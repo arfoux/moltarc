@@ -19,10 +19,10 @@ molt find <trx-id>  # fetch 1 chunk via manifest, not 100MB
 
 ## Honest SLA (measured, not planned)
 
-- Repetitive tx text → **34.4x** (band 25-60x)
-- Mixed text + free notes + blob refs → **10.2x** (band 6-12x)
-- Real jpeg bytes → **1.05x** raw zstd (claim 1.0-1.2x proven, details in [Photo SLA](#photo-sla))
-- Trained 32KB dict on repetitive text → **1.7%** smaller warm (details in [Dict SLA](#dict-sla))
+- Repetitive tx text, 60% tx slice of `bun bench/mixed-corpus.ts` (6000 rows, seed 7) → **34.5x**
+- Mixed text+notes+refs, full mixed corpus of `bun bench/mixed-corpus.ts` (6000 rows, seed 7, blob bytes excluded) → **10.2x**
+- Real jpeg bytes, raw zstd over the 50 real jpeg of `bun bench/photo-bench.ts` (128x128 blurred noise, q85, 600 text rows, seed 11) → **1.05x** (details in [Photo SLA](#photo-sla))
+- Trained 32KB dict on repetitive text, `bun bench/dict-bench.ts` (12000 rows, seed 7, same corpus both sides) → **1.7%** smaller warm (details in [Dict SLA](#dict-sla))
 
 Details in [Measured SLA](#measured-sla) below. Older micro-benchmark (5-template POS log, 3.45MB → 10.7KB = 323x)
 is retired: too repetitive to plan from.
@@ -51,10 +51,11 @@ is retired: too repetitive to plan from.
 
 - `src/seal.ts` — hot WAL -> warm columnar chunks (delta/RLE/dict + zstd)
 - `src/manifest.ts` — atomic manifest, min/max + bloom, rebuild scan
+- `src/cold.ts` — warm to cold tar merge plus prune sweep (repack without dead members, manifest rewrite)
 - `src/ship.ts` — delta by hash, chunked resume, text-first lanes
 - `src/find.ts` — prune + bloom + single-chunk fetch + sparse index
 - `src/dict.ts` — per-table 32KB zstd dicts, trained when the sample compresses 4x+
-- `bin/molt.ts` — CLI: `seal|ship|find` over archive dirs (`bun bin/molt.ts …`)
+- `bin/molt.ts` — CLI: `seal|ship|find|status|gc|merge|forget|coldg` over archive dirs (`bun bin/molt.ts …`)
 - `bench/photo-bench.ts` — 50 real noise JPEGs sealed beside text, writes Photo SLA
 - `bench/dict-bench.ts` — same corpus dict off vs on, writes Dict SLA
 - interop: fielog `kasir.log` (`type` bayar / `event` undo + `nominal`) seals with no manual conversion (`test/interop.test.ts`)
@@ -64,8 +65,8 @@ is retired: too repetitive to plan from.
 <!-- SLA-MEASURED-START -->
 | corpus | input | warm archive | ratio |
 |---|---|---|---|
-| repetitive tx text (60% repetitive tx) | 1.64MB | 48.7KB | **34.4x** |
-| mixed text+notes+refs (blob bytes excluded) | 2.40MB | 241.0KB | **10.2x** |
+| repetitive tx text (60% repetitive tx) | 1.64MB | 48.6KB | **34.5x** |
+| mixed text+notes+refs (blob bytes excluded) | 2.40MB | 240.9KB | **10.2x** |
 | photo blobs (3.23MB sidecar, lazy/on-demand) | excluded | excluded | n/a (incompressible) |
 
 _Measured by `bun bench/mixed-corpus.ts --write-readme`; corpus deterministic (seeded). Blob bytes never enter the mandatory archive — only `blob:sha256:…` refs do._

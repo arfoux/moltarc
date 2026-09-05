@@ -150,9 +150,22 @@ export async function measureArchive(hotPath: string, outDir: string, sealOpts?:
   return { inputBytes, warmBytes, ratio: inputBytes / warmBytes, chunks: r.chunks.length };
 }
 
+export const MEASURED_PATH = 'measured.json';
+
+// Bench cross-check source of truth: every README ratio must appear here
+// with the corpus that produced it, or test/readme.test.ts fails.
+export function recordMeasured(benchDir: string, key: string, value: Record<string, number | string>): void {
+  const dest = join(benchDir, MEASURED_PATH);
+  let cur: Record<string, unknown> = {};
+  try {
+    cur = JSON.parse(readFileSync(dest, 'utf8')) as Record<string, unknown>;
+  } catch { /* first bench run: start empty */ }
+  cur[key] = value;
+  writeFileSync(dest, `${JSON.stringify(cur, null, 1)}\n`);
+}
+
 const README_START = '<!-- SLA-MEASURED-START -->';
 const README_END = '<!-- SLA-MEASURED-END -->';
-
 export function slaTable(text: ArchiveMeasure, mixed: ArchiveMeasure, blobBytes: number): string {
   const mb = (n: number) => `${(n / 1048576).toFixed(2)}MB`;
   const kb = (n: number) => `${(n / 1024).toFixed(1)}KB`;
@@ -196,6 +209,14 @@ async function main(): Promise<void> {
   console.log(`text : input=${text.inputBytes}B warm=${text.warmBytes}B ratio=${text.ratio.toFixed(1)}x chunks=${text.chunks}`);
   console.log(`mixed: input=${mixed.inputBytes}B warm=${mixed.warmBytes}B ratio=${mixed.ratio.toFixed(1)}x chunks=${mixed.chunks}`);
   console.log(`blobs: sidecar=${corpus.blobBytes}B excluded from mandatory archive`);
+  recordMeasured(here, 'mixed', {
+    corpus: CORPUS_SPEC, rows, seed,
+    textInputBytes: text.inputBytes, textWarmBytes: text.warmBytes,
+    textRatio: text.ratio.toFixed(1), textChunks: text.chunks,
+    mixedInputBytes: mixed.inputBytes, mixedWarmBytes: mixed.warmBytes,
+    mixedRatio: mixed.ratio.toFixed(1), mixedChunks: mixed.chunks,
+    blobBytes: corpus.blobBytes,
+  });
   if (a['write-readme']) {
     const root = join(here, '..');
     const readme = join(root, 'README.md');

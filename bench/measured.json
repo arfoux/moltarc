@@ -1,0 +1,39 @@
+{
+ "mixed": {
+  "corpus": "60% repetitive tx / 25% free notes / 15% blob refs (bytes excluded)",
+  "rows": 6000,
+  "seed": 7,
+  "textInputBytes": 1715809,
+  "textWarmBytes": 49763,
+  "textRatio": "34.5",
+  "textChunks": 1,
+  "mixedInputBytes": 2518925,
+  "mixedWarmBytes": 246732,
+  "mixedRatio": "10.2",
+  "mixedChunks": 3,
+  "blobBytes": 3387392
+ },
+ "photo": {
+  "corpus": "50 real jpeg 128x128 blurred noise q85 plus 600 tx text rows",
+  "photos": 50,
+  "rows": 600,
+  "seed": 11,
+  "jpegBytes": 590441,
+  "photoWarm": 561594,
+  "photoRatio": "1.41",
+  "rawJpegRatio": "1.05",
+  "textRatio": "26.8",
+  "textWarm": 3725
+ },
+ "dict": {
+  "corpus": "repetitive tx text, same corpus both sides, dict off vs on",
+  "rows": 12000,
+  "seed": 7,
+  "plainWarm": 111230,
+  "plainRatio": "30.5",
+  "dictWarm": 109390,
+  "dictRatio": "31.1",
+  "savedBytes": 1840,
+  "savedPct": "1.7"
+ }
+}

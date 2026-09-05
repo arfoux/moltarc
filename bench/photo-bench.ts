@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import { zstdCompressSync } from 'zlib';
 import { encode } from 'jpeg-js';
 import { seal } from '../src/seal.js';
-import { mulberry32 } from './mixed-corpus.js';
+import { mulberry32, recordMeasured } from './mixed-corpus.js';
 
 export const PHOTO_QUALITY = 85;
 export const PHOTO_SIZE = 128;
@@ -172,6 +172,11 @@ async function main(): Promise<void> {
   const { corpus, measure } = await measurePhotoCorpus(out, photos, rows, seed);
   console.log(`photos: jpeg=${corpus.jpegBytes}B photo-lines=${corpus.photoInputBytes}B warm=${measure.photoWarm}B ratio=${measure.photoRatio.toFixed(2)}x`);
   console.log(`raw jpeg zstd ratio=${measure.rawJpegRatio.toFixed(2)}x text ratio=${measure.textRatio.toFixed(1)}x`);
+  recordMeasured(here, 'photo', {
+    corpus: `${photos} real jpeg 128x128 blurred noise q${PHOTO_QUALITY} plus ${rows} tx text rows`, photos, rows, seed,
+    jpegBytes: corpus.jpegBytes, photoWarm: measure.photoWarm, photoRatio: measure.photoRatio.toFixed(2),
+    rawJpegRatio: measure.rawJpegRatio.toFixed(2), textRatio: measure.textRatio.toFixed(1), textWarm: measure.textWarm,
+  });
   if (argv.includes('--write-readme')) {
     const readme = join(here, '..', 'README.md');
     const cur = readFileSync(readme, 'utf8');

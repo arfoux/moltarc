@@ -4,7 +4,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { generateMixedCorpus, measureArchive } from './mixed-corpus.js';
+import { generateMixedCorpus, measureArchive, recordMeasured } from './mixed-corpus.js';
 import type { ArchiveMeasure } from './mixed-corpus.js';
 
 export interface DictDelta {
@@ -59,6 +59,12 @@ async function main(): Promise<void> {
   const out = get('out', join(here, 'dict-out'));
   const d = await measureDictDelta(out, rows, seed);
   console.log(`dict: plain=${d.plain.warmBytes}B dict=${d.withDict.warmBytes}B saved=${d.savedBytes}B (${d.savedPct.toFixed(1)}%) chunks=${d.withDict.chunks}`);
+  recordMeasured(here, 'dict', {
+    corpus: 'repetitive tx text, same corpus both sides, dict off vs on', rows, seed,
+    plainWarm: d.plain.warmBytes, plainRatio: d.plain.ratio.toFixed(1),
+    dictWarm: d.withDict.warmBytes, dictRatio: d.withDict.ratio.toFixed(1),
+    savedBytes: d.savedBytes, savedPct: d.savedPct.toFixed(1),
+  });
   if (argv.includes('--write-readme')) {
     const readme = join(here, '..', 'README.md');
     const cur = readFileSync(readme, 'utf8');
