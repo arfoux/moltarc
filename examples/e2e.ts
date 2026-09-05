@@ -65,7 +65,7 @@ export async function runE2E(baseDir: string, rows = 1200): Promise<E2EResult> {
 }
 
 async function main(): Promise<void> {
-  const out = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? join(dirname(fileURLToPath(import.meta.url)), 'out');
+  const out = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? join(dirname(fileURLToPath(import.meta.url)), 'e2e-out');
   await runE2E(out);
   console.log('e2e ok');
 }

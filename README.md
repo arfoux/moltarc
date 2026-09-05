@@ -56,6 +56,7 @@ is retired: too repetitive to plan from.
 - `test/` — 5GB→100MB on synthetic repetitive log, resume mid-ship, 1-corrupt-chunk survival
 - `bench/mixed-corpus.ts` — deterministic 60/25/15 corpus, writes Measured SLA (`--write-readme`)
 - `examples/e2e.ts` — fielog JSONL -> seal -> ship to relay dir -> find one trx
+- `examples/kasir-demo.ts` — 50 struk kasir -> seal -> ship -> find 1 struk (15.5x)
 
 ## Measured SLA
 

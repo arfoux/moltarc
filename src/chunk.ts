@@ -180,14 +180,38 @@ export function encodeRows(rows: HotRow[]): { raw: Buffer; dictId: number } {
 
 export function decodeRows(raw: Buffer): HotRow[] {
   const f = JSON.parse(raw.toString('utf8')) as Frame;
+  // Dictionary/frame integrity: a deleted or truncated pool must fail loud,
+  // never decode into silently wrong rows.
+  if (!Array.isArray(f.ids) || !Array.isArray(f.devI) || !Array.isArray(f.pool)
+    || !Array.isArray(f.runs) || !Array.isArray(f.dev) || !Array.isArray(f.seqD) || !Array.isArray(f.tsD)) {
+    throw new Error('frame corrupt: missing column or dictionary array');
+  }
+  if (f.ids.length !== f.devI.length || f.ids.length !== f.seqD.length || f.ids.length !== f.tsD.length) {
+    throw new Error('frame corrupt: column length mismatch');
+  }
+  if (f.runs.length > 0 && f.pool.length === 0) {
+    throw new Error('frame corrupt: body dictionary deleted');
+  }
+  if (f.dev.length === 0 && f.ids.length > 0) {
+    throw new Error('frame corrupt: device dictionary deleted');
+  }
   const bodies: string[] = [];
-  for (const [p, n] of f.runs) for (let i = 0; i < n; i++) bodies.push(f.pool[p]);
+  for (const [p, n] of f.runs) {
+    if (!Number.isInteger(p) || p < 0 || p >= f.pool.length) {
+      throw new Error(`frame corrupt: body dictionary index ${String(p)} out of range`);
+    }
+    if (!Number.isInteger(n) || n <= 0) throw new Error('frame corrupt: bad run length');
+    for (let i = 0; i < n; i++) bodies.push(f.pool[p]);
+  }
+  if (bodies.length !== f.ids.length) throw new Error('frame corrupt: body run count mismatch');
   const rows: HotRow[] = [];
   let seq = f.seqB;
   let ts = f.tsB;
   for (let i = 0; i < f.ids.length; i++) {
     if (i > 0) { seq += f.seqD[i]; ts += f.tsD[i]; }
-    rows.push({ device_id: f.dev[f.devI[i]], seq, ts, id: f.ids[i], table: f.table, body: bodies[i] });
+    const device = f.dev[f.devI[i]];
+    if (device === undefined) throw new Error(`frame corrupt: device dictionary index ${String(f.devI[i])} out of range`);
+    rows.push({ device_id: device, seq, ts, id: f.ids[i], table: f.table, body: bodies[i] });
   }
   return rows;
 }

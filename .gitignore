@@ -8,3 +8,5 @@ coverage/
 .opencode/
 bench/out/
 examples/out/
+examples/e2e-out/
+examples/kasir-out/

@@ -8,7 +8,8 @@
     "test": "bun test test/",
     "build": "node node_modules/typescript/bin/tsc -p tsconfig.json",
     "bench": "bun bench/mixed-corpus.ts --write-readme",
-    "e2e": "bun examples/e2e.ts"
+    "e2e": "bun examples/e2e.ts",
+    "kasir": "bun examples/kasir-demo.ts"
   },
   "license": "MIT",
   "devDependencies": {
