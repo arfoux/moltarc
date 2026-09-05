@@ -10,6 +10,7 @@ import { trainTableDict, saveDictAtomic } from './dict.js';
 import { checkReserve } from './gc.js';
 import { buildManifest, saveManifestAtomic } from './manifest.js';
 import type { ColdSegment } from './manifest.js';
+import { saveThumb } from './thumb.js';
 
 export const TARGET_BYTES = 2 * 1024 * 1024;
 export const MIN_BYTES = 1 * 1024 * 1024;
@@ -167,6 +168,8 @@ export function quarantineFotoBody(outDir: string, body: string): string | null 
     writeFileSync(dest, raw);
     fsyncFile(dest);
   }
+  // Sidecar preview: best-effort, never fails the seal; the .bin stays authoritative.
+  try { saveThumb(outDir, raw); } catch { /* thumb fallback already avoids throws */ }
   return `foto:sha256:${sha}:size=${raw.length}`;
 }
 
