@@ -3,13 +3,13 @@
 // kill mid-batch loses only the unflushed tail; maxRows bounds one call.
 import { createHash } from 'crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { encodeChunk } from './chunk.js';
+import { basename, join } from 'path';
+import { encodeChunk, sha256hex } from './chunk.js';
 import type { HotRow } from './chunk.js';
 import { trainTableDict, saveDictAtomic } from './dict.js';
 import { checkReserve } from './gc.js';
-import { buildManifest, saveManifestAtomic } from './manifest.js';
-import type { ColdSegment } from './manifest.js';
+import { appendEntries, buildManifest, saveManifestAtomic, scanChunk } from './manifest.js';
+import type { ChunkEntry, ColdSegment } from './manifest.js';
 import { saveThumb } from './thumb.js';
 
 export const TARGET_BYTES = 2 * 1024 * 1024;
@@ -361,13 +361,42 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
     flush(true);
   }
 
-  // Manifest once at the end: buildManifest scans warm, so every flushed chunk
-  // is listed. The watermark already covers each chunk; a kill before this
-  // point only repeats manifest work on the next seal.
+  // Manifest once at the end: append-only fast path merges caller-scanned
+  // entries into the best crc-valid copy, no full warm rescan. ordering,
+  // fsync, and dual-copy behavior stay identical: appendEntries sorts by
+  // filename and saves via the same atomic dual-copy path. the watermark
+  // already covers each chunk; a kill before this point only repeats
+  // manifest work on the next seal.
   const upto = Math.max(0, ...Object.values(advanced));
   const ordered: Record<string, number> = {};
   for (const k of Object.keys(advanced).sort()) ordered[k] = advanced[k];
 
+  const hasManifest =
+    existsSync(join(opts.outDir, 'manifest.json')) || existsSync(join(opts.outDir, 'manifest.bak.json'));
+  if (hasManifest) {
+    const dictDir = join(opts.outDir, 'dicts');
+    const entries: ChunkEntry[] = [];
+    for (const dest of chunks) {
+      const name = basename(dest);
+      try {
+        entries.push(scanChunk(dest, name, dictDir));
+      } catch {
+        // Corrupt just-flushed chunk: quarantine stub mirrors buildManifest
+        // so history survives minus one chunk.
+        const buf = readFileSync(dest);
+        entries.push({
+          file: name, table: name.split('-')[0],
+          seqMin: 0, seqMax: 0, tsMin: 0, tsMax: 0, rows: 0, bytes: buf.length,
+          sha256: sha256hex(buf), crc32c: 0, dictId: 0, codec: 0,
+          minKey: '', maxKey: '', bloom: '', quarantined: true,
+        });
+      }
+    }
+    appendEntries(opts.outDir, entries);
+    return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, probeEncodes };
+  }
+
+  // First seal (no prior manifest): full rebuild owns the listing.
   // Preserve cold listing: buildManifest scans warm only, so reattach the
   // prior cold[] (tars stay on disk) or the next merge repacks warm twice.
   let cold: ColdSegment[] | undefined;
