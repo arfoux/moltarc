@@ -1,0 +1,8 @@
+node_modules/
+dist/
+warm/
+cold/
+tmp/
+*.db
+coverage/
+.opencode/

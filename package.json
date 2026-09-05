@@ -1,0 +1,12 @@
+{
+  "name": "molt",
+  "version": "0.1.0",
+  "description": "Molt — shrink + ship + find. Tiered SQLite archive: hot DB, warm chunks, cold archive + manifest.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "node --test test/",
+    "build": "tsc -p tsconfig.json"
+  },
+  "license": "MIT"
+}
