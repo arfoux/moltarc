@@ -1,11 +1,14 @@
 // moltarc find — prune by min/max, bloom check, single-chunk fetch+verify, sparse index.
+// Shard-aware fast path: persisted sparse.json picks candidate files without a
+// full-manifest parse, then only the months holding candidates load from
+// manifest-YYYY-MM.json. Missing sidecars fall back to the root manifest.
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { decodeChunk, decodeHeader, fnv1a32, DICT_FLAG } from './chunk.js';
 import type { HotRow } from './chunk.js';
 import { loadDictFor } from './dict.js';
-import { bloomCheck, loadManifest, BLOOM_BITS } from './manifest.js';
-import type { ChunkEntry, Manifest } from './manifest.js';
+import { bloomCheck, loadManifest, loadShard, loadSparseIndex, BLOOM_BITS } from './manifest.js';
+import type { ChunkEntry, ColdSegment, Manifest, ManifestShard, SparseDisk } from './manifest.js';
 import { readTar } from './cold.js';
 
 export interface FindOpts {
@@ -20,6 +23,9 @@ export interface FindResult {
   chunksFetched: number;
   chunksPruned: number;
   skippedMissing: number;
+  // Shard fast path only: sidecars loaded vs months skipped by the sparse jump.
+  shardsLoaded?: number;
+  shardsPruned?: number;
 }
 
 export interface FindColdOpts extends FindOpts {
@@ -40,18 +46,79 @@ export function buildSparseIndex(entries: ChunkEntry[]): SparseEntry[] {
     .map((e) => ({ minKey: e.minKey, maxKey: e.maxKey, file: e.file, seqMin: e.seqMin }))
     .sort((a, b) => (a.minKey < b.minKey ? -1 : a.minKey > b.minKey ? 1 : 0));
 }
-
-// --- per-process caches: no re-parse per query ---
-// Manifest files are content-stable between seals; key by outDir + primary
-// mtime so a reseal (rewrite) invalidates while repeat finds hit memory.
 const manifestCache = new Map<string, { mtimeMs: number; manifest: Manifest; source: 'primary' | 'backup' | 'rebuilt' }>();
 // Dict files are content-hash addressed and immutable; cache hits only
 // (misses stay uncached so a later-sealed dict is still discovered).
 const dictCache = new Map<string, Buffer>();
+// Persisted sparse + shard sidecars keyed by file mtime, same stability deal
+// as the manifest cache: reseal rewrites invalidate, repeat finds hit memory.
+const sparseCache = new Map<string, { mtimeMs: number; sparse: SparseDisk | null; cold: ColdSegment[]; total: number; quarantined: number }>();
+const shardCache = new Map<string, { mtimeMs: number; shard: ManifestShard | null }>();
 
 export function clearFindCaches(): void {
   manifestCache.clear();
   dictCache.clear();
+  sparseCache.clear();
+  shardCache.clear();
+}
+
+function loadSparseCached(outDir: string): { sparse: SparseDisk | null; cold: ColdSegment[]; total: number; quarantined: number } {
+  const primary = join(outDir, 'sparse.json');
+  let mtimeMs = -1;
+  try {
+    mtimeMs = statSync(primary).mtimeMs;
+  } catch { /* no sidecar yet: legacy archives predate sharding */ }
+  const hit = sparseCache.get(outDir);
+  if (hit && hit.mtimeMs === mtimeMs) return hit;
+  const loaded = loadSparseIndex(outDir);
+  const entry = loaded
+    ? { mtimeMs, sparse: loaded.sparse, cold: loaded.sparse.cold ?? [], total: loaded.sparse.total, quarantined: loaded.sparse.quarantined }
+    : { mtimeMs, sparse: null, cold: [], total: 0, quarantined: 0 };
+  sparseCache.set(outDir, entry);
+  return entry;
+}
+
+function loadShardCached(outDir: string, month: string): ManifestShard | null {
+  const file = join(outDir, `manifest-${month}.json`);
+  let mtimeMs = -1;
+  try {
+    mtimeMs = statSync(file).mtimeMs;
+  } catch { /* missing sidecar: caller falls back to root */ }
+  const key = `${outDir}\n${month}`;
+  const hit = shardCache.get(key);
+  if (hit && hit.mtimeMs === mtimeMs) return hit.shard;
+  const shard = loadShard(outDir, month);
+  shardCache.set(key, { mtimeMs, shard });
+  return shard;
+}
+
+// Sparse-level prune over persisted rows (no bloom here): binary-search the
+// first entry with minKey > trxId, prune the tail, then drop head rows whose
+// maxKey misses. Unknown-range rows stay candidates. Returns candidate files
+// plus the min/max prune count; bloom misses resolve after the shard load.
+export function sparseCandidateFiles(
+  entries: { file: string; minKey: string; maxKey: string }[],
+  trxId: string,
+): { files: string[]; pruned: number } {
+  let lo = 0;
+  let hi = entries.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    const k = entries[mid].minKey;
+    if (!k || k <= trxId) lo = mid + 1;
+    else hi = mid;
+  }
+  let pruned = entries.length - lo;
+  const files: string[] = [];
+  for (let i = 0; i < lo; i++) {
+    const e = entries[i];
+    if (e.minKey && e.maxKey && trxId > e.maxKey) {
+      pruned++;
+      continue;
+    }
+    files.push(e.file);
+  }
+  return { files, pruned };
 }
 
 function loadManifestCached(outDir: string): { manifest: Manifest; source: 'primary' | 'backup' | 'rebuilt' } {
@@ -157,10 +224,70 @@ export function candidates(entries: ChunkEntry[], trxId: string): { hit: ChunkEn
   return { hit, pruned };
 }
 
+// Shard-resolved warm index: sparse.json picks candidate files with no
+// full-manifest parse, then only candidate months load from their sidecars.
+// Null on any stale/missing sidecar so the caller keeps root behavior.
+function tryShardIndex(outDir: string, trxId: string): {
+  hit: ChunkEntry[]; pruned: number; shardsLoaded: number; shardsPruned: number; cold: ColdSegment[];
+} | null {
+  const { sparse, cold, total, quarantined } = loadSparseCached(outDir);
+  if (!sparse) return null;
+  const { files } = sparseCandidateFiles(sparse.entries, trxId);
+  const wantFiles = new Set(files);
+  const monthOf = new Map<string, string>();
+  const allMonths = new Set<string>();
+  for (const e of sparse.entries) {
+    monthOf.set(e.file, e.month);
+    allMonths.add(e.month);
+  }
+  const months = new Set<string>();
+  for (const f of wantFiles) {
+    const month = monthOf.get(f);
+    if (!month) return null; // sparse/file skew: stay on root
+    months.add(month);
+  }
+  const loaded: ChunkEntry[] = [];
+  for (const month of months) {
+    const shard = loadShardCached(outDir, month);
+    if (!shard) return null;
+    if (shard.seq !== sparse.seq) return null; // reseal raced the sidecars
+    for (const e of shard.chunks) loaded.push(e);
+  }
+  const loadedFiles = new Set(loaded.map((e) => e.file));
+  for (const f of wantFiles) {
+    if (!loadedFiles.has(f)) return null; // shard skew: stay on root
+  }
+  const { hit, pruned: prunedWithin } = candidates(loaded, trxId);
+  const pruned = quarantined + (total - quarantined - loaded.length) + prunedWithin;
+  return { hit, pruned, shardsLoaded: months.size, shardsPruned: allMonths.size - months.size, cold };
+}
+
 export function findTrx(opts: FindOpts): FindResult {
-  const { manifest } = loadManifestCached(opts.outDir);
   const dir = opts.chunkDir ?? join(opts.outDir, 'warm');
   const dictDir = join(dir, '..', 'dicts');
+  const fast = tryShardIndex(opts.outDir, opts.trxId);
+  if (fast) {
+    let fetched = 0;
+    let skippedMissing = 0;
+    for (const e of fast.hit) {
+      const full = join(dir, e.file);
+      if (!existsSync(full)) { skippedMissing++; continue; }
+      // Single-chunk fetch: read + verify (crc inside decodeChunk) + decode.
+      const buf = readFileSync(full);
+      const dict = (decodeHeader(buf).flags & DICT_FLAG) !== 0 ? loadDictCached(dictDir, e.dictId) : undefined;
+      const { rows } = decodeChunk(buf, dict);
+      fetched++;
+      const row = rows.find((r) => r.id === opts.trxId);
+      if (row) {
+        return {
+          row, chunk: e.file, chunksFetched: fetched, chunksPruned: fast.pruned, skippedMissing,
+          shardsLoaded: fast.shardsLoaded, shardsPruned: fast.shardsPruned,
+        };
+      }
+    }
+    throw new Error(`trx ${opts.trxId} not found (${fetched} chunk(s) fetched, ${fast.pruned} pruned, ${skippedMissing} missing)`);
+  }
+  const { manifest } = loadManifestCached(opts.outDir);
   const { hit, pruned } = candidates(manifest.chunks, opts.trxId);
   let fetched = 0;
   let skippedMissing = 0;
@@ -182,11 +309,25 @@ export function findTrx(opts: FindOpts): FindResult {
 // and deliberately loud about it. Narrows to segments holding a candidate
 // chunk when the warm index yields one; fully-pruned keys skip the scan.
 export function findCold(opts: FindColdOpts): FindResult {
+  const fast = tryShardIndex(opts.outDir, opts.trxId);
+  if (fast) return scanCold(opts, fast.hit, fast.pruned, fast.cold, fast.shardsLoaded, fast.shardsPruned);
   const { manifest } = loadManifestCached(opts.outDir);
   const { hit, pruned } = candidates(manifest.chunks, opts.trxId);
+  return scanCold(opts, hit, pruned, manifest.cold ?? []);
+}
+
+// Shared tar scan for both paths: the warm index above already resolved the
+// candidate chunks, so this only decodes the narrowed cold segments.
+function scanCold(
+  opts: FindColdOpts,
+  hit: ChunkEntry[],
+  pruned: number,
+  segs: ColdSegment[],
+  shardsLoaded?: number,
+  shardsPruned?: number,
+): FindResult {
   const coldDir = opts.coldDir ?? join(opts.outDir, 'cold');
   const dictDir = join(opts.chunkDir ?? join(opts.outDir, 'warm'), '..', 'dicts');
-  const segs = manifest.cold ?? [];
   const hitFiles = new Set(hit.map((e) => e.file));
   let targets: string[];
   if (hitFiles.size > 0) {
@@ -223,7 +364,7 @@ export function findCold(opts: FindColdOpts): FindResult {
       const { rows } = decodeChunk(Buffer.from(m.data), dict);
       fetched++;
       const row = rows.find((r) => r.id === opts.trxId);
-      if (row) return { row, chunk: m.name, chunksFetched: fetched, chunksPruned: pruned, skippedMissing };
+      if (row) return { row, chunk: m.name, chunksFetched: fetched, chunksPruned: pruned, skippedMissing, shardsLoaded, shardsPruned };
     }
   }
   throw new Error(
