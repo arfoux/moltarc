@@ -14,12 +14,12 @@
 // Reserve policy: every write path below (merge tar + manifest, sweep repack
 // tmp + manifest) calls checkReserve first and throws before any byte lands,
 // so a full disk never leaves a torn tar or a half-rewritten manifest.
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from 'fs';
 import { join } from 'path';
 import { loadManifest, saveManifestAtomic } from './manifest.js';
 import { readRelayIndex } from './ship.js';
 import { checkReserve } from './gc.js';
-import { decodeHeader, DICT_FLAG } from './chunk.js';
+import { HEADER_SIZE, decodeHeader, DICT_FLAG } from './chunk.js';
 import { dictFile, dictHex } from './dict.js';
 
 export interface TarMember {
@@ -108,53 +108,146 @@ export function mergeCold(outDir: string, opts: MergeOpts = {}): MergeResult {
   const { manifest } = loadManifest(outDir);
   manifest.cold ??= [];
   const packed = new Set(manifest.cold.flatMap((s) => s.chunks));
-  const pending: TarMember[] = [];
+  // Pass 1 (metadata only, no bytes): collect pending names + sizes and the
+  // dict-flag header bits. The header read is 64B per file; bodies stay on
+  // disk until the streaming copy below, so RAM stays flat past any scale.
+  const pending: { name: string; size: number }[] = [];
   const wantDicts = new Set<number>();
   for (const e of manifest.chunks) {
     if (packed.has(e.file)) continue;
     const full = join(warm, e.file);
-    if (!existsSync(full)) continue; // missing warm file: skip, never fail merge
-    const data = readFileSync(full);
-    pending.push({ name: e.file, data });
+    let size: number;
+    try {
+      const st = statSync(full);
+      if (!st.isFile()) continue; // missing warm file: skip, never fail merge
+      size = st.size;
+    } catch {
+      continue; // missing warm file: skip, never fail merge
+    }
     // Dict need is flag-gated: header.dictId without DICT_FLAG is an inline
     // content hint, not a trained dict file (decodeChunk ignores it). Only
-    // DICT_FLAG chunks name a dicts/dict-<hex>.dict member.
+    // DICT_FLAG chunks name a dicts/dict-<hex>.dict member. decodeHeader
+    // inspects the first 64B only, so a 64B read decides identically to the
+    // old full-file read.
     let need = 0;
-    try {
-      const header = decodeHeader(data);
-      if ((header.flags & DICT_FLAG) !== 0) need = header.dictId >>> 0;
-    } catch {
-      if (e.dictId !== 0) need = e.dictId >>> 0; // torn header: fail closed
+    const head = readHeaderPrefix(full);
+    if (head.ok) {
+      if ((head.flags & DICT_FLAG) !== 0) need = head.dictId;
+    } else if (e.dictId !== 0) {
+      need = e.dictId >>> 0; // torn header: fail closed
     }
     if (need !== 0) wantDicts.add(need);
+    pending.push({ name: e.file, size });
   }
   if (pending.length === 0) return { segment: '', chunks: [], dicts: [], bytes: 0 };
   // A dict-flagged chunk without its dictionary is undecodable: refuse the
   // whole merge instead of writing a segment that can never be read back.
   const dictDir = join(outDir, 'dicts');
-  const dictMembers: TarMember[] = [];
+  const dictMembers: { name: string; full: string; size: number }[] = [];
   for (const dictId of [...wantDicts].sort((a, b) => a - b)) {
     const full = dictFile(dictDir, dictId);
     if (!existsSync(full)) {
       throw new Error(`merge refused: chunk(s) need dict-${dictHex(dictId)}.dict, file missing (reseal to retrain)`);
     }
-    dictMembers.push({ name: `dicts/dict-${dictHex(dictId)}.dict`, data: readFileSync(full) });
+    dictMembers.push({ name: `dicts/dict-${dictHex(dictId)}.dict`, full, size: statSync(full).size });
   }
   pending.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  const members = [...pending, ...dictMembers];
+  const members: { name: string; full: string; size: number }[] = [
+    ...pending.map((p) => ({ name: p.name, full: join(warm, p.name), size: p.size })),
+    ...dictMembers,
+  ];
   const existing = existsSync(cold) ? readdirSync(cold).map(segIndex).filter((n) => n >= 0) : [];
   const next = existing.length === 0 ? 1 : Math.max(...existing) + 1;
   const segment = `seg-${String(next).padStart(6, '0')}.tar`;
-  const tar = writeTar(members);
   // Reserve first: fail-closed before the tar tmp or the manifest moves.
   checkReserve(outDir, opts.freeSpaceBytes, 'merge');
   const dest = join(cold, segment);
   const tmp = `${dest}.tmp.${process.pid}`;
-  writeFileSync(tmp, tar);
+  // Pass 2 (streaming copy): header + file windows + pad per member, one
+  // MERGE_COPY_BYTES window live at a time. Byte layout (headers, order,
+  // padding, end marker) matches writeTar exactly.
+  let total = 0;
+  let outFd = -1;
+  try {
+    outFd = openSync(tmp, 'w');
+    const writeAll = (buf: Buffer): void => {
+      let off = 0;
+      while (off < buf.length) {
+        const w = writeSync(outFd, buf, off, buf.length - off, null);
+        if (w <= 0) throw new Error(`short write merging ${segment}`);
+        off += w;
+      }
+      total += buf.length;
+    };
+    const window = Buffer.allocUnsafe(MERGE_COPY_BYTES);
+    for (const m of members) {
+      writeAll(tarHeader(m.name, m.size));
+      const inFd = openSync(m.full, 'r');
+      try {
+        let left = m.size;
+        while (left > 0) {
+          const n = readSync(inFd, window, 0, Math.min(window.length, left), null);
+          if (n <= 0) throw new Error(`warm file shrank mid-merge: ${m.name} (expected ${m.size}B)`);
+          let off = 0;
+          while (off < n) {
+            const w = writeSync(outFd, window, off, n - off, null);
+            if (w <= 0) throw new Error(`short write merging ${segment}`);
+            off += w;
+          }
+          total += n;
+          left -= n;
+        }
+      } finally {
+        closeSync(inFd);
+      }
+      const pad = (512 - (m.size % 512)) % 512;
+      if (pad > 0) writeAll(ZERO512.subarray(0, pad));
+    }
+    writeAll(ZERO1024); // two zero blocks = end of archive
+  } catch (err) {
+    if (outFd >= 0) {
+      try { closeSync(outFd); } catch { /* ignore */ }
+      outFd = -1;
+    }
+    try { unlinkSync(tmp); } catch { /* ignore: nothing torn left behind */ }
+    throw err;
+  }
+  if (outFd >= 0) closeSync(outFd);
   renameSync(tmp, dest);
-  manifest.cold.push({ file: segment, chunks: pending.map((m) => m.name), bytes: tar.length });
+  manifest.cold.push({ file: segment, chunks: pending.map((m) => m.name), bytes: total });
   saveManifestAtomic(outDir, manifest);
-  return { segment, chunks: pending.map((m) => m.name), dicts: dictMembers.map((m) => m.name), bytes: tar.length };
+  return { segment, chunks: pending.map((m) => m.name), dicts: dictMembers.map((m) => m.name), bytes: total };
+}
+// Streaming tariff: mergeCold above never holds more than one copy window
+// in RAM. Bodies stream file -> tar through a fixed 1MB window, so peak
+// extra RSS stays flat (~a few MB) no matter how many chunks merge.
+const MERGE_COPY_BYTES = 1024 * 1024;
+const ZERO512 = Buffer.alloc(512);
+const ZERO1024 = Buffer.alloc(1024);
+// 64B header prefix for the dict-flag gate. decodeHeader inspects the first
+// HEADER_SIZE bytes only, so this decides identically to a full-file read;
+// short/unreadable files report !ok and the caller fails closed on dictId.
+function readHeaderPrefix(full: string): { ok: boolean; flags: number; dictId: number } {
+  let fd = -1;
+  try {
+    fd = openSync(full, 'r');
+    const head = Buffer.alloc(HEADER_SIZE);
+    let got = 0;
+    while (got < HEADER_SIZE) {
+      const n = readSync(fd, head, got, HEADER_SIZE - got, null);
+      if (n <= 0) break;
+      got += n;
+    }
+    if (got < HEADER_SIZE) return { ok: false, flags: 0, dictId: 0 };
+    const header = decodeHeader(head);
+    return { ok: true, flags: header.flags, dictId: header.dictId >>> 0 };
+  } catch {
+    return { ok: false, flags: 0, dictId: 0 };
+  } finally {
+    if (fd >= 0) {
+      try { closeSync(fd); } catch { /* ignore */ }
+    }
+  }
 }
 
 // Retention prune: drop manifest entries by chunk file name, atomic dual copy.
