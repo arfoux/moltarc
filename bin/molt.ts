@@ -6,6 +6,7 @@
 import { seal } from '../src/seal.js';
 import { ship } from '../src/ship.js';
 import { findTrx } from '../src/find.js';
+import { statusInfo, sweep } from '../src/gc.js';
 
 function fail(msg: string): never {
   console.error(msg);
@@ -30,8 +31,24 @@ async function main(): Promise<void> {
     const f = findTrx({ outDir, trxId });
     console.log(JSON.stringify(f.row));
     console.log(`chunk ${f.chunk} fetched ${f.chunksFetched}`);
+  } else if (cmd === 'status') {
+    const [outDir, relayDir] = rest;
+    if (!outDir) fail('usage: molt status <outDir> [relayDir]');
+    const s = statusInfo(outDir, relayDir);
+    console.log(`chunks: ${s.chunks}`);
+    console.log(`bytes: ${s.bytes}`);
+    console.log(`unacked: ${s.unacked}`);
+    console.log(`orphans: ${s.orphans} (${s.orphanBytes}B)`);
+  } else if (cmd === 'gc') {
+    const [outDir, flag] = rest;
+    if (!outDir) fail('usage: molt gc <outDir> [--apply]');
+    const r = sweep(outDir, { dryRun: flag !== '--apply' });
+    if (r.dryRun) console.log(`dry-run: ${r.orphans.length} orphan(s), ${r.bytesReclaimed}B reclaimable`);
+    else console.log(`swept ${r.removed.length} orphan(s), reclaimed ${r.bytesReclaimed}B`);
+    for (const f of r.orphans) console.log(`orphan ${f}`);
+    console.log(`chunks: ${r.chunks} (${r.bytes}B)`);
   } else {
-    fail('usage: molt <seal|ship|find> ...');
+    fail('usage: molt <seal|ship|find|status|gc> ...');
   }
 }
 

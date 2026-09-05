@@ -11,3 +11,5 @@ export { verifyChunk, verifyAll, quarantine, repairByHash } from './verify.js';
 export type { VerifyItem, VerifyResult } from './verify.js';
 export { encodeChunk, decodeChunk, encodeHeader, decodeHeader, crc32c, sha256hex, fnv1a32, DICT_FLAG } from './chunk.js';
 export { trainTableDict, saveDictAtomic, loadDictFor, dictFile, dictHex, DICT_MAX_BYTES, DICT_TRAIN_ROWS } from './dict.js';
+export { sweep, statusInfo, checkReserve, freeSpaceBytes, RESERVE_BYTES } from './gc.js';
+export type { SweepOpts, SweepResult, StatusInfo } from './gc.js';

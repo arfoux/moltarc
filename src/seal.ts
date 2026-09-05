@@ -6,6 +6,7 @@ import { join } from 'path';
 import { encodeChunk } from './chunk.js';
 import type { HotRow } from './chunk.js';
 import { trainTableDict, saveDictAtomic } from './dict.js';
+import { checkReserve } from './gc.js';
 import { buildManifest, saveManifestAtomic } from './manifest.js';
 
 export const TARGET_BYTES = 2 * 1024 * 1024;
@@ -18,6 +19,7 @@ export interface SealOpts {
   targetBytes?: number;
   table?: string;
   trainDict?: boolean; // default true; false skips per-table zstd dicts (bench control)
+  freeSpaceBytes?: number; // test seam: overrides statfs free-space reading
 }
 
 export interface SealResult {
@@ -129,6 +131,9 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   const target = opts.targetBytes ?? TARGET_BYTES;
   const warm = join(opts.outDir, 'warm');
   mkdirSync(warm, { recursive: true });
+  // Reserve-space rule: refuse before any chunk/watermark/manifest write
+  // when free space drops below 50MB, so a seal never half-writes.
+  checkReserve(opts.outDir, opts.freeSpaceBytes);
   const wmPath = join(opts.outDir, 'sealed_upto_seq');
   const watermark = existsSync(wmPath) ? Number(readFileSync(wmPath, 'utf8').trim() || '0') : 0;
 
