@@ -1,5 +1,6 @@
 // moltarc seal — hot WAL/JSONL -> warm immutable chunks (~2MB default, 1-4MB bounds).
-// Never deletes input. Advances sealed_upto_seq watermark only after fsync.
+// Never deletes input. Watermark advances per flushed chunk (after fsync), so a
+// kill mid-batch loses only the unflushed tail; maxRows bounds one call.
 import { createHash } from 'crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -13,7 +14,11 @@ import type { ColdSegment } from './manifest.js';
 export const TARGET_BYTES = 2 * 1024 * 1024;
 export const MIN_BYTES = 1 * 1024 * 1024;
 export const MAX_BYTES = 4 * 1024 * 1024;
-const PACK_PROBE_ROWS = 400;
+// Foto gate: a base64 body decoding past this never seals inline; the raw bytes
+// go to foto/<sha>.bin and the chunk keeps a foto:sha256:… hash ref instead.
+export const FOTO_INLINE_LIMIT_BYTES = 256 * 1024;
+// Malformed-row abort: malformed lines past this share of input fail loud.
+export const MALFORMED_ABORT_PCT = 0.01;
 export interface SealOpts {
   hotDb: string;
   outDir: string;
@@ -21,6 +26,7 @@ export interface SealOpts {
   table?: string;
   trainDict?: boolean; // default true; false skips per-table zstd dicts (bench control)
   freeSpaceBytes?: number; // test seam: overrides statfs free-space reading
+  maxRows?: number; // bounds one call: seals at most this many pending rows, tail stays for the next seal
 }
 
 export interface SealResult {
@@ -29,6 +35,8 @@ export interface SealResult {
   sealedByDevice: Record<string, number>; // per-device max sealed seq
   rowsSealed: number;
   rowsSkipped: number;
+  rowsMalformed: number; // input lines that failed to parse/normalize
+  probeEncodes: number; // full chunk encodes spent on size probing
 }
 
 // Fielog interop: raw cashier events (`type`/`event` bayar/undo, `nominal`
@@ -70,23 +78,29 @@ export function isSqliteFile(p: string): boolean {
   }
 }
 
-export function readHotRows(hotDb: string, fallbackTable = 'log'): HotRow[] {
+export function readHotRowsCounted(hotDb: string, fallbackTable = 'log'): { rows: HotRow[]; malformed: number } {
   const text = readFileSync(hotDb, 'utf8');
   const rows: HotRow[] = [];
+  let malformed = 0;
   for (const line of text.split('\n')) {
     const t = line.trim();
     if (!t) continue;
     try {
       const r = normRow(JSON.parse(t) as Record<string, unknown>, fallbackTable);
       if (r) rows.push(r);
-    } catch { /* skip malformed WAL line, never crash seal */ }
+      else malformed++;
+    } catch { malformed++; /* skip malformed WAL line, never crash seal */ }
   }
-  return rows;
+  return { rows, malformed };
+}
+
+export function readHotRows(hotDb: string, fallbackTable = 'log'): HotRow[] {
+  return readHotRowsCounted(hotDb, fallbackTable).rows;
 }
 
 // Hot SQLite read (tables tx/log with device_id,seq,ts,id,table,body).
 // Runs only under bun; node callers get a clear error instead of a crash.
-export async function readSqliteRows(hotDb: string, fallbackTable = 'log'): Promise<HotRow[]> {
+export async function readSqliteRowsCounted(hotDb: string, fallbackTable = 'log'): Promise<{ rows: HotRow[]; malformed: number }> {
   let sqlite: typeof import('bun:sqlite');
   try {
     // Platform module absent outside bun: dynamic import is the only option.
@@ -104,14 +118,63 @@ export async function readSqliteRows(hotDb: string, fallbackTable = 'log'): Prom
       `SELECT device_id, seq, ts, id, "table", body FROM "${picked.replace(/"/g, '')}" ORDER BY seq`,
     ).all();
     const rows: HotRow[] = [];
+    let malformed = 0;
     for (const o of raw) {
       const r = normRow(o, picked);
       if (r) rows.push(r);
+      else malformed++;
     }
-    return rows;
+    return { rows, malformed };
   } finally {
     db.close();
   }
+}
+
+export async function readSqliteRows(hotDb: string, fallbackTable = 'log'): Promise<HotRow[]> {
+  return (await readSqliteRowsCounted(hotDb, fallbackTable)).rows;
+}
+
+const FOTO_REF_RE = /^foto:sha256:[0-9a-f]{64}:size=\d+$/;
+const B64_CHARS_RE = /^[A-Za-z0-9+/=\r\n]+$/;
+
+export function isFotoRef(body: string): boolean {
+  return FOTO_REF_RE.test(body);
+}
+
+// Foto gate: a base64 body decoding past FOTO_INLINE_LIMIT_BYTES is quarantined
+// to a sidecar file under <outDir>/foto/<sha>.bin; returns the hash ref to seal
+// instead of the inline bytes. Small bodies and non-base64 text return null and
+// keep sealing inline as before.
+export function quarantineFotoBody(outDir: string, body: string): string | null {
+  const chars = body.replace(/\s/g, '');
+  // Fast path: shorter strings cannot decode past the limit; no base64 work.
+  if (chars.length < (FOTO_INLINE_LIMIT_BYTES * 4) / 3) return null;
+  if (chars.length % 4 !== 0 || !B64_CHARS_RE.test(chars)) return null;
+  let raw: Buffer;
+  try {
+    raw = Buffer.from(chars, 'base64');
+  } catch {
+    return null;
+  }
+  if (raw.length <= FOTO_INLINE_LIMIT_BYTES) return null;
+  // Strict re-encode: base64 decode is lenient, large prose must not match.
+  if (raw.toString('base64') !== chars) return null;
+  const sha = createHash('sha256').update(raw).digest('hex');
+  const dir = join(outDir, 'foto');
+  mkdirSync(dir, { recursive: true });
+  const dest = join(dir, `${sha}.bin`);
+  if (!existsSync(dest)) {
+    writeFileSync(dest, raw);
+    fsyncFile(dest);
+  }
+  return `foto:sha256:${sha}:size=${raw.length}`;
+}
+
+// Read back quarantined foto bytes for a hash ref produced by quarantineFotoBody.
+export function readFotoSidecar(outDir: string, ref: string): Buffer {
+  const m = /^foto:sha256:([0-9a-f]{64}):size=(\d+)$/.exec(ref);
+  if (!m) throw new Error(`not a foto ref: ${ref.slice(0, 32)}`);
+  return readFileSync(join(outDir, 'foto', `${m[1]}.bin`));
 }
 
 function fsyncFile(p: string): void {
@@ -169,24 +232,56 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
 
   // Idempotent replay: dedupe by device_id+seq, keep last; skip sealed.
   // Input auto-detect: SQLite magic -> hot.db via bun:sqlite, else JSONL WAL.
-  const source = isSqliteFile(opts.hotDb)
-    ? await readSqliteRows(opts.hotDb, opts.table ?? 'log')
-    : readHotRows(opts.hotDb, opts.table ?? 'log');
+  const counted = isSqliteFile(opts.hotDb)
+    ? await readSqliteRowsCounted(opts.hotDb, opts.table ?? 'log')
+    : readHotRowsCounted(opts.hotDb, opts.table ?? 'log');
+  const malformed = counted.malformed;
+  const total = counted.rows.length + malformed;
+  if (total > 0 && malformed / total > MALFORMED_ABORT_PCT) {
+    throw new Error(`seal aborted: ${malformed}/${total} malformed rows (>${MALFORMED_ABORT_PCT * 100}%)`);
+  }
+  const source = counted.rows;
   const seen = new Map<string, HotRow>();
   let skipped = 0;
   for (const r of source) {
     if (r.seq <= Math.max(wm[r.device_id] ?? 0, wm[''] ?? 0)) { skipped++; continue; }
     seen.set(`${r.device_id}:${r.seq}`, r);
   }
-  const pending = [...seen.values()].sort((a, b) => a.seq - b.seq || (a.device_id < b.device_id ? -1 : a.device_id > b.device_id ? 1 : 0));
+  const sorted = [...seen.values()].sort((a, b) => a.seq - b.seq || (a.device_id < b.device_id ? -1 : a.device_id > b.device_id ? 1 : 0));
+  // Bounded seal: only the head of the queue seals this call; the tail stays
+  // pending (unwatermarked) for the next call.
+  const cap = opts.maxRows ?? sorted.length;
+  const pending = sorted.slice(0, Math.max(0, cap));
   const wmMax = Math.max(0, ...Object.values(wm));
   if (pending.length === 0) {
     const byDevice: Record<string, number> = {};
     for (const [k, v] of Object.entries(wm)) if (k !== '') byDevice[k] = v;
-    return { chunks: [], sealedUptoSeq: wmMax, sealedByDevice: byDevice, rowsSealed: 0, rowsSkipped: skipped };
+    return { chunks: [], sealedUptoSeq: wmMax, sealedByDevice: byDevice, rowsSealed: 0, rowsSkipped: skipped, rowsMalformed: malformed, probeEncodes: 0 };
   }
 
-  // Pack rows per table; probe compressed size periodically, emit near target.
+  // Foto gate first: oversize base64 never reaches a chunk inline.
+  for (const r of pending) {
+    const ref = quarantineFotoBody(opts.outDir, r.body);
+    if (ref !== null) r.body = ref;
+  }
+
+  // Per-chunk watermark: every flush fsyncs its chunk, then persists the
+  // per-device advance. A kill between flushes loses only the unflushed tail,
+  // which still sits below the watermark and reseals on the next call.
+  const advanced: Record<string, number> = {};
+  for (const [k, v] of Object.entries(wm)) if (k !== '') advanced[k] = v;
+  const persistWatermark = (): void => {
+    const ordered: Record<string, number> = {};
+    for (const k of Object.keys(advanced).sort()) ordered[k] = advanced[k];
+    const tmp = `${wmPath}.tmp`;
+    writeFileSync(tmp, `${JSON.stringify(ordered)}\n`);
+    fsyncFile(tmp);
+    renameSync(tmp, wmPath);
+  };
+
+  // Pack rows per table; a raw-bytes x last-ratio estimate gates full encodes,
+  // which run only near the target (plus one calibration per table and a
+  // recalibration every 4000 rows so the ratio tracks corpus drift).
   const byTable = new Map<string, HotRow[]>();
   for (const r of pending) {
     const arr = byTable.get(r.table);
@@ -194,6 +289,7 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
     else byTable.set(r.table, [r]);
   }
   const chunks: string[] = [];
+  let probeEncodes = 0;
   const dictDir = join(opts.outDir, 'dicts');
   for (const [table, rows] of byTable) {
     // Per-table dictionary from leading rows when repetitive; saved content-hashed.
@@ -203,41 +299,71 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
     const dict = trained?.dict;
     const dictId = trained?.dictId ?? 0;
     let batch: HotRow[] = [];
-    const flush = (force: boolean, probeBytes: number) => {
+    let batchRaw = 0;
+    let lastRatio = 0.5; // compressed bytes per raw byte; probes recalibrate
+    let recalAt = 0;
+    let lastProbeAt = 0;
+    let calibrated = false;
+    const rowSize = (r: HotRow): number =>
+      Buffer.byteLength(r.body) + Buffer.byteLength(r.id) + Buffer.byteLength(r.device_id) + 48;
+    const probe = (): Buffer => {
+      const out = encodeChunk(table, batch, dict, dictId);
+      probeEncodes++;
+      if (batchRaw > 0) lastRatio = out.length / batchRaw;
+      return out;
+    };
+    const flush = (force: boolean, probed?: Buffer) => {
       if (batch.length === 0) return;
-      if (!force && probeBytes < target) return;
-      const bytes = encodeChunk(table, batch, dict, dictId);
+      if (!force && (probed?.length ?? 0) < target) return;
+      const out = probed ?? encodeChunk(table, batch, dict, dictId);
       // Oversize probe above MAX still ships: chunks stay immutable, tail rule wins.
-      const name = chunkName(table, batch[0].seq, batch[batch.length - 1].seq, bytes);
+      const name = chunkName(table, batch[0].seq, batch[batch.length - 1].seq, out);
       const dest = join(warm, name);
       if (!existsSync(dest)) {
-        writeFileSync(dest, bytes);
+        writeFileSync(dest, out);
         fsyncFile(dest);
       }
       chunks.push(dest);
+      for (const r of batch) advanced[r.device_id] = Math.max(advanced[r.device_id] ?? 0, r.seq);
+      persistWatermark();
       batch = [];
+      batchRaw = 0;
+      recalAt = 0;
+      lastProbeAt = 0;
     };
     for (const r of rows) {
       batch.push(r);
-      if (batch.length % PACK_PROBE_ROWS === 0) flush(false, encodeChunk(table, batch, dict, dictId).length);
+      batchRaw += rowSize(r);
+      if (!calibrated && batch.length >= 400) {
+        calibrated = true;
+        recalAt = batch.length;
+        lastProbeAt = batch.length;
+        flush(false, probe());
+        continue;
+      }
+      if (batch.length - recalAt >= 4000) {
+        recalAt = batch.length;
+        lastProbeAt = batch.length;
+        flush(false, probe());
+        continue;
+      }
+      const est = batchRaw * lastRatio;
+      if (est < target * 0.5) continue;
+      const gap = est >= target ? 100 : 400;
+      if (batch.length - lastProbeAt >= gap) {
+        lastProbeAt = batch.length;
+        flush(false, probe());
+      }
     }
-    flush(true, batch.length ? encodeChunk(table, batch, dict, dictId).length : 0);
+    flush(true);
   }
 
-  // Advance the per-device watermark only after every chunk is fsynced.
-  // Every pending row lands in exactly one flushed batch, so the advance
-  // is the per-device max over pending. The legacy '' floor is dropped:
-  // each device seen now carries its own entry going forward.
-  const advanced: Record<string, number> = {};
-  for (const [k, v] of Object.entries(wm)) if (k !== '') advanced[k] = v;
-  for (const r of pending) advanced[r.device_id] = Math.max(advanced[r.device_id] ?? 0, r.seq);
+  // Manifest once at the end: buildManifest scans warm, so every flushed chunk
+  // is listed. The watermark already covers each chunk; a kill before this
+  // point only repeats manifest work on the next seal.
   const upto = Math.max(0, ...Object.values(advanced));
   const ordered: Record<string, number> = {};
   for (const k of Object.keys(advanced).sort()) ordered[k] = advanced[k];
-  const tmp = `${wmPath}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(ordered)}\n`);
-  fsyncFile(tmp);
-  renameSync(tmp, wmPath);
 
   // Preserve cold listing: buildManifest scans warm only, so reattach the
   // prior cold[] (tars stay on disk) or the next merge repacks warm twice.
@@ -252,5 +378,5 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   const manifest = buildManifest(opts.outDir);
   if (cold !== undefined) manifest.cold = cold;
   saveManifestAtomic(opts.outDir, manifest);
-  return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped };
+  return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, probeEncodes };
 }
