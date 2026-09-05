@@ -1,6 +1,6 @@
 {
   "name": "molt",
-  "version": "0.1.0",
+  "version": "0.12.0",
   "description": "Molt — shrink + ship + find. Tiered SQLite archive: hot DB, warm chunks, cold archive + manifest.",
   "type": "module",
   "main": "src/index.ts",
