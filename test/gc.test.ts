@@ -7,6 +7,9 @@ import { existsSync, readdirSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { seal } from '../src/seal.js';
+import { loadManifest } from '../src/manifest.js';
+import { ship } from '../src/ship.js';
+import { forgetChunks } from '../src/cold.js';
 import { sweep } from '../src/gc.js';
 import { scratch, writeHotLog } from './util.js';
 
@@ -38,18 +41,30 @@ describe('gc orphan sweep', () => {
     assert.equal(r.removed.length, 0);
   });
 
-  it('apply removes only orphans, manifest chunks survive', { timeout: 30_000 }, async () => {
+  it('apply removes only acked orphans, live chunks and unacked garbage survive', { timeout: 30_000 }, async () => {
     const dir = scratch('gc-apply');
-    const { hotDb } = writeHotLog(dir, { rows: 200 });
     const outDir = join(dir, 'archive');
-    const sealed = await seal({ hotDb, outDir });
-    const live = sealed.chunks.map((c) => c.split(/[\\/]/).pop() as string);
-    const orphan = plantOrphan(outDir);
-    const r = sweep(outDir, { dryRun: false });
+    const relayDir = join(dir, 'relay');
+    // Two devices seal two chunks, so one survives as the live control.
+    for (const device of ['pos-01', 'pos-02']) {
+      const { hotDb } = writeHotLog(dir, { rows: 200, device, table: `t-${device}` });
+      await seal({ hotDb, outDir });
+    }
+    const { manifest } = loadManifest(outDir);
+    assert.equal(manifest.chunks.length, 2);
+    await ship({ outDir, relayDir, baseDelayMs: 1 });
+    // Forget one shipped chunk: its warm bytes turn into an acked orphan.
+    const victim = manifest.chunks[0].file;
+    const survivor = manifest.chunks[1].file;
+    forgetChunks(outDir, [victim], relayDir);
+    const garbage = plantOrphan(outDir);
+    const r = sweep(outDir, { dryRun: false, relayDir });
     assert.equal(r.dryRun, false);
-    assert.deepEqual(r.removed, [orphan]);
-    assert.ok(!existsSync(join(outDir, 'warm', orphan)), 'orphan removed');
-    for (const f of live) assert.ok(existsSync(join(outDir, 'warm', f)), `live chunk kept: ${f}`);
+    assert.deepEqual(r.removed, [victim], 'acked orphan collected');
+    assert.ok(!existsSync(join(outDir, 'warm', victim)), 'orphan removed');
+    assert.ok(r.skippedUnacked.includes(garbage), 'unacked garbage retained');
+    assert.ok(existsSync(join(outDir, 'warm', garbage)), 'garbage bytes stay');
+    assert.ok(existsSync(join(outDir, 'warm', survivor)), `live chunk kept: ${survivor}`);
     assert.ok(r.bytesReclaimed > 0);
   });
 });

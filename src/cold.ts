@@ -4,10 +4,21 @@
 // name is not in chunks[] is unreferenced. sweepCold repacks partial
 // segments without dead members, deletes fully-dead segments, and rewrites
 // the manifest atomically (dual copy). Dry-run is the default.
+// Dict-carrying segments: a merged chunk with header dictId != 0 decodes
+// only with its trained dictionary, so mergeCold packs every referenced
+// dicts/dict-<hex>.dict member into the same tar (and refuses when the dict
+// file is missing instead of writing an undecodable segment). sweepCold
+// treats carried dict members as live while any manifest chunk names their
+// dictId, and drops them with the last referencing chunk.
+// Reserve policy: every write path below (merge tar + manifest, sweep repack
+// tmp + manifest) calls checkReserve first and throws before any byte lands,
+// so a full disk never leaves a torn tar or a half-rewritten manifest.
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { loadManifest, saveManifestAtomic } from './manifest.js';
 import { readRelayIndex } from './ship.js';
+import { checkReserve } from './gc.js';
+import { dictFile, dictHex } from './dict.js';
 
 export interface TarMember {
   name: string;
@@ -77,13 +88,18 @@ function segIndex(name: string): number {
   return m ? Number(m[1]) : -1;
 }
 
+export interface MergeOpts {
+  freeSpaceBytes?: number; // test seam: overrides statfs free-space reading
+}
+
 export interface MergeResult {
   segment: string;
   chunks: string[];
+  dicts: string[]; // carried dict tar members (dicts/dict-<hex>.dict)
   bytes: number;
 }
 
-export function mergeCold(outDir: string): MergeResult {
+export function mergeCold(outDir: string, opts: MergeOpts = {}): MergeResult {
   const warm = join(outDir, 'warm');
   const cold = join(outDir, 'cold');
   mkdirSync(cold, { recursive: true });
@@ -91,25 +107,41 @@ export function mergeCold(outDir: string): MergeResult {
   manifest.cold ??= [];
   const packed = new Set(manifest.cold.flatMap((s) => s.chunks));
   const pending: TarMember[] = [];
+  const wantDicts = new Set<number>();
   for (const e of manifest.chunks) {
     if (packed.has(e.file)) continue;
     const full = join(warm, e.file);
     if (!existsSync(full)) continue; // missing warm file: skip, never fail merge
     pending.push({ name: e.file, data: readFileSync(full) });
+    if (e.dictId !== 0) wantDicts.add(e.dictId >>> 0);
   }
-  if (pending.length === 0) return { segment: '', chunks: [], bytes: 0 };
+  if (pending.length === 0) return { segment: '', chunks: [], dicts: [], bytes: 0 };
+  // A dict-flagged chunk without its dictionary is undecodable: refuse the
+  // whole merge instead of writing a segment that can never be read back.
+  const dictDir = join(outDir, 'dicts');
+  const dictMembers: TarMember[] = [];
+  for (const dictId of [...wantDicts].sort((a, b) => a - b)) {
+    const full = dictFile(dictDir, dictId);
+    if (!existsSync(full)) {
+      throw new Error(`merge refused: chunk(s) need dict-${dictHex(dictId)}.dict, file missing (reseal to retrain)`);
+    }
+    dictMembers.push({ name: `dicts/dict-${dictHex(dictId)}.dict`, data: readFileSync(full) });
+  }
   pending.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const members = [...pending, ...dictMembers];
   const existing = existsSync(cold) ? readdirSync(cold).map(segIndex).filter((n) => n >= 0) : [];
   const next = existing.length === 0 ? 1 : Math.max(...existing) + 1;
   const segment = `seg-${String(next).padStart(6, '0')}.tar`;
-  const tar = writeTar(pending);
+  const tar = writeTar(members);
+  // Reserve first: fail-closed before the tar tmp or the manifest moves.
+  checkReserve(outDir, opts.freeSpaceBytes, 'merge');
   const dest = join(cold, segment);
   const tmp = `${dest}.tmp.${process.pid}`;
   writeFileSync(tmp, tar);
   renameSync(tmp, dest);
   manifest.cold.push({ file: segment, chunks: pending.map((m) => m.name), bytes: tar.length });
   saveManifestAtomic(outDir, manifest);
-  return { segment, chunks: pending.map((m) => m.name), bytes: tar.length };
+  return { segment, chunks: pending.map((m) => m.name), dicts: dictMembers.map((m) => m.name), bytes: tar.length };
 }
 
 // Retention prune: drop manifest entries by chunk file name, atomic dual copy.
@@ -137,6 +169,7 @@ export function forgetChunks(outDir: string, files: string[], relayDir: string):
 
 export interface ColdSweepOpts {
   dryRun?: boolean; // default true
+  freeSpaceBytes?: number; // test seam: overrides statfs free-space reading
 }
 
 export interface RepackedSeg {
@@ -159,9 +192,16 @@ export function sweepCold(outDir: string, opts: ColdSweepOpts = {}): ColdSweepRe
   const dryRun = opts.dryRun ?? true;
   const cold = join(outDir, 'cold');
   mkdirSync(cold, { recursive: true });
+  // Reserve first when writes may follow: fail-closed before any repack tmp
+  // or manifest rewrite lands. Read-only dry-runs never touch the disk.
+  if (!dryRun) checkReserve(outDir, opts.freeSpaceBytes, 'cold sweep');
   const { manifest } = loadManifest(outDir);
   manifest.cold ??= [];
   const refs = new Set(manifest.chunks.map((e) => e.file));
+  // Carried dicts stay live while any manifest chunk names their dictId.
+  const liveDicts = new Set(
+    manifest.chunks.filter((e) => e.dictId !== 0).map((e) => `dicts/dict-${dictHex(e.dictId >>> 0)}.dict`),
+  );
   const bySeg = new Map(manifest.cold.map((s) => [s.file, s]));
   const segments = readdirSync(cold).filter((f) => segIndex(f) >= 0).sort();
   const pruned: string[] = [];
@@ -184,8 +224,8 @@ export function sweepCold(outDir: string, opts: ColdSweepOpts = {}): ColdSweepRe
     } catch {
       continue; // corrupt segment: quarantine by leaving it, never delete blind
     }
-    const live = members.filter((m) => refs.has(m.name) && (known === null || known.has(m.name)));
-    const liveNames = new Set(live.map((m) => m.name));
+    const live = members.filter((m) => (m.name.startsWith('dicts/') ? liveDicts.has(m.name) : refs.has(m.name) && (known === null || known.has(m.name))));
+    const liveNames = new Set(live.filter((m) => !m.name.startsWith('dicts/')).map((m) => m.name));
     const dead = members.length - live.length;
     if (dead === 0) {
       bytesAfter += raw.length;

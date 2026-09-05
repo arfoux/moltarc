@@ -191,7 +191,7 @@ async function runSoak(seed: number, ops: number): Promise<{ ops: number; seals:
       if (f === tail.file && liveIds.delete(id)) dropped++;
     }
     sealedLiveRows -= dropped;
-    sweep(outDir, { dryRun: false });
+    sweep(outDir, { dryRun: false, relayDir });
   };
 
   const doKill = async (mode: 'seal' | 'ship'): Promise<void> => {

@@ -70,7 +70,8 @@ describe('cold gc end-to-end', () => {
     assert.equal(merged.chunks.length, sealed.chunks.length);
     assert.ok(existsSync(join(outDir, 'cold', merged.segment)));
     const members = readTar(readFileSync(join(outDir, 'cold', merged.segment)));
-    assert.equal(members.length, sealed.chunks.length);
+    assert.equal(members.length, sealed.chunks.length + merged.dicts.length, 'chunks plus carried dicts');
+    for (const d of merged.dicts) assert.ok(members.some((m) => m.name === d), `dict carried: ${d}`);
 
     // Dry-run default: reports but changes nothing.
     const victim = merged.chunks[0];
@@ -86,7 +87,8 @@ describe('cold gc end-to-end', () => {
     assert.equal(archiveBytes(outDir), before, 'dry-run changes nothing');
 
     // Warm sweep first: the forgotten chunk file is now an orphan.
-    const warm = sweep(outDir, { dryRun: false });
+    // relayDir proves the ack: unacked-safe default retains without it.
+    const warm = sweep(outDir, { dryRun: false, relayDir });
     assert.ok(warm.removed.includes(victim), 'warm sweep drops forgotten chunk');
     assert.ok(!existsSync(join(outDir, 'warm', victim)));
 
@@ -128,7 +130,7 @@ describe('cold gc end-to-end', () => {
 
     // Forget everything: the whole segment dies.
     forgetChunks(outDir, merged.chunks, relayDir);
-    sweep(outDir, { dryRun: false });
+    sweep(outDir, { dryRun: false, relayDir });
     const applied = sweepCold(outDir, { dryRun: false });
     assert.deepEqual(applied.pruned, [merged.segment]);
     assert.ok(!existsSync(join(outDir, 'cold', merged.segment)), 'dead segment deleted');
