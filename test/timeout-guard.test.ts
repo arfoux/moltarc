@@ -1,6 +1,6 @@
 // Timeout guard: every test must declare an explicit timeout instead of
 // relying on the default 5s budget, which flakes under suite contention.
-// Fails on any bare it(...) or unbounded execFileSync(...) in test/.
+// Fails on any bare it(...) or any unbounded child-process exec in test/.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'fs';
