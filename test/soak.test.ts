@@ -5,7 +5,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { appendFileSync, copyFileSync, existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'fs';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { HEADER_SIZE } from '../src/chunk.js';
@@ -201,13 +201,22 @@ async function runSoak(seed: number, ops: number): Promise<{ ops: number; seals:
     const args = mode === 'seal'
       ? ['bin/moltarc.ts', 'seal', hotDb, outDir]
       : ['bin/moltarc.ts', 'ship', outDir, relayDir];
-    const child = spawn('bun', args, { cwd: root, stdio: 'ignore' });
-    await new Promise<void>((r) => setTimeout(r, 3 + pick(10)));
-    try { child.kill(); } catch { /* already exited */ }
-    await new Promise<void>((r) => {
-      const t = setTimeout(r, 10_000);
-      child.on('exit', () => { clearTimeout(t); r(); });
-    });
+    let child: ChildProcess | undefined;
+    try {
+      child = spawn('bun', args, { cwd: root, stdio: 'ignore' });
+    } catch { /* spawn failed: fall through to in-process heal */ }
+    if (child) {
+      // an unhandled 'error' event crashes the test worker: swallow it here
+      // and let the heal path below re-establish invariants.
+      child.on('error', () => {});
+      await new Promise<void>((r) => setTimeout(r, 3 + pick(10)));
+      try { if (child.exitCode === null) child.kill(); } catch { /* already exited */ }
+      await new Promise<void>((r) => {
+        const t = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } r(); }, 10_000);
+        child.on('exit', () => { clearTimeout(t); r(); });
+        child.on('error', () => { clearTimeout(t); r(); });
+      });
+    }
     kills++;
     // heal: drop torn warm bytes the relay never acked, reseal, reship, repair.
     let files: string[] = [];

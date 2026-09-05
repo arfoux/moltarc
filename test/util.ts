@@ -4,9 +4,17 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 export function scratch(name: string): string {
-  const dir = join(tmpdir(), `moltarc-${name}-${process.pid}-${Date.now()}`);
-  mkdirSync(dir, { recursive: true });
-  return dir;
+  // parallel workers share pid+clock: pid+Date.now alone collides, so add a
+  // random suffix and retry on EEXIST instead of reusing a live dir.
+  const base = `moltarc-${name}-${process.pid}`;
+  for (let i = 0; i < 100; i++) {
+    const dir = join(tmpdir(), `${base}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+    try {
+      mkdirSync(dir);
+      return dir;
+    } catch { /* collision: retry with a fresh suffix */ }
+  }
+  throw new Error(`scratch: cannot allocate dir for ${name}`);
 }
 
 export interface GenOpts {
