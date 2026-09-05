@@ -1,17 +1,54 @@
 #!/usr/bin/env bun
-// bin/molt — seal/ship/find over archive directories.
+// bin/molt — seal/ship/find/verify/repair over archive directories.
 //   molt seal <hot.jsonl|hot.db> <outDir>
 //   molt ship <outDir> <relayDir> [--blobs]
 //   molt find <outDir> <trxId>
+//   molt verify <outDir>
+//   molt repair <outDir> <relayDir>
 import { seal } from '../src/seal.js';
 import { ship } from '../src/ship.js';
 import { findTrx } from '../src/find.js';
 import { statusInfo, sweep } from '../src/gc.js';
 import { forgetChunks, mergeCold, sweepCold } from '../src/cold.js';
-
+import { verifyFull, repairAll } from '../src/verify.js';
+import type { VerifyFullResult } from '../src/verify.js';
 function fail(msg: string): never {
   console.error(msg);
   process.exit(1);
+}
+
+function usageLines(): string[] {
+  return [
+    'usage: molt <seal|ship|find|verify|repair|status|gc|merge|forget|coldg> ...',
+    '  molt seal <hot.jsonl|hot.db> <outDir>',
+    '  molt ship <outDir> <relayDir> [--blobs]',
+    '  molt find <outDir> <trxId>',
+    '  molt verify <outDir>',
+    '  molt repair <outDir> <relayDir>',
+    '  molt status <outDir> [relayDir]',
+    '  molt merge <outDir>',
+    '  molt forget <outDir> <chunk> [chunk...]',
+    '  molt coldg <outDir> [--apply]',
+  ];
+}
+
+function usage(): never {
+  for (const line of usageLines()) console.error(line);
+  process.exit(1);
+}
+
+function printVerify(v: VerifyFullResult): void {
+  console.log(`manifest: ${v.manifest.ok ? 'OK' : 'CORRUPT'} (${v.manifest.detail})`);
+  for (const item of v.items) {
+    console.log(item.status === 'OK' ? `OK ${item.file}` : `${item.status} ${item.file} (${item.reason})`);
+  }
+  if (v.chain.length === 0) {
+    console.log('chain: OK');
+  } else {
+    for (const b of v.chain) console.log(`CHAIN ${b.table} ${b.prev} -> ${b.next} gap`);
+  }
+  const count = (s: string) => v.items.filter((i) => i.status === s).length;
+  console.log(`verify: ${count('OK')} ok, ${count('CORRUPT')} corrupt, ${count('MISSING')} missing, ${count('QUARANTINED')} quarantined, ${v.chain.length} chain break(s) — ${v.ok ? 'OK' : 'FAIL'}`);
 }
 
 async function main(): Promise<void> {
@@ -32,6 +69,12 @@ async function main(): Promise<void> {
     const f = findTrx({ outDir, trxId });
     console.log(JSON.stringify(f.row));
     console.log(`chunk ${f.chunk} fetched ${f.chunksFetched}`);
+  } else if (cmd === 'verify') {
+    const [outDir] = rest;
+    if (!outDir) fail('usage: molt verify <outDir>');
+    const v = verifyFull(outDir);
+    printVerify(v);
+    if (!v.ok) process.exitCode = 1;
   } else if (cmd === 'status') {
     const [outDir, relayDir] = rest;
     if (!outDir) fail('usage: molt status <outDir> [relayDir]');
@@ -63,8 +106,19 @@ async function main(): Promise<void> {
     for (const f of r.pruned) console.log(`pruned ${f}`);
     for (const s of r.repacked) console.log(`repacked ${s.file} ${s.before}B -> ${s.after}B`);
     console.log(`cold: ${r.bytesBefore}B -> ${r.bytesAfter}B`);
+  } else if (cmd === 'repair') {
+    const [outDir, relayDir] = rest;
+    if (!outDir || !relayDir) fail('usage: molt repair <outDir> <relayDir>');
+    const r = repairAll(outDir, relayDir);
+    for (const f of r.repaired) console.log(`REPAIRED ${f}`);
+    for (const f of r.failed) console.log(`FAILED ${f.file} (${f.error})`);
+    printVerify(r.verify);
+    console.log(`repair: ${r.repaired.length} repaired, ${r.failed.length} failed — ${r.ok ? 'OK' : 'FAIL'}`);
+    if (!r.ok) process.exitCode = 1;
+  } else if (cmd === 'help' || cmd === '-h' || cmd === '--help') {
+    for (const line of usageLines()) console.log(line);
   } else {
-    fail('usage: molt <seal|ship|find|status|gc|merge|forget|coldg> ...');
+    usage();
   }
 }
 

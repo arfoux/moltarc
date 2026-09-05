@@ -7,8 +7,8 @@ export { ship, planShipment, sendChunked, readRelayIndex, laneOf } from './ship.
 export type { ShipOpts, ShipResult, RelayIndex } from './ship.js';
 export { findTrx, candidates, buildSparseIndex } from './find.js';
 export type { FindOpts, FindResult, SparseEntry } from './find.js';
-export { verifyChunk, verifyAll, quarantine, repairByHash } from './verify.js';
-export type { VerifyItem, VerifyResult } from './verify.js';
+export { verifyChunk, verifyAll, verifyFull, repairAll, quarantine, repairByHash } from './verify.js';
+export type { VerifyItem, VerifyResult, VerifyFullResult, FullVerifyItem, ChunkStatus, ManifestCheck, ChainBreak, RepairResult, RepairFailure } from './verify.js';
 export { encodeChunk, decodeChunk, encodeHeader, decodeHeader, crc32c, sha256hex, fnv1a32, DICT_FLAG } from './chunk.js';
 export { trainTableDict, saveDictAtomic, loadDictFor, dictFile, dictHex, DICT_MAX_BYTES, DICT_TRAIN_ROWS } from './dict.js';
 export { sweep, statusInfo, checkReserve, freeSpaceBytes, RESERVE_BYTES } from './gc.js';
