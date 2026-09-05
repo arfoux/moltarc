@@ -1,5 +1,6 @@
-// moltarc manifest — atomic tmp+fsync+rename, dual copy, min/max+bloom, rebuild-from-filenames.
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
+// moltarc manifest — atomic tmp+fsync+rename, dual copy, min/max+bloom, rebuild-from-filenames,
+// monthly shards (manifest-YYYY-MM.json + root pointer), persisted sparse index (sparse.json).
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { crc32c, decodeChunk, decodeHeader, fnv1a32, HEADER_SIZE, sha256hex, DICT_FLAG } from './chunk.js';
 import { loadDictFor } from './dict.js';
@@ -37,10 +38,39 @@ export interface Manifest {
   createdAt: string;
   chunks: ChunkEntry[];
   cold?: ColdSegment[];
+  // Monthly-shard pointer: sorted YYYY-MM months with a manifest-<month>.json
+  // sidecar. Root chunks[] stays complete so old readers work untouched.
+  shards?: string[];
   // Generation envelope: seq bumps on every atomic save, crc32c self-validates
   // the envelope so load can pick the best crc-valid copy. Both optional so
   // pre-envelope (v0/v1) archives still load as seq 0.
   seq?: number;
+  crc32c?: number;
+}
+
+export interface ManifestShard {
+  version: number;
+  month: string;
+  chunks: ChunkEntry[];
+  seq?: number;
+  crc32c?: number;
+}
+
+export interface SparseDiskEntry {
+  file: string;
+  minKey: string;
+  maxKey: string;
+  seqMin: number;
+  month: string;
+}
+
+export interface SparseDisk {
+  version: number;
+  seq: number;
+  total: number;
+  quarantined: number;
+  entries: SparseDiskEntry[];
+  cold: ColdSegment[];
   crc32c?: number;
 }
 
@@ -80,15 +110,18 @@ function readManifestText(p: string): string {
 }
 
 // Canonical envelope bytes the manifest crc covers: explicit field order so
-// save and load agree regardless of key insertion order on disk.
+// save and load agree regardless of key insertion order on disk. shards is
+// covered only when present, so pre-shard crc copies stay valid.
 function envelopeBytes(m: Manifest): Buffer {
-  return Buffer.from(JSON.stringify({
+  const env: Record<string, unknown> = {
     version: m.version,
     createdAt: m.createdAt,
     chunks: m.chunks,
     cold: m.cold ?? [],
     seq: m.seq ?? 0,
-  }), 'utf8');
+  };
+  if (m.shards !== undefined) env.shards = m.shards;
+  return Buffer.from(JSON.stringify(env), 'utf8');
 }
 
 export function manifestCrc(m: Manifest): number {
@@ -137,7 +170,215 @@ function stampEnvelope(m: Manifest, baseSeq: number): void {
   const want = Math.max(manifestSeq(m), baseSeq) + 1;
   m.seq = want;
   if (!Array.isArray(m.cold)) m.cold = [];
+  m.shards = shardMonthsFor(m.chunks);
   m.crc32c = manifestCrc(m);
+}
+
+// --- monthly shards + persisted sparse index ---
+// Shard key is the UTC month of the chunk's tsMin (tsMax fallback); zero-ts
+// quarantined stubs land in 1970-01 so they stay addressable.
+export function monthForTs(ts: number): string {
+  if (!Number.isFinite(ts) || ts <= 0) return '1970-01';
+  const d = new Date(ts);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+export function shardMonthForEntry(e: ChunkEntry): string {
+  if (typeof e.tsMin === 'number' && e.tsMin > 0) return monthForTs(e.tsMin);
+  if (typeof e.tsMax === 'number' && e.tsMax > 0) return monthForTs(e.tsMax);
+  return '1970-01';
+}
+
+export function shardFileForMonth(month: string): string {
+  return `manifest-${month}.json`;
+}
+
+export function shardMonthsFor(chunks: ChunkEntry[]): string[] {
+  const months = new Set<string>();
+  for (const e of chunks) months.add(shardMonthForEntry(e));
+  return [...months].sort();
+}
+
+function shardEnvelopeBytes(s: ManifestShard): Buffer {
+  return Buffer.from(JSON.stringify({
+    version: s.version,
+    month: s.month,
+    chunks: s.chunks,
+    seq: s.seq ?? 0,
+  }), 'utf8');
+}
+
+export function shardCrc(s: ManifestShard): number {
+  return crc32c(shardEnvelopeBytes(s));
+}
+
+function sparseEnvelopeBytes(s: SparseDisk): Buffer {
+  return Buffer.from(JSON.stringify({
+    version: s.version,
+    seq: s.seq,
+    total: s.total,
+    quarantined: s.quarantined,
+    entries: s.entries,
+    cold: s.cold,
+  }), 'utf8');
+}
+
+export function sparseCrc(s: SparseDisk): number {
+  return crc32c(sparseEnvelopeBytes(s));
+}
+
+// Sparse rows persist sorted by minKey (unknown-range tail), mirroring the
+// in-memory buildSparseIndex order so queries binary-search without parsing
+// the full manifest.
+export function buildSparseDiskEntries(chunks: ChunkEntry[]): SparseDiskEntry[] {
+  const ranged: SparseDiskEntry[] = [];
+  const unknown: SparseDiskEntry[] = [];
+  for (const e of chunks) {
+    if (e.quarantined) continue;
+    const row: SparseDiskEntry = {
+      file: e.file, minKey: e.minKey ?? '', maxKey: e.maxKey ?? '',
+      seqMin: e.seqMin, month: shardMonthForEntry(e),
+    };
+    if (row.minKey && row.maxKey) ranged.push(row);
+    else unknown.push(row);
+  }
+  ranged.sort((a, b) => (a.minKey < b.minKey ? -1 : a.minKey > b.minKey ? 1 : 0));
+  return [...ranged, ...unknown];
+}
+
+export function buildSparseDisk(m: Manifest): SparseDisk {
+  const quarantined = m.chunks.filter((e) => e.quarantined).length;
+  const s: SparseDisk = {
+    version: 1,
+    seq: manifestSeq(m),
+    total: m.chunks.length,
+    quarantined,
+    entries: buildSparseDiskEntries(m.chunks),
+    cold: Array.isArray(m.cold) ? m.cold : [],
+  };
+  s.crc32c = sparseCrc(s);
+  return s;
+}
+
+function parseSparseCopy(p: string): SparseDisk | null {
+  try {
+    const s = JSON.parse(readManifestText(p)) as SparseDisk;
+    if (typeof s.seq !== 'number' || !Array.isArray(s.entries) || !Array.isArray(s.cold)) return null;
+    if (typeof s.crc32c === 'number' && s.crc32c >>> 0 !== sparseCrc(s)) return null;
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+function parseShardCopy(p: string): ManifestShard | null {
+  try {
+    const s = JSON.parse(readManifestText(p)) as ManifestShard;
+    if (typeof s.month !== 'string' || !Array.isArray(s.chunks)) return null;
+    if (typeof s.crc32c === 'number' && s.crc32c >>> 0 !== shardCrc(s)) return null;
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+// Best crc-valid sparse copy wins (higher seq first); null when no sidecar yet.
+export function loadSparseIndex(outDir: string): { sparse: SparseDisk; source: 'primary' | 'backup' } | null {
+  const ranked = [
+    { s: parseSparseCopy(join(outDir, 'sparse.json')), source: 'primary' },
+    { s: parseSparseCopy(join(outDir, 'sparse.bak.json')), source: 'backup' },
+  ] as const;
+  let best: SparseDisk | null = null;
+  let bestSource: 'primary' | 'backup' = 'primary';
+  let bestSeq = -1;
+  for (const { s, source } of ranked) {
+    if (!s) continue;
+    const seq = Number.isFinite(s.seq) && s.seq > 0 ? Math.floor(s.seq) : 0;
+    if (seq > bestSeq) {
+      best = s;
+      bestSource = source;
+      bestSeq = seq;
+    }
+  }
+  return best ? { sparse: best, source: bestSource } : null;
+}
+
+export function loadShard(outDir: string, month: string): ManifestShard | null {
+  return parseShardCopy(join(outDir, shardFileForMonth(month)));
+}
+
+// Shard months present on disk (no root parse); lets queries resolve the
+// relevant sidecars from the sparse index alone.
+export function listShardMonths(outDir: string): string[] {
+  let names: string[] = [];
+  try {
+    names = readdirSync(outDir);
+  } catch {
+    return [];
+  }
+  return names
+    .filter((f) => /^manifest-\d{4}-\d{2}\.json$/.test(f))
+    .map((f) => f.slice('manifest-'.length, -'.json'.length))
+    .sort();
+}
+
+// Load exactly the requested months; corrupt/missing months land in missing so
+// the caller can fall back to the full root manifest.
+export function loadChunksForMonths(outDir: string, months: string[]): {
+  chunks: ChunkEntry[]; shardsLoaded: number; shardsMissing: string[]; seq: number;
+} {
+  const chunks: ChunkEntry[] = [];
+  let shardsLoaded = 0;
+  const shardsMissing: string[] = [];
+  let seq = 0;
+  for (const month of months) {
+    const s = loadShard(outDir, month);
+    if (!s) {
+      shardsMissing.push(month);
+      continue;
+    }
+    shardsLoaded++;
+    if (typeof s.seq === 'number' && Number.isFinite(s.seq)) seq = Math.max(seq, Math.floor(s.seq));
+    for (const e of s.chunks) chunks.push(e);
+  }
+  return { chunks, shardsLoaded, shardsMissing, seq };
+}
+
+function writeFileAtomicSync(dest: string, payload: string): void {
+  const tmp = `${dest}.tmp.${process.pid}`;
+  writeFileSync(tmp, payload);
+  fsyncFile(tmp);
+  renameSync(tmp, dest);
+}
+
+// Sidecars for a freshly stamped manifest: one shard file per month, stale
+// months removed, plus the dual-copy persisted sparse index.
+function saveShardSidecars(outDir: string, m: Manifest): void {
+  const seq = manifestSeq(m);
+  const byMonth = new Map<string, ChunkEntry[]>();
+  for (const e of m.chunks) {
+    const month = shardMonthForEntry(e);
+    const list = byMonth.get(month);
+    if (list) list.push(e);
+    else byMonth.set(month, [e]);
+  }
+  const months = [...byMonth.keys()].sort();
+  for (const month of months) {
+    const entries = (byMonth.get(month) ?? []).slice().sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+    const shard: ManifestShard = { version: m.version, month, chunks: entries, seq };
+    shard.crc32c = shardCrc(shard);
+    writeFileAtomicSync(join(outDir, shardFileForMonth(month)), `${JSON.stringify(shard, null, 1)}\n`);
+  }
+  for (const month of listShardMonths(outDir)) {
+    if (!byMonth.has(month)) {
+      try { unlinkSync(join(outDir, shardFileForMonth(month))); } catch { /* already gone */ }
+    }
+  }
+  const sparse = buildSparseDisk(m);
+  const payload = `${JSON.stringify(sparse, null, 1)}\n`;
+  for (const name of ['sparse.json', 'sparse.bak.json']) {
+    writeFileAtomicSync(join(outDir, name), payload);
+  }
 }
 
 function fsyncFile(p: string): void {
@@ -195,7 +436,7 @@ export function buildManifest(outDir: string): Manifest {
       });
     }
   }
-  const m: Manifest = { version: 1, createdAt: new Date().toISOString(), chunks, cold: [], seq: 0 };
+  const m: Manifest = { version: 1, createdAt: new Date().toISOString(), chunks, cold: [], shards: shardMonthsFor(chunks), seq: 0 };
   m.crc32c = manifestCrc(m);
   return m;
 }
@@ -217,6 +458,11 @@ export function saveManifestAtomic(outDir: string, m: Manifest): void {
     fsyncFile(tmp);
     renameSync(tmp, dest);
   }
+  // Shard + sparse sidecars carry the same seq; a torn sidecar falls back to
+  // the root copies, so they never gate durability.
+  try {
+    saveShardSidecars(outDir, m);
+  } catch { /* sidecars are a pure speedup: root copies already durable */ }
   fsyncDir(outDir);
 }
 
