@@ -1,7 +1,7 @@
 // moltarc ship — delta by hash, chunked resume, text-first lanes, exponential backoff.
 // Relay = directory (cold side): <relay>/chunks/*.chk + index.json {sha256: file}.
 // Never deletes source chunks.
-import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync, writeSync } from 'fs';
+import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from 'fs';
 import { join } from 'path';
 import { sha256hex } from './chunk.js';
 import { loadManifest } from './manifest.js';
@@ -21,6 +21,7 @@ export interface ShipOpts {
 export interface ShipResult {
   sent: string[];
   skipped: string[];
+  missing: string[];
   bytes: number;
 }
 
@@ -72,14 +73,17 @@ const sleepDefault = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 // Resumable chunked copy: partial file + offset journal survive process death.
 export async function sendChunked(src: string, dst: string, statePath: string, opts: {
   blockBytes: number; maxRetries: number; baseDelayMs: number; failAtBytes?: number;
-  sleep: (ms: number) => Promise<void>;
+  sleep: (ms: number) => Promise<void>; chunkFile?: string;
 }): Promise<{ bytes: number; resumed: boolean }> {
   const data = readFileSync(src);
+  const hex = sha256hex(data);
   let offset = 0;
   let failedOnce = false;
   try {
-    const st = JSON.parse(readFileSync(statePath, 'utf8')) as { offset: number; sha256: string };
-    if (st.sha256 === sha256hex(data)) offset = Math.min(st.offset, data.length);
+    const st = JSON.parse(readFileSync(statePath, 'utf8')) as { offset: number; sha256: string; file?: string };
+    if (st.sha256 !== hex) { /* stale source: start at 0 */ }
+    else if (opts.chunkFile !== undefined && st.file !== undefined && st.file !== opts.chunkFile) { /* foreign journal: start at 0 */ }
+    else offset = Math.min(st.offset, data.length);
   } catch { /* no state: start at 0 */ }
   const resumed = offset > 0;
   mkdirSync(join(dst, '..'), { recursive: true });
@@ -90,7 +94,11 @@ export async function sendChunked(src: string, dst: string, statePath: string, o
       try {
         // Append-only forward progress; journal every block for resume.
         let pos = offset;
-        if (pos > 0) pos = Math.min(readFileSync(dst).length, data.length);
+        if (pos > 0) {
+          try {
+            pos = Math.min(statSync(dst).size, data.length);
+          } catch { pos = offset; }
+        }
         while (pos < data.length) {
           if (opts.failAtBytes !== undefined && !failedOnce && pos >= opts.failAtBytes) {
             failedOnce = true;
@@ -99,14 +107,14 @@ export async function sendChunked(src: string, dst: string, statePath: string, o
           const end = Math.min(pos + opts.blockBytes, data.length);
           writeSync(fd, data.subarray(pos, end), 0, end - pos, pos);
           pos = end;
-          writeFileSync(statePath, JSON.stringify({ offset: pos, sha256: sha256hex(data) }));
+          writeFileSync(statePath, JSON.stringify({ offset: pos, sha256: hex, ...(opts.chunkFile !== undefined ? { file: opts.chunkFile } : {}) }));
         }
         fsyncSync(fd);
       } finally {
         closeSync(fd);
       }
       const got = readFileSync(dst);
-      if (sha256hex(got) !== sha256hex(data)) throw new Error('post-copy hash mismatch');
+      if (sha256hex(got) !== hex) throw new Error('post-copy hash mismatch');
       try { unlinkSync(statePath); } catch { /* state already gone */ }
       return { bytes: data.length, resumed };
     } catch (err) {
@@ -126,24 +134,27 @@ export async function ship(opts: ShipOpts): Promise<ShipResult> {
   const blockBytes = opts.blockBytes ?? 64 * 1024;
   const sleep = opts.sleep ?? sleepDefault;
   const sent: string[] = [];
+  const absent: string[] = [];
   let bytes = 0;
   for (const e of missing) {
     const src = join(opts.outDir, 'warm', e.file);
-    if (!existsSync(src)) { skipped.push(e.file); continue; } // missing warm source: explicit skip, never fail the lane
+    if (!existsSync(src)) { skipped.push(e.file); absent.push(e.file); continue; } // missing warm source: explicit missing entry, lane continues
     const dst = join(relayChunks, e.file);
-    const state = join(opts.relayDir, `.ship-state-${e.sha256.slice(0, 12)}.json`);
+    const state = join(opts.relayDir, `.ship-state-${e.file}-${e.sha256.slice(0, 12)}.json`);
     const r = await sendChunked(src, dst, state, {
       blockBytes,
       maxRetries: opts.maxRetries ?? 5,
       baseDelayMs: opts.baseDelayMs ?? 200,
       failAtBytes: opts.failAtBytes,
       sleep,
+      chunkFile: e.file,
     });
     bytes += r.bytes;
     sent.push(e.file);
     remote.chunks[e.sha256] = e.file;
-    saveRelayIndex(opts.relayDir, remote);
+    try { unlinkSync(join(opts.relayDir, `.ship-state-${e.sha256.slice(0, 12)}.json`)); } catch { /* legacy journal name: best-effort */ }
   }
+  if (sent.length > 0) saveRelayIndex(opts.relayDir, remote);
   // Dictionaries are tiny, immutable, content-hashed: copy-if-missing, no resume needed.
   const dictSrc = join(opts.outDir, 'dicts');
   const dictDst = join(opts.relayDir, 'dicts');
@@ -154,5 +165,5 @@ export async function ship(opts: ShipOpts): Promise<ShipResult> {
       if (!existsSync(dst)) copyFileSync(join(dictSrc, f), dst);
     }
   }
-  return { sent, skipped, bytes };
+  return { sent, skipped, missing: absent, bytes };
 }
