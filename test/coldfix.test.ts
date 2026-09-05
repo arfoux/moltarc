@@ -1,8 +1,13 @@
 // merge-seal-merge keeps cold listing stable; ship reports missing warm as skipped.
+// merge packs dictless chunks without demanding phantom dict files.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFileSync, existsSync, readFileSync, unlinkSync } from 'fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { decodeHeader, DICT_FLAG } from '../src/chunk.js';
+import { dictHex } from '../src/dict.js';
+import { sweep } from '../src/gc.js';
+import { findTrx } from '../src/find.js';
 import { seal } from '../src/seal.js';
 import { ship } from '../src/ship.js';
 import { mergeCold, readTar } from '../src/cold.js';
@@ -72,5 +77,81 @@ describe('coldfix regressions', () => {
     assert.ok(!r.sent.includes(victim), 'missing source is never marked sent');
     assert.equal(r.sent.length, manifest.chunks.length - 1, 'survivors still ship');
     assert.equal(r.sent.length + r.skipped.length, manifest.chunks.length, 'every chunk accounted for');
+  });
+
+  it('merge packs dictless chunks without demanding phantom dict files', { timeout: 60_000 }, async () => {
+    const dir = scratch('coldfix-dictless');
+    mkdirSync(dir, { recursive: true });
+    const outDir = join(dir, 'archive');
+    // sales: repetitive bodies earn a trained dict; photo: unique bodies earn none.
+    // Both tables seal dictId-tagged headers, but only DICT_FLAG chunks need a file.
+    const base = 1_700_000_000_000;
+    // Deterministic PRNG: photo hashes must be unique and incompressible
+    // (counter hex still compresses 4x and earns a dict, hiding the bug).
+    let st = 0x12345678;
+    const hex64 = (): string => {
+      let s = '';
+      for (let k = 0; k < 16; k++) {
+        st = (Math.imul(st ^ (st >>> 15), 1 | st) + 0x6d2b79f5) | 0;
+        s += ((st >>> 0).toString(16).padStart(8, '0'));
+      }
+      return s.slice(0, 64);
+    };
+    const lines: string[] = [];
+    for (let i = 0; i < 3000; i++) {
+      lines.push(JSON.stringify({
+        device_id: 'pos-01', seq: i + 1, ts: base + i * 1000,
+        id: `trx-${String(i + 1).padStart(8, '0')}`, table: 'sales',
+        body: `TRANSACTION OK amount=${15000 + (i % 97)} cashier=agus tend=cash change=0 store=jakarta-selatan`,
+      }));
+    }
+    for (let i = 0; i < 1500; i++) {
+      lines.push(JSON.stringify({
+        device_id: 'cam-01', seq: i + 1, ts: base + (1500 + i) * 1000,
+        id: `photo-${String(i + 1).padStart(8, '0')}`, table: 'photo',
+        body: `blob:sha256:${hex64()}:size=4096`,
+      }));
+    }
+    const hotDb = join(dir, 'hot.jsonl');
+    writeFileSync(hotDb, `${lines.join('\n')}\n`);
+    await seal({ hotDb, outDir, targetBytes: 4 * 1024 });
+    const { manifest } = loadManifest(outDir);
+    assert.ok(manifest.chunks.length >= 3, `need dict + dictless chunks, got ${manifest.chunks.length}`);
+    const dictsOnDisk = new Set(readdirSync(join(outDir, 'dicts')));
+    let flagged = 0;
+    let hintOnly = 0;
+    for (const e of manifest.chunks) {
+      const h = decodeHeader(readFileSync(join(outDir, 'warm', e.file)));
+      assert.equal(h.dictId >>> 0, e.dictId >>> 0, 'manifest dictId matches header');
+      if ((h.flags & DICT_FLAG) !== 0) {
+        flagged++;
+        assert.ok(dictsOnDisk.has(`dict-${dictHex(e.dictId >>> 0)}.dict`), `trained dict present for ${e.file}`);
+      } else if (e.dictId !== 0) {
+        hintOnly++;
+        assert.ok(!dictsOnDisk.has(`dict-${dictHex(e.dictId >>> 0)}.dict`), `no dict file for hint-only ${e.file}`);
+      }
+    }
+    assert.ok(flagged >= 1, 'at least one DICT_FLAG chunk sealed');
+    assert.ok(hintOnly >= 1, 'at least one hint-only chunk sealed');
+
+    // gc sweep must not orphan the live trained dicts.
+    const swept = sweep(outDir, { dryRun: false });
+    assert.deepEqual(swept.dictsRemoved, [], 'sweep removes no live dict');
+    for (const e of manifest.chunks) {
+      const h = decodeHeader(readFileSync(join(outDir, 'warm', e.file)));
+      if ((h.flags & DICT_FLAG) !== 0) assert.ok(existsSync(join(outDir, 'dicts', `dict-${dictHex(e.dictId >>> 0)}.dict`)), `live dict kept for ${e.file}`);
+    }
+
+    // merge used to refuse here: hint-only photo chunks named phantom dict files.
+    const merged = mergeCold(outDir);
+    assert.ok(merged.segment.endsWith('.tar'), 'cold segment written');
+    assert.equal(merged.chunks.length, manifest.chunks.length, 'every live chunk merged');
+    for (const d of merged.dicts) assert.ok(dictsOnDisk.has(d.split('/')[1]), `packed dict exists: ${d}`);
+    const names = new Set(readTar(readFileSync(join(outDir, 'cold', merged.segment))).map((m) => m.name));
+    for (const e of manifest.chunks) assert.ok(names.has(e.file), `segment carries ${e.file}`);
+
+    // rows from both sides stay readable after the merge.
+    assert.equal(findTrx({ outDir, trxId: 'trx-00000001' }).row.id, 'trx-00000001', 'dict row survives merge');
+    assert.equal(findTrx({ outDir, trxId: 'photo-00000001' }).row.id, 'photo-00000001', 'dictless row survives merge');
   });
 });

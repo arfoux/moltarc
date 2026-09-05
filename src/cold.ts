@@ -4,12 +4,13 @@
 // name is not in chunks[] is unreferenced. sweepCold repacks partial
 // segments without dead members, deletes fully-dead segments, and rewrites
 // the manifest atomically (dual copy). Dry-run is the default.
-// Dict-carrying segments: a merged chunk with header dictId != 0 decodes
+// Dict-carrying segments: a merged chunk with DICT_FLAG in its header decodes
 // only with its trained dictionary, so mergeCold packs every referenced
 // dicts/dict-<hex>.dict member into the same tar (and refuses when the dict
-// file is missing instead of writing an undecodable segment). sweepCold
-// treats carried dict members as live while any manifest chunk names their
-// dictId, and drops them with the last referencing chunk.
+// file is missing instead of writing an undecodable segment). A header dictId
+// without DICT_FLAG is an inline content hint (decodeChunk ignores it), never
+// a file requirement. sweepCold treats carried dict members as live while any
+// manifest chunk names their dictId, and drops them with the last chunk.
 // Reserve policy: every write path below (merge tar + manifest, sweep repack
 // tmp + manifest) calls checkReserve first and throws before any byte lands,
 // so a full disk never leaves a torn tar or a half-rewritten manifest.
@@ -18,6 +19,7 @@ import { join } from 'path';
 import { loadManifest, saveManifestAtomic } from './manifest.js';
 import { readRelayIndex } from './ship.js';
 import { checkReserve } from './gc.js';
+import { decodeHeader, DICT_FLAG } from './chunk.js';
 import { dictFile, dictHex } from './dict.js';
 
 export interface TarMember {
@@ -112,8 +114,19 @@ export function mergeCold(outDir: string, opts: MergeOpts = {}): MergeResult {
     if (packed.has(e.file)) continue;
     const full = join(warm, e.file);
     if (!existsSync(full)) continue; // missing warm file: skip, never fail merge
-    pending.push({ name: e.file, data: readFileSync(full) });
-    if (e.dictId !== 0) wantDicts.add(e.dictId >>> 0);
+    const data = readFileSync(full);
+    pending.push({ name: e.file, data });
+    // Dict need is flag-gated: header.dictId without DICT_FLAG is an inline
+    // content hint, not a trained dict file (decodeChunk ignores it). Only
+    // DICT_FLAG chunks name a dicts/dict-<hex>.dict member.
+    let need = 0;
+    try {
+      const header = decodeHeader(data);
+      if ((header.flags & DICT_FLAG) !== 0) need = header.dictId >>> 0;
+    } catch {
+      if (e.dictId !== 0) need = e.dictId >>> 0; // torn header: fail closed
+    }
+    if (need !== 0) wantDicts.add(need);
   }
   if (pending.length === 0) return { segment: '', chunks: [], dicts: [], bytes: 0 };
   // A dict-flagged chunk without its dictionary is undecodable: refuse the
