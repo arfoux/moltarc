@@ -17,11 +17,23 @@ molt ship   # send only missing chunk hashes, resumable
 molt find <trx-id>  # fetch 1 chunk via manifest, not 100MB
 ```
 
-## Honest SLA
-
 - Pure repetitive text log → 30-50x (5GB → ~100-150MB) achievable
 - Mixed DB (free text + index bloat) → 8-15x
 - Photo-heavy DB → 2-5x (JPEG is incompressible; blobs ship lazy, never in the mandatory archive)
+
+Measured (synthetic, `npm test`): 20k-row 5-template POS log, 3.45MB JSONL → 10.7KB in 1 chunk = **323x**.
+Tiny + ultra-repetitive, so it beats the 30-50x band — real 5GB WALs carry more entropy. Mixed/unique-body
+logs in the same suite land far lower; treat 30-50x / 8-15x / 2-5x as the planning bands, not the benchmark.
+
+## Notes
+
+- Codec: zstd (Node 22 built-in) with deflate fallback; `codec` byte in the 64B header keeps chunks
+  self-describing, dict inline in the frame (`dict_id = fnv1a32(devices + body pool)`).
+- Hot input is a JSONL WAL export (one JSON object per line: `device_id, seq, ts, id, table, body`);
+  pure-SQLite reads need no native dep this way. `sealed_upto_seq` watermark + `device_id:seq`
+  dedupe make re-seal idempotent.
+- Text-first ship lanes: `*blob* | *photo* | *image* | *thumb*` tables ship last and are skipped
+  unless `includeBlobs: true`.
 
 ## Rules (non-negotiable)
 
