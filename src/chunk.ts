@@ -128,11 +128,26 @@ export function compressFrame(raw: Buffer, dict?: Buffer): { codec: number; body
   }
 }
 
+// Hard cap on decompressed frame bytes: enforced in decompressFrame and
+// re-checked in decodeChunk before JSON.parse. Bomb frames fail loud.
+export const DECOMPRESS_MAX_BYTES = 16 * 1024 * 1024;
+
+function checkFrameCap(out: Buffer): Buffer {
+  if (out.length > DECOMPRESS_MAX_BYTES) {
+    throw new Error(`decompressed frame ${out.length}B exceeds ${DECOMPRESS_MAX_BYTES}B cap (likely corrupt)`);
+  }
+  return out;
+}
+
+// Low-level backend: caller must gate `dict` on DICT_FLAG first (decodeChunk
+// does: supplied dict is ignored when the flag is off). dictId is accepted
+// for call compat and otherwise unused.
 export function decompressFrame(codec: number, body: Buffer, dict?: Buffer, dictId = 0): Buffer {
-  if (codec === CODEC_ZSTD && dict) return Buffer.from(zstdDecompressSync(body, { dictionary: dict }));
-  if (codec === CODEC_ZSTD && !dict) return Buffer.from(zstdDecompressSync(body));
-  if (codec === CODEC_DEFLATE) return Buffer.from(inflateSync(body));
-  if (codec === CODEC_NONE) return body;
+  void dictId;
+  if (codec === CODEC_ZSTD && dict) return checkFrameCap(Buffer.from(zstdDecompressSync(body, { dictionary: dict })));
+  if (codec === CODEC_ZSTD && !dict) return checkFrameCap(Buffer.from(zstdDecompressSync(body)));
+  if (codec === CODEC_DEFLATE) return checkFrameCap(Buffer.from(inflateSync(body)));
+  if (codec === CODEC_NONE) return checkFrameCap(body);
   throw new Error(`unsupported codec ${codec} (N-2 compat: upgrade moltarc)`);
 }
 
@@ -243,7 +258,11 @@ export function encodeChunk(table: string, rows: HotRow[], dict?: Buffer, dictId
   });
   return Buffer.concat([header, body]);
 }
-
+// Full chunk decode: body crc first, then dict gating, cap, frame checks.
+// Header integrity: crc covers the body only (frozen v1 layout), so header
+// seqMin/seqMax/tsMin/tsMax/rows are cross-checked against decoded rows.
+// header.dictId with DICT_FLAG off is a non-authoritative inline hint
+// (pre-dict chunks carry any dict_id): ignored on decode, never verified.
 export function decodeChunk(buf: Buffer, dict?: Buffer): { header: ChunkHeader; rows: HotRow[] } {
   const header = decodeHeader(buf);
   const body = Buffer.from(buf.subarray(HEADER_SIZE, HEADER_SIZE + header.bodyLen));
@@ -252,5 +271,34 @@ export function decodeChunk(buf: Buffer, dict?: Buffer): { header: ChunkHeader; 
   if ((header.flags & DICT_FLAG) !== 0 && !dict) {
     throw new Error(`chunk needs dict ${(header.dictId >>> 0).toString(16).padStart(8, '0')} (dict file missing)`);
   }
-  return { header, rows: decodeRows(decompressFrame(header.codec, body, dict, header.dictId)) };
+  // Gate: ignore a supplied dict when the chunk names none (flag off), so a
+  // stray dict file can never mis-decode a flagless chunk.
+  const useDict = (header.flags & DICT_FLAG) !== 0 ? dict : undefined;
+  const raw = decompressFrame(header.codec, body, useDict, header.dictId);
+  if (raw.length > DECOMPRESS_MAX_BYTES) {
+    throw new Error(`decompressed frame ${raw.length}B exceeds ${DECOMPRESS_MAX_BYTES}B cap (likely corrupt)`);
+  }
+  const rows = decodeRows(raw);
+  if (rows.length !== header.rows) throw new Error(`header rows ${header.rows} vs decoded ${rows.length}`);
+  if (rows.length > 0) {
+    let smin = rows[0].seq;
+    let smax = rows[0].seq;
+    let tmin = rows[0].ts;
+    let tmax = rows[0].ts;
+    for (let i = 1; i < rows.length; i++) {
+      const s = rows[i].seq;
+      const t = rows[i].ts;
+      if (s < smin) smin = s;
+      if (s > smax) smax = s;
+      if (t < tmin) tmin = t;
+      if (t > tmax) tmax = t;
+    }
+    if (BigInt(smin) !== header.seqMin || BigInt(smax) !== header.seqMax) {
+      throw new Error('header seq range differs from decoded rows (corrupt header/frame)');
+    }
+    if (BigInt(tmin) !== header.tsMin || BigInt(tmax) !== header.tsMax) {
+      throw new Error('header ts range differs from decoded rows (corrupt header/frame)');
+    }
+  }
+  return { header, rows };
 }

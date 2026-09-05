@@ -32,7 +32,17 @@ export function sampleRatio(bodies: string[]): number {
   }
 }
 
-export function trainTableDict(bodies: string[]): TrainedDict | null {
+// Blob tables never earn a dictionary: bodies are hash-refs or incompressible
+// bytes, so training wastes a dict file and a DICT_FLAG lookup per chunk.
+// Mirrors ship lane regex locally (dict owns this gate; seal passes table).
+export const BLOB_TABLE_RE = /blob|photo|image|thumb/i;
+
+export function isBlobTable(table: string): boolean {
+  return BLOB_TABLE_RE.test(table);
+}
+
+export function trainTableDict(bodies: string[], table?: string): TrainedDict | null {
+  if (table !== undefined && isBlobTable(table)) return null;
   if (bodies.length < 100) return null;
   if (sampleRatio(bodies) < 4) return null;
   const sample = bodies.slice(0, DICT_TRAIN_ROWS);
