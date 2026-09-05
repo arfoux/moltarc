@@ -21,6 +21,7 @@ molt find <trx-id>  # fetch 1 chunk via manifest, not 100MB
 
 - Repetitive tx text → **34.4x** (band 25-60x)
 - Mixed text + free notes + blob refs → **10.2x** (band 6-12x)
+- Real jpeg bytes → **1.05x** raw zstd (claim 1.0-1.2x proven, details in [Photo SLA](#photo-sla))
 - Photo blobs → excluded from the mandatory archive, lazy/on-demand (`blob:sha256:…` refs only)
 
 Details in [Measured SLA](#measured-sla) below. Older micro-benchmark (5-template POS log, 3.45MB → 10.7KB = 323x)
@@ -52,11 +53,10 @@ is retired: too repetitive to plan from.
 - `src/manifest.ts` — atomic manifest, min/max + bloom, rebuild scan
 - `src/ship.ts` — delta by hash, chunked resume, text-first lanes
 - `src/find.ts` — prune + bloom + single-chunk fetch + sparse index
-- `src/verify.ts` — hash verify, quarantine, repair-by-hash
-- `test/` — 5GB→100MB on synthetic repetitive log, resume mid-ship, 1-corrupt-chunk survival
-- `bench/mixed-corpus.ts` — deterministic 60/25/15 corpus, writes Measured SLA (`--write-readme`)
-- `examples/e2e.ts` — fielog JSONL -> seal -> ship to relay dir -> find one trx
-- `examples/kasir-demo.ts` — 50 struk kasir -> seal -> ship -> find 1 struk (15.5x)
+- `src/dict.ts` — per-table 32KB zstd dicts, trained when the sample compresses 4x+
+- `bin/molt.ts` — CLI: `seal|ship|find` over archive dirs (`bun bin/molt.ts …`)
+- `bench/photo-bench.ts` — 50 real noise JPEGs sealed beside text, writes Photo SLA
+- `test/` — shrink, resume, corrupt survival, find-one-trx, sqlite, mixed bands, e2e, fault injection, dict compat, photo proof, CLI
 
 ## Measured SLA
 
@@ -69,3 +69,15 @@ is retired: too repetitive to plan from.
 
 _Measured by `bun bench/mixed-corpus.ts --write-readme`; corpus deterministic (seeded). Blob bytes never enter the mandatory archive — only `blob:sha256:…` refs do._
 <!-- SLA-MEASURED-END -->
+
+## Photo SLA
+
+<!-- PHOTO-MEASURED-START -->
+| bytes | input | warm archive | ratio |
+|---|---|---|---|
+| 50 real jpeg (128x128 blurred noise, q85, 577KB raw) sealed as base64 lines | base64 in jsonl | per-table chunks | **1.41x** |
+| same jpeg bytes, raw zstd (the foto claim) | 577KB raw | zstd | **1.05x, inside 1.0-1.2x** |
+| tx text beside the photos | text jsonl | text chunks + dict | **26.8x** |
+
+_Measured by `bun bench/photo-bench.ts --write-readme`; deterministic (seeded). The base64 line ratio rides above raw because of the text envelope — raw jpeg bytes sit at ~1.05x, which is why photo bytes never enter the mandatory archive (hash refs only, lazy fetch)._
+<!-- PHOTO-MEASURED-END -->

@@ -1,7 +1,8 @@
 // molt manifest — atomic tmp+fsync+rename, dual copy, min/max+bloom, rebuild-from-filenames.
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { crc32c, decodeChunk, decodeHeader, fnv1a32, HEADER_SIZE, sha256hex } from './chunk.js';
+import { crc32c, decodeChunk, decodeHeader, fnv1a32, HEADER_SIZE, sha256hex, DICT_FLAG } from './chunk.js';
+import { loadDictFor } from './dict.js';
 
 export const BLOOM_BITS = 2048;
 const BLOOM_BYTES = BLOOM_BITS / 8;
@@ -68,14 +69,16 @@ function fsyncDir(p: string): void {
   } catch { /* Windows: dir fsync unsupported, rename is enough */ }
 }
 
-export function scanChunk(full: string, name: string): ChunkEntry {
+export function scanChunk(full: string, name: string, dictDir?: string): ChunkEntry {
   const buf = readFileSync(full);
   const header = decodeHeader(buf);
   const body = buf.subarray(HEADER_SIZE, HEADER_SIZE + header.bodyLen);
   const crc = crc32c(body);
   if (crc !== header.crc32c) throw new Error(`crc32c mismatch in ${name}`);
+  // Dict chunks resolve their trained dictionary; flagless (pre-dict) chunks decode inline.
+  const dict = (header.flags & DICT_FLAG) !== 0 && dictDir ? loadDictFor(dictDir, header.dictId) ?? undefined : undefined;
   // Full decode for min/max keys + bloom; corrupt bodies surface here, not at find-time.
-  const { rows } = decodeChunk(Buffer.from(buf));
+  const { rows } = decodeChunk(Buffer.from(buf), dict);
   const ids = rows.map((r) => r.id).sort();
   return {
     file: name,
@@ -97,7 +100,7 @@ export function buildManifest(outDir: string): Manifest {
   const names = readdirSync(warm).filter((f: string) => f.endsWith('.chk')).sort();
   for (const name of names) {
     try {
-      chunks.push(scanChunk(join(warm, name), name));
+      chunks.push(scanChunk(join(warm, name), name, join(outDir, 'dicts')));
     } catch {
       // Corrupt chunk: keep a quarantined stub so history survives minus 1 chunk.
       const buf = readFileSync(join(warm, name));

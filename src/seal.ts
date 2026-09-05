@@ -5,6 +5,7 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, re
 import { join } from 'path';
 import { encodeChunk } from './chunk.js';
 import type { HotRow } from './chunk.js';
+import { trainTableDict, saveDictAtomic } from './dict.js';
 import { buildManifest, saveManifestAtomic } from './manifest.js';
 
 export const TARGET_BYTES = 2 * 1024 * 1024;
@@ -142,12 +143,18 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   }
   const chunks: string[] = [];
   let sealedMax = watermark;
+  const dictDir = join(opts.outDir, 'dicts');
   for (const [table, rows] of byTable) {
+    // Per-table dictionary from leading rows when repetitive; saved content-hashed.
+    const trained = trainTableDict(rows.map((r) => r.body));
+    if (trained) saveDictAtomic(dictDir, trained.dict, trained.dictId);
+    const dict = trained?.dict;
+    const dictId = trained?.dictId ?? 0;
     let batch: HotRow[] = [];
     const flush = (force: boolean, probeBytes: number) => {
       if (batch.length === 0) return;
       if (!force && probeBytes < target) return;
-      const bytes = encodeChunk(table, batch);
+      const bytes = encodeChunk(table, batch, dict, dictId);
       // Oversize probe above MAX still ships: chunks stay immutable, tail rule wins.
       const name = chunkName(table, batch[0].seq, batch[batch.length - 1].seq, bytes);
       const dest = join(warm, name);
@@ -161,9 +168,9 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
     };
     for (const r of rows) {
       batch.push(r);
-      if (batch.length % PACK_PROBE_ROWS === 0) flush(false, encodeChunk(table, batch).length);
+      if (batch.length % PACK_PROBE_ROWS === 0) flush(false, encodeChunk(table, batch, dict, dictId).length);
     }
-    flush(true, batch.length ? encodeChunk(table, batch).length : 0);
+    flush(true, batch.length ? encodeChunk(table, batch, dict, dictId).length : 0);
   }
 
   // Advance watermark only after every chunk is fsynced.

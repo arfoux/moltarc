@@ -1,8 +1,9 @@
 // molt find — prune by min/max, bloom check, single-chunk fetch+verify, sparse index.
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { decodeChunk } from './chunk.js';
+import { decodeChunk, decodeHeader, DICT_FLAG } from './chunk.js';
 import type { HotRow } from './chunk.js';
+import { loadDictFor } from './dict.js';
 import { bloomCheck, loadManifest } from './manifest.js';
 import type { ChunkEntry } from './manifest.js';
 
@@ -54,13 +55,16 @@ export function candidates(entries: ChunkEntry[], trxId: string): { hit: ChunkEn
 export function findTrx(opts: FindOpts): FindResult {
   const { manifest } = loadManifest(opts.outDir);
   const dir = opts.chunkDir ?? join(opts.outDir, 'warm');
+  const dictDir = join(dir, '..', 'dicts');
   const { hit, pruned } = candidates(manifest.chunks, opts.trxId);
   let fetched = 0;
   for (const e of hit) {
     const full = join(dir, e.file);
     if (!existsSync(full)) continue;
     // Single-chunk fetch: read + verify (crc inside decodeChunk) + decode.
-    const { rows } = decodeChunk(readFileSync(full));
+    const buf = readFileSync(full);
+    const dict = (decodeHeader(buf).flags & DICT_FLAG) !== 0 ? loadDictFor(dictDir, e.dictId) ?? undefined : undefined;
+    const { rows } = decodeChunk(buf, dict);
     fetched++;
     const row = rows.find((r) => r.id === opts.trxId);
     if (row) return { row, chunk: e.file, chunksFetched: fetched, chunksPruned: pruned };

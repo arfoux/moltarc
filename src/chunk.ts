@@ -110,16 +110,27 @@ export function decodeHeader(buf: Uint8Array): ChunkHeader {
 }
 
 // --- compression backend: zstd preferred, deflate fallback ---
-export function compressFrame(raw: Buffer): { codec: number; body: Buffer } {
+// A trained per-table dictionary narrows repetitive frames further.
+// Chunks carrying it set DICT_FLAG and name dict_id; flagless chunks
+// (everything sealed before dicts existed) decode with no dictionary.
+export const DICT_FLAG = 0x02;
+
+export function compressFrame(raw: Buffer, dict?: Buffer): { codec: number; body: Buffer; usedDict: boolean } {
+  if (dict) {
+    try {
+      return { codec: CODEC_ZSTD, body: Buffer.from(zstdCompressSync(raw, { dictionary: dict })), usedDict: true };
+    } catch { /* runtimes without dict support fall through to plain */ }
+  }
   try {
-    return { codec: CODEC_ZSTD, body: Buffer.from(zstdCompressSync(raw)) };
+    return { codec: CODEC_ZSTD, body: Buffer.from(zstdCompressSync(raw)), usedDict: false };
   } catch {
-    return { codec: CODEC_DEFLATE, body: Buffer.from(deflateSync(raw)) };
+    return { codec: CODEC_DEFLATE, body: Buffer.from(deflateSync(raw)), usedDict: false };
   }
 }
 
-export function decompressFrame(codec: number, body: Buffer): Buffer {
-  if (codec === CODEC_ZSTD) return Buffer.from(zstdDecompressSync(body));
+export function decompressFrame(codec: number, body: Buffer, dict?: Buffer, dictId = 0): Buffer {
+  if (codec === CODEC_ZSTD && dict) return Buffer.from(zstdDecompressSync(body, { dictionary: dict }));
+  if (codec === CODEC_ZSTD && !dict) return Buffer.from(zstdDecompressSync(body));
   if (codec === CODEC_DEFLATE) return Buffer.from(inflateSync(body));
   if (codec === CODEC_NONE) return body;
   throw new Error(`unsupported codec ${codec} (N-2 compat: upgrade molt)`);
@@ -217,26 +228,29 @@ export function decodeRows(raw: Buffer): HotRow[] {
 }
 
 // --- full chunk encode/decode ---
-export function encodeChunk(table: string, rows: HotRow[]): Buffer {
+export function encodeChunk(table: string, rows: HotRow[], dict?: Buffer, dictId = 0): Buffer {
   const sorted = [...rows].sort((a, b) => a.seq - b.seq);
-  const { raw, dictId } = encodeRows(sorted);
-  const { codec, body } = compressFrame(raw);
+  const { raw, dictId: inlineId } = encodeRows(sorted);
+  const { codec, body, usedDict } = compressFrame(raw, dict);
   const seqs = sorted.map((r) => BigInt(r.seq));
   const tss = sorted.map((r) => BigInt(r.ts));
   const header = encodeHeader({
-    ver: VERSION, codec, flags: dictId ? 1 : 0,
+    ver: VERSION, codec, flags: (inlineId ? 1 : 0) | (usedDict ? DICT_FLAG : 0),
     tableId: fnv1a32(table),
     seqMin: seqs[0] ?? 0n, seqMax: seqs[seqs.length - 1] ?? 0n,
     tsMin: tss[0] ?? 0n, tsMax: tss[tss.length - 1] ?? 0n,
-    rows: sorted.length, crc32c: crc32c(body), dictId, bodyLen: body.length,
+    rows: sorted.length, crc32c: crc32c(body), dictId: usedDict ? dictId : inlineId, bodyLen: body.length,
   });
   return Buffer.concat([header, body]);
 }
 
-export function decodeChunk(buf: Buffer): { header: ChunkHeader; rows: HotRow[] } {
+export function decodeChunk(buf: Buffer, dict?: Buffer): { header: ChunkHeader; rows: HotRow[] } {
   const header = decodeHeader(buf);
   const body = Buffer.from(buf.subarray(HEADER_SIZE, HEADER_SIZE + header.bodyLen));
   if (body.length !== header.bodyLen) throw new Error('truncated chunk body');
   if (crc32c(body) !== header.crc32c) throw new Error('crc32c mismatch: corrupt chunk body');
-  return { header, rows: decodeRows(decompressFrame(header.codec, body)) };
+  if ((header.flags & DICT_FLAG) !== 0 && !dict) {
+    throw new Error(`chunk needs dict ${(header.dictId >>> 0).toString(16).padStart(8, '0')} (dict file missing)`);
+  }
+  return { header, rows: decodeRows(decompressFrame(header.codec, body, dict, header.dictId)) };
 }

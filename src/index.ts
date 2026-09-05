@@ -9,5 +9,5 @@ export { findTrx, candidates, buildSparseIndex } from './find.js';
 export type { FindOpts, FindResult, SparseEntry } from './find.js';
 export { verifyChunk, verifyAll, quarantine, repairByHash } from './verify.js';
 export type { VerifyItem, VerifyResult } from './verify.js';
-export { encodeChunk, decodeChunk, encodeHeader, decodeHeader, crc32c, sha256hex, fnv1a32 } from './chunk.js';
-export type { HotRow, ChunkHeader } from './chunk.js';
+export { encodeChunk, decodeChunk, encodeHeader, decodeHeader, crc32c, sha256hex, fnv1a32, DICT_FLAG } from './chunk.js';
+export { trainTableDict, saveDictAtomic, loadDictFor, dictFile, dictHex, DICT_MAX_BYTES, DICT_TRAIN_ROWS } from './dict.js';

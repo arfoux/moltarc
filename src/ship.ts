@@ -1,7 +1,7 @@
 // molt ship — delta by hash, chunked resume, text-first lanes, exponential backoff.
 // Relay = directory (cold side): <relay>/chunks/*.chk + index.json {sha256: file}.
 // Never deletes source chunks.
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync, writeSync } from 'fs';
+import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync, writeSync } from 'fs';
 import { join } from 'path';
 import { sha256hex } from './chunk.js';
 import { loadManifest } from './manifest.js';
@@ -143,6 +143,16 @@ export async function ship(opts: ShipOpts): Promise<ShipResult> {
     sent.push(e.file);
     remote.chunks[e.sha256] = e.file;
     saveRelayIndex(opts.relayDir, remote);
+  }
+  // Dictionaries are tiny, immutable, content-hashed: copy-if-missing, no resume needed.
+  const dictSrc = join(opts.outDir, 'dicts');
+  const dictDst = join(opts.relayDir, 'dicts');
+  if (existsSync(dictSrc)) {
+    mkdirSync(dictDst, { recursive: true });
+    for (const f of readdirSync(dictSrc).filter((f: string) => f.endsWith('.dict'))) {
+      const dst = join(dictDst, f);
+      if (!existsSync(dst)) copyFileSync(join(dictSrc, f), dst);
+    }
   }
   return { sent, skipped, bytes };
 }

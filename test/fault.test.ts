@@ -3,11 +3,12 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { HEADER_SIZE, decodeHeader, decompressFrame, compressFrame, encodeHeader, crc32c } from '../src/chunk.js';
+import { HEADER_SIZE, decodeHeader, decompressFrame, compressFrame, encodeHeader, crc32c, DICT_FLAG } from '../src/chunk.js';
 import { seal } from '../src/seal.js';
 import { ship } from '../src/ship.js';
 import { findTrx } from '../src/find.js';
 import { loadManifest } from '../src/manifest.js';
+import { loadDictFor } from '../src/dict.js';
 import { verifyAll, quarantine, repairByHash } from '../src/verify.js';
 import { scratch, writeHotLog } from './util.js';
 
@@ -75,16 +76,19 @@ describe('fault injection', () => {
     const victimName = victim.split(/[\\/]/).pop() as string;
     const targetId = loadManifest(outDir).manifest.chunks.find((e) => e.file === victimName)?.minKey as string;
 
-    // Delete the dictionary, then re-seal the header so crc still verifies:
+    // Delete the dictionary, then re-seal the header flagless with valid crc:
     // decode must fail loud on the missing pool.
     const buf = Buffer.from(readFileSync(victim));
     const header = decodeHeader(buf);
-    const frame = JSON.parse(decompressFrame(header.codec, Buffer.from(buf.subarray(HEADER_SIZE))).toString()) as { pool: string[] };
+    const trained = (header.flags & DICT_FLAG) !== 0
+      ? loadDictFor(join(outDir, 'dicts'), header.dictId) ?? undefined
+      : undefined;
+    const frame = JSON.parse(decompressFrame(header.codec, Buffer.from(buf.subarray(HEADER_SIZE)), trained).toString()) as { pool: string[] };
     frame.pool = [];
     const raw = Buffer.from(JSON.stringify(frame), 'utf8');
     const packed = compressFrame(raw);
     const fresh = Buffer.concat([
-      encodeHeader({ ...header, codec: packed.codec, bodyLen: packed.body.length, crc32c: crc32c(packed.body) }),
+      encodeHeader({ ...header, codec: packed.codec, flags: header.flags & ~DICT_FLAG, bodyLen: packed.body.length, crc32c: crc32c(packed.body) }),
       packed.body,
     ]);
     writeFileSync(victim, fresh);
