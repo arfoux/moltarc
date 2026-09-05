@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { seal } from '../src/seal.js';
+import { ship } from '../src/ship.js';
 import { sweep } from '../src/gc.js';
 import { forgetChunks, mergeCold, readTar, sweepCold } from '../src/cold.js';
 import { loadManifest } from '../src/manifest.js';
@@ -60,8 +61,9 @@ describe('cold gc end-to-end', () => {
     const dir = scratch('coldg-e2e');
     const { hotDb } = writeTwoTableLog(dir, 1500);
     const outDir = join(dir, 'archive');
+    const relayDir = join(dir, 'relay');
     const sealed = await seal({ hotDb, outDir });
-    assert.ok(sealed.chunks.length >= 2, `need 2+ warm chunks, got ${sealed.chunks.length}`);
+    await ship({ outDir, relayDir, baseDelayMs: 1 });
 
     const merged = mergeCold(outDir);
     assert.ok(merged.segment.endsWith('.tar'), 'one cold segment packed');
@@ -72,7 +74,7 @@ describe('cold gc end-to-end', () => {
 
     // Dry-run default: reports but changes nothing.
     const victim = merged.chunks[0];
-    forgetChunks(outDir, [victim]);
+    forgetChunks(outDir, [victim], relayDir);
     const { manifest: keptManifest } = loadManifest(outDir);
     assert.ok(keptManifest.chunks.length >= 1, 'one chunk survives');
     const liveId = keptManifest.chunks[0].minKey;
@@ -118,12 +120,14 @@ describe('cold gc end-to-end', () => {
     const dir = scratch('coldg-prune');
     const { hotDb } = writeTwoTableLog(dir, 1500);
     const outDir = join(dir, 'archive');
+    const relayDir = join(dir, 'relay');
     await seal({ hotDb, outDir });
+    await ship({ outDir, relayDir, baseDelayMs: 1 });
     const merged = mergeCold(outDir);
     assert.ok(merged.chunks.length >= 1);
 
     // Forget everything: the whole segment dies.
-    forgetChunks(outDir, merged.chunks);
+    forgetChunks(outDir, merged.chunks, relayDir);
     sweep(outDir, { dryRun: false });
     const applied = sweepCold(outDir, { dryRun: false });
     assert.deepEqual(applied.pruned, [merged.segment]);

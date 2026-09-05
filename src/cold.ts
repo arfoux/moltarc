@@ -7,6 +7,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { loadManifest, saveManifestAtomic } from './manifest.js';
+import { readRelayIndex } from './ship.js';
 
 export interface TarMember {
   name: string;
@@ -113,10 +114,22 @@ export function mergeCold(outDir: string): MergeResult {
 
 // Retention prune: drop manifest entries by chunk file name, atomic dual copy.
 // Tar bytes stay on disk until sweepCold repacks without them.
-export function forgetChunks(outDir: string, files: string[]): { removed: string[] } {
+// Relay-ack guard: every target must be acked in the relay index (written
+// by ship). Forgetting the only unshipped chunk would make its warm bytes
+// an orphan that gc deletes, so unacked targets throw instead of pruning
+// silently. The check is atomic: all-or-nothing, no partial forget.
+export function forgetChunks(outDir: string, files: string[], relayDir: string): { removed: string[] } {
+  if (!relayDir) throw new Error('forget needs the relayDir ship wrote to (refusing silent unacked delete)');
   const { manifest } = loadManifest(outDir);
   const drop = new Set(files);
-  const removed = manifest.chunks.filter((e) => drop.has(e.file)).map((e) => e.file);
+  const targets = manifest.chunks.filter((e) => drop.has(e.file));
+  const remote = readRelayIndex(relayDir);
+  const have = new Set(Object.keys(remote.chunks));
+  const unacked = targets.filter((e) => !have.has(e.sha256)).map((e) => e.file);
+  if (unacked.length > 0) {
+    throw new Error(`refusing to forget unacked chunk(s): ${unacked.join(', ')} (ship first)`);
+  }
+  const removed = targets.map((e) => e.file);
   manifest.chunks = manifest.chunks.filter((e) => !drop.has(e.file));
   saveManifestAtomic(outDir, manifest);
   return { removed };

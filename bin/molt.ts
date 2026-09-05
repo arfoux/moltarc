@@ -27,7 +27,7 @@ function usageLines(): string[] {
     '  molt repair <outDir> <relayDir>',
     '  molt status <outDir> [relayDir]',
     '  molt merge <outDir>',
-    '  molt forget <outDir> <chunk> [chunk...]',
+    '  molt forget <outDir> <relayDir> <chunk> [chunk...]',
     '  molt coldg <outDir> [--apply]',
   ];
 }
@@ -92,9 +92,9 @@ async function main(): Promise<void> {
     if (!r.segment) console.log('merge: nothing new to pack');
     else console.log(`merged ${r.chunks.length} chunk(s) -> cold/${r.segment} (${r.bytes}B)`);
   } else if (cmd === 'forget') {
-    const [outDir, ...files] = rest;
-    if (!outDir || files.length === 0) fail('usage: molt forget <outDir> <chunk> [chunk...]');
-    const r = forgetChunks(outDir, files);
+    const [outDir, relayDir, ...files] = rest;
+    if (!outDir || !relayDir || files.length === 0) fail('usage: molt forget <outDir> <relayDir> <chunk> [chunk...]');
+    const r = forgetChunks(outDir, files, relayDir);
     console.log(`forgot ${r.removed.length} chunk(s)`);
     for (const f of r.removed) console.log(`forgot ${f}`);
   } else if (cmd === 'coldg') {

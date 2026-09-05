@@ -117,9 +117,9 @@ describe('molt verify', () => {
   });
 
   it('forgotten middle chunk shows as a hash-chain gap', async () => {
-    const { outDir, files } = await sealedArchive('verify-chain');
+    const { outDir, relayDir, files } = await sealedArchive('verify-chain');
     const middle = [...files].sort()[1];
-    forgetChunks(outDir, [middle]);
+    forgetChunks(outDir, [middle], relayDir);
 
     const v = verifyFull(outDir);
     assert.equal(v.chain.length, 1);

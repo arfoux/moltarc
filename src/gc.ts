@@ -2,10 +2,11 @@
 // Orphan = warm/*.chk file with refcount 0 in the manifest (not referenced
 // by any manifest entry). Sweep defaults to dry-run: lists orphans, deletes
 // nothing unless dryRun:false is passed explicitly.
-import { existsSync, mkdirSync, readdirSync, statSync, statfsSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, statfsSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { loadManifest } from './manifest.js';
 import { readRelayIndex } from './ship.js';
+import { sha256hex } from './chunk.js';
 
 // Seal refuses below this much free space so it never half-writes a chunk,
 // watermark, or manifest copy.
@@ -33,11 +34,13 @@ export function checkReserve(dir: string, free?: number): void {
 
 export interface SweepOpts {
   dryRun?: boolean; // default true
+  relayDir?: string; // when set, unacked orphans are retained, never deleted
 }
 
 export interface SweepResult {
   orphans: string[];
   removed: string[];
+  skippedUnacked: string[]; // orphans retained: bytes not acked by the relay
   bytesReclaimed: number;
   dryRun: boolean;
   chunks: number;
@@ -52,9 +55,14 @@ export function sweep(outDir: string, opts: SweepOpts = {}): SweepResult {
   // Refcount over manifest entries; a disk file with 0 refs is an orphan.
   const refs = new Map<string, number>();
   for (const e of manifest.chunks) refs.set(e.file, (refs.get(e.file) ?? 0) + 1);
+  // Relay-ack backstop for forget-before-ship states (older prunes, raced
+  // deletes): an orphan whose content sha is not in the relay index is
+  // unshipped working data, so it stays even under dryRun:false.
+  const acked = opts.relayDir ? new Set(Object.keys(readRelayIndex(opts.relayDir).chunks)) : null;
   let chunks = 0;
   let bytes = 0;
   const orphans: string[] = [];
+  const skippedUnacked: string[] = [];
   let orphanBytes = 0;
   for (const f of readdirSync(warm).filter((f: string) => f.endsWith('.chk')).sort()) {
     try {
@@ -64,13 +72,20 @@ export function sweep(outDir: string, opts: SweepOpts = {}): SweepResult {
       if ((refs.get(f) ?? 0) === 0) {
         orphans.push(f);
         orphanBytes += st.size;
+        if (acked) {
+          let sha = '';
+          try { sha = sha256hex(readFileSync(join(warm, f))); } catch { /* raced delete: fall through */ }
+          if (!acked.has(sha)) skippedUnacked.push(f);
+        }
       }
     } catch { /* raced delete: ignore */ }
   }
+  const skipped = new Set(skippedUnacked);
   const removed: string[] = [];
   let bytesReclaimed = 0;
   if (!dryRun) {
     for (const f of orphans) {
+      if (skipped.has(f)) continue;
       try {
         const st = statSync(join(warm, f));
         unlinkSync(join(warm, f));
@@ -81,7 +96,7 @@ export function sweep(outDir: string, opts: SweepOpts = {}): SweepResult {
   } else {
     bytesReclaimed = orphanBytes;
   }
-  return { orphans, removed, bytesReclaimed, dryRun, chunks, bytes };
+  return { orphans, removed, skippedUnacked, bytesReclaimed, dryRun, chunks, bytes };
 }
 
 export interface StatusInfo {
