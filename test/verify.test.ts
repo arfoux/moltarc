@@ -98,7 +98,10 @@ describe('molt verify', () => {
     assert.match(hit?.reason ?? '', /sha256 differs from manifest/);
   });
 
-  it('primary manifest loss falls back to backup and still fails the walk', async () => {
+  // Heavy integration path (4000-row seal + ship + fresh-bun CLI verify):
+  // ~0.5s solo but >5s under concurrent-suite CPU contention, past bun's
+  // default 5s per-test timeout. Budget declared explicitly; logic untouched.
+  it('primary manifest loss falls back to backup and still fails the walk', { timeout: 30_000 }, async () => {
     const { outDir } = await sealedArchive('verify-manifest');
     const primary = readFileSync(join(outDir, 'manifest.json'));
     writeFileSync(join(outDir, 'manifest.json'), primary.subarray(0, Math.floor(primary.length / 2)));
