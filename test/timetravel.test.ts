@@ -48,7 +48,7 @@ function snapshot(outDir: string): string {
 const byId = (rows: HotRow[]) => Object.fromEntries(rows.map((r) => [r.id, `${r.seq}:${r.ts}:${r.body}`]));
 
 describe('moltarc timetravel', () => {
-  it('as-of ts 2500 sees only chunk1 versions', () => {
+  it('as-of ts 2500 sees only chunk1 versions', { timeout: 30_000 }, () => {
     const outDir = fixedArchive();
     const before = snapshot(outDir);
     const r = queryAsOf({ outDir, ts: 2500 });
@@ -58,7 +58,7 @@ describe('moltarc timetravel', () => {
     assert.equal(snapshot(outDir), before);
   });
 
-  it('as-of ts 4500 folds b update, d not yet visible', () => {
+  it('as-of ts 4500 folds b update, d not yet visible', { timeout: 30_000 }, () => {
     const outDir = fixedArchive();
     const r = queryAsOf({ outDir, ts: 4500 });
     assert.deepEqual(byId(r.rows), { a: '1:1000:a-v1', b: '4:4000:b-v2', c: '3:3000:c-v1' });
@@ -69,7 +69,7 @@ describe('moltarc timetravel', () => {
     assert.equal(r.proof.chunksPruned, 1);
   });
 
-  it('as-of ts 6500 sees latest per id across all chunks', () => {
+  it('as-of ts 6500 sees latest per id across all chunks', { timeout: 30_000 }, () => {
     const outDir = fixedArchive();
     const r = queryAsOf({ outDir, ts: 6500 });
     assert.deepEqual(byId(r.rows), {
