@@ -1,5 +1,5 @@
 // molt v0.1 — tiered SQLite archive: hot WAL -> warm chunks -> cold relay + manifest.
-export { seal, readHotRows, readSqliteRows, isSqliteFile, chunkName, TARGET_BYTES, MIN_BYTES, MAX_BYTES } from './seal.js';
+export { seal, readHotRows, readSqliteRows, isSqliteFile, normRow, chunkName, TARGET_BYTES, MIN_BYTES, MAX_BYTES } from './seal.js';
 export type { SealOpts, SealResult } from './seal.js';
 export { buildManifest, saveManifestAtomic, loadManifest, rebuildFromFilenames, buildBloom, bloomCheck } from './manifest.js';
 export type { ChunkEntry, Manifest } from './manifest.js';

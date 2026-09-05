@@ -12,12 +12,12 @@ export const TARGET_BYTES = 2 * 1024 * 1024;
 export const MIN_BYTES = 1 * 1024 * 1024;
 export const MAX_BYTES = 4 * 1024 * 1024;
 const PACK_PROBE_ROWS = 400;
-
 export interface SealOpts {
   hotDb: string;
   outDir: string;
   targetBytes?: number;
   table?: string;
+  trainDict?: boolean; // default true; false skips per-table zstd dicts (bench control)
 }
 
 export interface SealResult {
@@ -27,17 +27,31 @@ export interface SealResult {
   rowsSkipped: number;
 }
 
-function normRow(o: Record<string, unknown>, fallbackTable: string): HotRow | null {
-  const seq = Number(o.seq);
+// Fielog interop: raw cashier events (`type`/`event` bayar/undo, `nominal`
+// payload) normalize with no manual conversion step.
+export function normRow(o: Record<string, unknown>, fallbackTable: string): HotRow | null {
+  const seq = Number(o.seq ?? o.no ?? o.nomor);
   if (!Number.isFinite(seq)) return null;
-  const bodyRaw = o.body ?? o.payload ?? o.msg ?? o.data ?? '';
+  const kind = o.type ?? o.event ?? o.jenis;
+  const nominal = o.nominal ?? o.amount ?? o.total;
+  const bodyRaw = o.body ?? o.payload ?? o.msg ?? o.data ?? o.catatan ?? o.note ?? o.keterangan ?? '';
+  const device = String(o.device_id ?? o.device ?? o.kasir_id ?? 'dev0');
+  const body = bodyRaw !== ''
+    ? (typeof bodyRaw === 'string' ? bodyRaw : JSON.stringify(bodyRaw))
+    : [
+      kind !== undefined ? String(kind) : '',
+      nominal !== undefined ? `nominal=${String(nominal)}` : '',
+      o.kasir !== undefined ? `kasir=${String(o.kasir)}` : '',
+      o.ref !== undefined ? `ref=${String(o.ref)}` : '',
+      o.alasan !== undefined ? `alasan=${String(o.alasan)}` : '',
+    ].filter((s) => s !== '').join(' ');
   return {
-    device_id: String(o.device_id ?? o.device ?? 'dev0'),
+    device_id: device,
     seq,
-    ts: Number(o.ts ?? o.timestamp ?? Date.now()),
-    id: String(o.id ?? o.trxId ?? o.trx_id ?? o.key ?? `${o.device_id ?? 'dev0'}:${seq}`),
-    table: String(o.table ?? fallbackTable),
-    body: typeof bodyRaw === 'string' ? bodyRaw : JSON.stringify(bodyRaw),
+    ts: Number(o.ts ?? o.timestamp ?? o.waktu ?? Date.now()),
+    id: String(o.id ?? o.trxId ?? o.trx_id ?? o.trx ?? o.key ?? `${device}:${seq}`),
+    table: String(o.table ?? kind ?? fallbackTable),
+    body,
   };
 }
 
@@ -146,7 +160,8 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   const dictDir = join(opts.outDir, 'dicts');
   for (const [table, rows] of byTable) {
     // Per-table dictionary from leading rows when repetitive; saved content-hashed.
-    const trained = trainTableDict(rows.map((r) => r.body));
+    // trainDict:false skips training (bench control for the dict on/off delta).
+    const trained = (opts.trainDict ?? true) ? trainTableDict(rows.map((r) => r.body)) : null;
     if (trained) saveDictAtomic(dictDir, trained.dict, trained.dictId);
     const dict = trained?.dict;
     const dictId = trained?.dictId ?? 0;
