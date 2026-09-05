@@ -2,8 +2,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'child_process';
+import { readFileSync, readdirSync, statSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { seal } from '../src/seal.js';
+import { ship } from '../src/ship.js';
 import { scratch, writeHotLog } from './util.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -32,5 +35,34 @@ describe('cli e2e', () => {
 
     assert.throws(() => run('find', outDir, 'trx-99999999'), /not found/);
     assert.throws(() => run('seal', join(dir, 'missing.jsonl'), outDir));
+  });
+  it('ship resumes a killed transfer without resending finished chunks', async () => {
+    const dir = scratch('cli-resume');
+    const { hotDb } = writeHotLog(dir, { rows: 4000, uniqueBodies: true });
+    const outDir = join(dir, 'archive');
+    const relayDir = join(dir, 'relay');
+    const sealed = await seal({ hotDb, outDir, targetBytes: 16 * 1024 });
+    assert.ok(sealed.chunks.length >= 3, `need >=3 chunks, got ${sealed.chunks.length}`);
+
+    // Kill the transfer mid-chunk (injected transport death, no retries).
+    await assert.rejects(
+      ship({ outDir, relayDir, blockBytes: 512, failAtBytes: 1500, maxRetries: 0, baseDelayMs: 1 }),
+      /injected transport failure/,
+    );
+    assert.ok(readdirSync(relayDir).some((f: string) => f.startsWith('.ship-state-')), 'crash leaves a resume journal');
+
+    // CLI completes what is missing.
+    const done = run('ship', outDir, relayDir);
+    assert.match(done, /shipped \d+ chunk\(s\)/);
+
+    // Second run sends nothing: finished chunks are never resent.
+    const again = run('ship', outDir, relayDir);
+    assert.match(again, /shipped 0 chunk\(s\)/);
+
+    // Every relay byte matches its sealed chunk.
+    for (const c of sealed.chunks) {
+      const name = c.split(/[\\/]/).pop() as string;
+      assert.ok(readFileSync(join(relayDir, 'chunks', name)).equals(readFileSync(c)));
+    }
   });
 });

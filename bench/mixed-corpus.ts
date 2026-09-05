@@ -141,10 +141,10 @@ export interface ArchiveMeasure {
   chunks: number;
 }
 
-export async function measureArchive(hotPath: string, outDir: string): Promise<ArchiveMeasure> {
+export async function measureArchive(hotPath: string, outDir: string, sealOpts?: { trainDict?: boolean; targetBytes?: number }): Promise<ArchiveMeasure> {
   rmSync(outDir, { recursive: true, force: true });
   const inputBytes = statSync(hotPath).size;
-  const r = await seal({ hotDb: hotPath, outDir });
+  const r = await seal({ hotDb: hotPath, outDir, ...sealOpts });
   const warm = join(outDir, 'warm');
   const warmBytes = readdirSync(warm).filter((f: string) => f.endsWith('.chk')).reduce((n: number, f: string) => n + statSync(join(warm, f)).size, 0);
   return { inputBytes, warmBytes, ratio: inputBytes / warmBytes, chunks: r.chunks.length };

@@ -22,7 +22,7 @@ molt find <trx-id>  # fetch 1 chunk via manifest, not 100MB
 - Repetitive tx text → **34.4x** (band 25-60x)
 - Mixed text + free notes + blob refs → **10.2x** (band 6-12x)
 - Real jpeg bytes → **1.05x** raw zstd (claim 1.0-1.2x proven, details in [Photo SLA](#photo-sla))
-- Photo blobs → excluded from the mandatory archive, lazy/on-demand (`blob:sha256:…` refs only)
+- Trained 32KB dict on repetitive text → **1.7%** smaller warm (details in [Dict SLA](#dict-sla))
 
 Details in [Measured SLA](#measured-sla) below. Older micro-benchmark (5-template POS log, 3.45MB → 10.7KB = 323x)
 is retired: too repetitive to plan from.
@@ -56,7 +56,8 @@ is retired: too repetitive to plan from.
 - `src/dict.ts` — per-table 32KB zstd dicts, trained when the sample compresses 4x+
 - `bin/molt.ts` — CLI: `seal|ship|find` over archive dirs (`bun bin/molt.ts …`)
 - `bench/photo-bench.ts` — 50 real noise JPEGs sealed beside text, writes Photo SLA
-- `test/` — shrink, resume, corrupt survival, find-one-trx, sqlite, mixed bands, e2e, fault injection, dict compat, photo proof, CLI
+- `bench/dict-bench.ts` — same corpus dict off vs on, writes Dict SLA
+- interop: fielog `kasir.log` (`type` bayar / `event` undo + `nominal`) seals with no manual conversion (`test/interop.test.ts`)
 
 ## Measured SLA
 
@@ -81,3 +82,15 @@ _Measured by `bun bench/mixed-corpus.ts --write-readme`; corpus deterministic (s
 
 _Measured by `bun bench/photo-bench.ts --write-readme`; deterministic (seeded). The base64 line ratio rides above raw because of the text envelope — raw jpeg bytes sit at ~1.05x, which is why photo bytes never enter the mandatory archive (hash refs only, lazy fetch)._
 <!-- PHOTO-MEASURED-END -->
+
+## Dict SLA
+
+<!-- DICT-MEASURED-START -->
+| repetitive text, dict off vs on | warm archive | ratio |
+|---|---|---|
+| plain (no trained dict) | 108.6KB | **30.5x** |
+| with 32KB per-table dict | 106.8KB | **31.1x** |
+| saving | 1.8KB (1.7%) | — |
+
+_Measured by `bun bench/dict-bench.ts --write-readme`; same corpus both sides, only the dictionary differs. Columnar delta/RLE/inline-dict already captures most repetition — the trained dict takes what is left._
+<!-- DICT-MEASURED-END -->
