@@ -24,7 +24,8 @@ export interface SealOpts {
 
 export interface SealResult {
   chunks: string[];
-  sealedUptoSeq: number;
+  sealedUptoSeq: number; // global max across devices (compat display)
+  sealedByDevice: Record<string, number>; // per-device max sealed seq
   rowsSealed: number;
   rowsSkipped: number;
 }
@@ -126,6 +127,34 @@ export function chunkName(table: string, seqMin: number, seqMax: number, bytes: 
   const pad = (n: number) => String(n).padStart(8, '0');
   return `${sanitizeTable(table)}-${pad(seqMin)}-${pad(seqMax)}-${sha8}.chk`;
 }
+// Per-device watermark: sealed_upto_seq holds a JSON map of device_id to
+// max sealed seq. A global r.seq <= watermark check drops slow devices
+// silently (kasir-02 seq 1..3 all fall under kasir-01 seq 1..5), so the
+// skip and the advance below are both keyed by device_id.
+// Legacy single-number files predate multi-device sealing: the old global
+// check skipped seq <= N for every device, so N floors each device seen
+// now. The rewrite is always per-device; re-fed ancient rows may reseal
+// as dupes (loud) instead of dropping new rows (silent).
+function readWatermark(wmPath: string): Record<string, number> {
+  if (!existsSync(wmPath)) return {};
+  const text = readFileSync(wmPath, 'utf8').trim();
+  if (!text) return {};
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (typeof parsed === 'number') {
+      return Number.isFinite(parsed) && parsed > 0 ? { '': parsed } : {};
+    }
+    if (parsed && typeof parsed === 'object') {
+      const wm: Record<string, number> = {};
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof v === 'number' && Number.isFinite(v) && v > 0) wm[k] = v;
+      }
+      return wm;
+    }
+  } catch { /* not json: fall through to the legacy plain number */ }
+  const n = Number(text);
+  return Number.isFinite(n) && n > 0 ? { '': n } : {};
+}
 
 export async function seal(opts: SealOpts): Promise<SealResult> {
   const target = opts.targetBytes ?? TARGET_BYTES;
@@ -135,7 +164,7 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   // when free space drops below 50MB, so a seal never half-writes.
   checkReserve(opts.outDir, opts.freeSpaceBytes);
   const wmPath = join(opts.outDir, 'sealed_upto_seq');
-  const watermark = existsSync(wmPath) ? Number(readFileSync(wmPath, 'utf8').trim() || '0') : 0;
+  const wm = readWatermark(wmPath);
 
   // Idempotent replay: dedupe by device_id+seq, keep last; skip sealed.
   // Input auto-detect: SQLite magic -> hot.db via bun:sqlite, else JSONL WAL.
@@ -145,12 +174,15 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   const seen = new Map<string, HotRow>();
   let skipped = 0;
   for (const r of source) {
-    if (r.seq <= watermark) { skipped++; continue; }
+    if (r.seq <= Math.max(wm[r.device_id] ?? 0, wm[''] ?? 0)) { skipped++; continue; }
     seen.set(`${r.device_id}:${r.seq}`, r);
   }
-  const pending = [...seen.values()].sort((a, b) => a.seq - b.seq);
+  const pending = [...seen.values()].sort((a, b) => a.seq - b.seq || (a.device_id < b.device_id ? -1 : a.device_id > b.device_id ? 1 : 0));
+  const wmMax = Math.max(0, ...Object.values(wm));
   if (pending.length === 0) {
-    return { chunks: [], sealedUptoSeq: watermark, rowsSealed: 0, rowsSkipped: skipped };
+    const byDevice: Record<string, number> = {};
+    for (const [k, v] of Object.entries(wm)) if (k !== '') byDevice[k] = v;
+    return { chunks: [], sealedUptoSeq: wmMax, sealedByDevice: byDevice, rowsSealed: 0, rowsSkipped: skipped };
   }
 
   // Pack rows per table; probe compressed size periodically, emit near target.
@@ -161,7 +193,6 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
     else byTable.set(r.table, [r]);
   }
   const chunks: string[] = [];
-  let sealedMax = watermark;
   const dictDir = join(opts.outDir, 'dicts');
   for (const [table, rows] of byTable) {
     // Per-table dictionary from leading rows when repetitive; saved content-hashed.
@@ -183,7 +214,6 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
         fsyncFile(dest);
       }
       chunks.push(dest);
-      sealedMax = Math.max(sealedMax, batch[batch.length - 1].seq);
       batch = [];
     };
     for (const r of rows) {
@@ -193,14 +223,22 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
     flush(true, batch.length ? encodeChunk(table, batch, dict, dictId).length : 0);
   }
 
-  // Advance watermark only after every chunk is fsynced.
-  const upto = Math.max(sealedMax, watermark);
+  // Advance the per-device watermark only after every chunk is fsynced.
+  // Every pending row lands in exactly one flushed batch, so the advance
+  // is the per-device max over pending. The legacy '' floor is dropped:
+  // each device seen now carries its own entry going forward.
+  const advanced: Record<string, number> = {};
+  for (const [k, v] of Object.entries(wm)) if (k !== '') advanced[k] = v;
+  for (const r of pending) advanced[r.device_id] = Math.max(advanced[r.device_id] ?? 0, r.seq);
+  const upto = Math.max(0, ...Object.values(advanced));
+  const ordered: Record<string, number> = {};
+  for (const k of Object.keys(advanced).sort()) ordered[k] = advanced[k];
   const tmp = `${wmPath}.tmp`;
-  writeFileSync(tmp, `${upto}\n`);
+  writeFileSync(tmp, `${JSON.stringify(ordered)}\n`);
   fsyncFile(tmp);
   renameSync(tmp, wmPath);
 
   const manifest = buildManifest(opts.outDir);
   saveManifestAtomic(opts.outDir, manifest);
-  return { chunks, sealedUptoSeq: upto, rowsSealed: pending.length, rowsSkipped: skipped };
+  return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped };
 }

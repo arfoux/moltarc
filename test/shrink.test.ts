@@ -33,7 +33,7 @@ describe('seal shrink ratio', () => {
     // Manifest dual copy + watermark written.
     assert.ok(existsSync(join(outDir, 'manifest.json')));
     assert.ok(existsSync(join(outDir, 'manifest.bak.json')));
-    assert.equal(readFileSync(join(outDir, 'sealed_upto_seq'), 'utf8').trim(), '20000');
+    assert.deepEqual(JSON.parse(readFileSync(join(outDir, 'sealed_upto_seq'), 'utf8')), { 'pos-01': 20000 });
     // Idempotent re-seal: nothing new, input never deleted.
     const r2 = await seal({ hotDb, outDir });
     assert.equal(r2.chunks.length, 0);

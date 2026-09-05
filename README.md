@@ -33,7 +33,7 @@ is retired: too repetitive to plan from.
   self-describing, dict inline in the frame (`dict_id = fnv1a32(devices + body pool)`).
 - Hot input auto-detects: `hot.db` SQLite (magic `SQLite format 3`, tables `tx`/`log` with
   `device_id,seq,ts,id,table,body` via `bun:sqlite`) or JSONL WAL export (one object per line).
-  `sealed_upto_seq` watermark + `device_id:seq` dedupe make re-seal idempotent.
+  Per-device `sealed_upto_seq` watermark (device_id -> max seq) + `device_id:seq` dedupe make re-seal idempotent.
 - Text-first ship lanes: `*blob* | *photo* | *image* | *thumb*` tables ship last and are skipped
   unless `includeBlobs: true`.
 
@@ -45,7 +45,7 @@ is retired: too repetitive to plan from.
 4. Text vs blob split: archive ships text+hash+thumb; full photos lazy/on-demand.
 5. Per-chunk `crc32c + sha256`; corrupt chunk quarantines 1/150 of history, never total-loss.
 6. Codec self-describing (`codec_id + dict_id`, N-2 backward compat); dictionary inside archive.
-7. Never delete unsealed/unacked data. `sealed_upto_seq` watermark + idempotent replay `(device_id, seq)`.
+7. Never delete unsealed/unacked data. Per-device `sealed_upto_seq` watermark + idempotent replay `(device_id, seq)`; forget/gc only drop relay-acked chunks.
 
 ## Layout
 
