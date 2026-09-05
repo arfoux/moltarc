@@ -1,8 +1,8 @@
 // moltarc verify — hash verify, quarantine 1 bad chunk without total loss, repair-by-hash.
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
 import { crc32c, decodeHeader, HEADER_SIZE, sha256hex } from './chunk.js';
-import { loadManifest, saveManifestAtomic } from './manifest.js';
+import { loadManifest, saveManifestAtomic, scanChunk } from './manifest.js';
 import type { ChunkEntry, Manifest } from './manifest.js';
 import { readRelayIndex } from './ship.js';
 export interface VerifyItem {
@@ -39,14 +39,52 @@ export function verifyAll(outDir: string): VerifyResult {
   return { ok: bad.length === 0, items, bad };
 }
 
+// Atomic chunk write: tmp + fsync + rename + dir fsync. A crash lands on the
+// old bytes or the new bytes, never a torn half-write. No direct overwrite.
+function fsyncFile(p: string): void {
+  const fd = openSync(p, 'r+');
+  try { fsyncSync(fd); } finally { closeSync(fd); }
+}
+
+function fsyncChunkDir(p: string): void {
+  try {
+    const fd = openSync(p, 'r+');
+    try { fsyncSync(fd); } finally { closeSync(fd); }
+  } catch { /* Windows: dir fsync unsupported, rename is enough */ }
+}
+
+function writeChunkAtomic(dest: string, data: Buffer): void {
+  const tmp = `${dest}.tmp.${process.pid}`;
+  writeFileSync(tmp, data);
+  fsyncFile(tmp);
+  renameSync(tmp, dest);
+  fsyncChunkDir(dirname(dest));
+}
+
+// Strict manifest load for quarantine/repair: primary, then backup, else throw.
+// Never auto-rebuilds: a lost manifest must show, not silently heal.
+function loadManifestStrict(outDir: string): Manifest {
+  const primary = parseManifestCopy(join(outDir, 'manifest.json'));
+  if (primary) {
+    if (!Array.isArray(primary.cold)) primary.cold = [];
+    return primary;
+  }
+  const backup = parseManifestCopy(join(outDir, 'manifest.bak.json'));
+  if (backup) {
+    if (!Array.isArray(backup.cold)) backup.cold = [];
+    return backup;
+  }
+  throw new Error(`no readable manifest copy in ${outDir}`);
+}
+
 // Quarantine exactly the bad chunk; every other chunk stays readable.
 export function quarantine(outDir: string, file: string): void {
+  const manifest = loadManifestStrict(outDir);
   const warm = join(outDir, 'warm');
   const qdir = join(outDir, 'quarantine');
   mkdirSync(qdir, { recursive: true });
   const src = join(warm, file);
   if (existsSync(src)) renameSync(src, join(qdir, file));
-  const { manifest } = loadManifest(outDir);
   const entry = manifest.chunks.find((e) => e.file === file);
   if (entry) {
     entry.quarantined = true;
@@ -68,16 +106,19 @@ function fetchRelayBytes(relayDir: string, entry: ChunkEntry): Buffer {
 }
 
 export function repairByHash(outDir: string, relayDir: string, file: string): void {
-  const { manifest } = loadManifest(outDir);
+  const manifest = loadManifestStrict(outDir);
   const entry = manifest.chunks.find((e) => e.file === file);
   if (!entry) throw new Error(`unknown chunk ${file}`);
   const good = fetchRelayBytes(relayDir, entry);
   const dest = join(outDir, 'warm', file);
-  writeFileSync(dest, good);
+  writeChunkAtomic(dest, good);
   const check = verifyChunk(dest);
   if (!check.ok) throw new Error(`repaired chunk still bad: ${check.error}`);
+  // Refill crc/bloom/minmax/rows from the fetched bytes: a quarantined stub
+  // carries none, so the entry must be re-scanned, not left blank.
+  const fresh = scanChunk(dest, entry.file, join(outDir, 'dicts'));
+  Object.assign(entry, fresh);
   delete entry.quarantined;
-  // A quarantined stub has no bloom/minmax; caller re-seals or rebuilds manifest.
   saveManifestAtomic(outDir, manifest);
 }
 
@@ -166,11 +207,10 @@ function checkOne(outDir: string, entry: ChunkEntry): FullVerifyItem {
   if (header.crc32c !== entry.crc32c) return { file: entry.file, status: 'CORRUPT', reason: 'manifest crc differs from header' };
   if (sha256hex(buf) !== entry.sha256) return { file: entry.file, status: 'CORRUPT', reason: 'sha256 differs from manifest' };
   const link = NAME_LINK.exec(entry.file);
-  if (link) {
-    const [, seqMin, seqMax, sha8] = link;
-    if (Number(seqMin) !== entry.seqMin || Number(seqMax) !== entry.seqMax || sha8 !== entry.sha256.slice(0, 8)) {
-      return { file: entry.file, status: 'CORRUPT', reason: 'filename link mismatch' };
-    }
+  if (!link) return { file: entry.file, status: 'CORRUPT', reason: 'filename link missing' };
+  const [, seqMin, seqMax, sha8] = link;
+  if (Number(seqMin) !== entry.seqMin || Number(seqMax) !== entry.seqMax || sha8 !== entry.sha256.slice(0, 8)) {
+    return { file: entry.file, status: 'CORRUPT', reason: 'filename link mismatch' };
   }
   return { file: entry.file, status: 'OK' };
 }
@@ -222,7 +262,7 @@ export function repairAll(outDir: string, relayDir: string): RepairResult {
   const repaired: string[] = [];
   const failed: RepairFailure[] = [];
   if (!first.ok && first.manifest.source !== 'none') {
-    const { manifest } = loadManifest(outDir);
+    const manifest = loadManifestStrict(outDir);
     for (const item of first.items) {
       if (item.status === 'OK') continue;
       try {
@@ -230,9 +270,11 @@ export function repairAll(outDir: string, relayDir: string): RepairResult {
         if (!entry) throw new Error(`unknown chunk ${item.file}`);
         const good = fetchRelayBytes(relayDir, entry);
         const dest = join(outDir, 'warm', item.file);
-        writeFileSync(dest, good);
+        writeChunkAtomic(dest, good);
         const check = verifyChunk(dest);
         if (!check.ok) throw new Error(`repaired chunk still bad: ${check.error}`);
+        const fresh = scanChunk(dest, entry.file, join(outDir, 'dicts'));
+        Object.assign(entry, fresh);
         delete entry.quarantined;
         repaired.push(item.file);
       } catch (err) {
