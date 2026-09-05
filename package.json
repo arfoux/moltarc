@@ -10,6 +10,7 @@
     "bench": "bun bench/mixed-corpus.ts --write-readme",
     "photo": "bun bench/photo-bench.ts --write-readme",
     "dict": "bun bench/dict-bench.ts --write-readme",
+    "perf": "bun bench/perf.ts",
     "e2e": "bun examples/e2e.ts",
     "kasir": "bun examples/kasir-demo.ts"
   },

@@ -35,5 +35,26 @@
   "dictRatio": "31.1",
   "savedBytes": 1840,
   "savedPct": "1.7"
+ },
+ "perf": {
+  "rows": 6000,
+  "seed": 7,
+  "inputBytes": 2518925,
+  "warmBytes": 246774,
+  "chunks": 3,
+  "sealMs": 290,
+  "sealMBs": "8.3",
+  "fullShipBytes": 211716,
+  "fullShipChunks": 2,
+  "deltaRows": 600,
+  "deltaShipBytes": 1791,
+  "deltaShipChunks": 1,
+  "deltaVsFull": "0.008",
+  "findId": "trx-00002000",
+  "findIters": 20,
+  "findMedianMs": "7.62",
+  "findFetched": 1,
+  "findPruned": 2,
+  "machine": "win32 10.0.26100 x64 | AMD Ryzen 5 PRO 5650U with Radeon Graphics x12 | bun 1.4.0"
  }
 }

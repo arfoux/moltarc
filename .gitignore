@@ -12,3 +12,4 @@ examples/e2e-out/
 examples/kasir-out/
 bench/photo-out/
 bench/dict-out/
+bench/perf-out/
