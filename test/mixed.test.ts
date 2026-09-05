@@ -6,7 +6,7 @@ import { generateMixedCorpus, measureArchive } from '../bench/mixed-corpus.js';
 import { scratch } from './util.js';
 
 describe('mixed corpus ratios', () => {
-  it('repetitive text lands 25-60x, mixed lands 6-12x, blobs excluded', async () => {
+  it('repetitive text lands 25-60x, mixed lands 6-12x, blobs excluded', { timeout: 30_000 }, async () => {
     const dir = scratch('mixed');
     const corpus = generateMixedCorpus(dir, 3000, 7);
     assert.ok(corpus.blobBytes > 3000 * 4096 * 0.1, 'sidecar holds real blob bytes');

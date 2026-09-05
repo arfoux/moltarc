@@ -7,7 +7,7 @@ import { findTrx } from '../src/find.js';
 import { scratch } from './util.js';
 
 describe('photo bench', () => {
-  it('jpeg bytes prove 1.0-1.2x while text shrinks 25x+', async () => {
+  it('jpeg bytes prove 1.0-1.2x while text shrinks 25x+', { timeout: 30_000 }, async () => {
     const dir = scratch('photo');
     const { corpus, measure } = await measurePhotoCorpus(dir, 12, 300, 11);
     assert.equal(corpus.photoIds.length, 12);
@@ -24,7 +24,7 @@ describe('photo bench', () => {
     assert.equal(found.row.body, expect);
   });
 
-  it('generates deterministic real jpeg containers', () => {
+  it('generates deterministic real jpeg containers', { timeout: 30_000 }, () => {
     const a = makeJpeg(42);
     const b = makeJpeg(42);
     assert.ok(a.equals(b), 'same seed, same bytes');

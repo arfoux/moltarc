@@ -45,7 +45,7 @@ function section(readme: string, start: string, end: string): string {
   return flat(readme.slice(a, b + end.length));
 }
 describe('readme numbers come from benches', () => {
-  it('marker tables equal tables regenerated from measured.json', () => {
+  it('marker tables equal tables regenerated from measured.json', { timeout: 30_000 }, () => {
     const m = loadMeasured();
     const readme = readFileSync(join(root, 'README.md'), 'utf8');
     const num = (v: number | string): number => Number(v);
@@ -84,7 +84,7 @@ describe('readme numbers come from benches', () => {
     );
   });
 
-  it('honest sla has no planning bands and every number names its bench', () => {
+  it('honest sla has no planning bands and every number names its bench', { timeout: 30_000 }, () => {
     const m = loadMeasured();
     const readme = readFileSync(join(root, 'README.md'), 'utf8');
     const start = readme.indexOf('## Honest SLA');

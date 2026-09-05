@@ -5,7 +5,7 @@ import { runE2E } from '../examples/e2e.js';
 import { scratch } from './util.js';
 
 describe('e2e fielog flow', () => {
-  it('seals, ships, and finds a single trx', async () => {
+  it('seals, ships, and finds a single trx', { timeout: 30_000 }, async () => {
     const r = await runE2E(scratch('e2e'));
     assert.equal(r.row.id, r.targetId);
     assert.ok(r.shipped >= 1, 'at least one chunk shipped');

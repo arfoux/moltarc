@@ -13,11 +13,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, '..', 'bin', 'moltarc.ts');
 
 function run(...args: string[]): string {
-  return execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
+  return execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8', timeout: 60_000 });
 }
 
 describe('cli e2e', () => {
-  it('seal, ship, and find one trx through the binary', () => {
+  it('seal, ship, and find one trx through the binary', { timeout: 30_000 }, () => {
     const dir = scratch('cli');
     const { hotDb, ids } = writeHotLog(dir, { rows: 300 });
     const outDir = join(dir, 'archive');
@@ -36,7 +36,7 @@ describe('cli e2e', () => {
     assert.throws(() => run('find', outDir, 'trx-99999999'), /not found/);
     assert.throws(() => run('seal', join(dir, 'missing.jsonl'), outDir));
   });
-  it('ship resumes a killed transfer without resending finished chunks', async () => {
+  it('ship resumes a killed transfer without resending finished chunks', { timeout: 30_000 }, async () => {
     const dir = scratch('cli-resume');
     const { hotDb } = writeHotLog(dir, { rows: 4000, uniqueBodies: true });
     const outDir = join(dir, 'archive');

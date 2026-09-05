@@ -36,7 +36,7 @@ function writeKasirLog(dir: string, events: number): { hotDb: string; ids: strin
 }
 
 describe('fielog interop', () => {
-  it('normRow handles bayar/undo events with nominal payload', () => {
+  it('normRow handles bayar/undo events with nominal payload', { timeout: 30_000 }, () => {
     const bayar = normRow({ device_id: 'kasir-01', seq: 3, type: 'bayar', trx: 'trx-00000003', nominal: 55000, kasir: 'agus' }, 'log');
     assert.equal(bayar?.table, 'bayar');
     assert.equal(bayar?.id, 'trx-00000003');
@@ -46,7 +46,7 @@ describe('fielog interop', () => {
     assert.ok((undo?.body ?? '').includes('ref=trx-00000005'));
   });
 
-  it('kasir.log seals directly and one struk finds back', async () => {
+  it('kasir.log seals directly and one struk finds back', { timeout: 30_000 }, async () => {
     const dir = scratch('interop');
     const { hotDb, ids } = writeKasirLog(dir, 90);
     const outDir = join(dir, 'archive');

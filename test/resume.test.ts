@@ -9,7 +9,7 @@ import { sha256hex } from '../src/chunk.js';
 import { scratch, writeHotLog } from './util.js';
 
 describe('ship resume', () => {
-  it('dies mid-chunk then resumes to a complete verified relay', async () => {
+  it('dies mid-chunk then resumes to a complete verified relay', { timeout: 30_000 }, async () => {
     const dir = scratch('resume');
     const { hotDb } = writeHotLog(dir, { rows: 3000, uniqueBodies: true });
     const outDir = join(dir, 'archive');

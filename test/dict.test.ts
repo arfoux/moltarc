@@ -24,7 +24,7 @@ function highEntropy(n: number): string[] {
 }
 
 describe('per-store dictionary', () => {
-  it('trains on repetitive tables, skips unique ones', async () => {
+  it('trains on repetitive tables, skips unique ones', { timeout: 30_000 }, async () => {
     const dir = scratch('dict');
     const bodies = highEntropy(500);
     assert.equal(trainTableDict(bodies), null);
@@ -36,7 +36,7 @@ describe('per-store dictionary', () => {
     assert.ok(!existsSync(join(dir, 'archive', 'dicts')));
   });
 
-  it('repetitive seal trains a dict file and chunks need it', async () => {
+  it('repetitive seal trains a dict file and chunks need it', { timeout: 30_000 }, async () => {
     const dir = scratch('dict-rep');
     const { hotDb, ids } = writeHotLog(dir, { rows: 2000 });
     const outDir = join(dir, 'archive');
@@ -52,7 +52,7 @@ describe('per-store dictionary', () => {
     void r;
   });
 
-  it('pre-dict chunks (flagless, any dict_id) still decode', async () => {
+  it('pre-dict chunks (flagless, any dict_id) still decode', { timeout: 30_000 }, async () => {
     const dir = scratch('dict-old');
     const { hotDb, ids } = writeHotLog(dir, { rows: 300 });
     const outDir = join(dir, 'archive');
@@ -74,7 +74,7 @@ describe('per-store dictionary', () => {
     assert.equal(rows[0].id, ids[0]);
   });
 
-  it('dict chunk without its dict file fails with a clear error', async () => {
+  it('dict chunk without its dict file fails with a clear error', { timeout: 30_000 }, async () => {
     const dir = scratch('dict-missing');
     const { hotDb } = writeHotLog(dir, { rows: 2000 });
     const outDir = join(dir, 'archive');

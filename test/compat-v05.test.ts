@@ -131,7 +131,7 @@ function buildV05Archive(outDir: string): { files: string[]; ids: string[] } {
 }
 
 describe('v0.5 cold archive compat', () => {
-  it('old header ver + deflate body decodes under the current reader', () => {
+  it('old header ver + deflate body decodes under the current reader', { timeout: 30_000 }, () => {
     const dir = scratch('compat-v05');
     const outDir = join(dir, 'archive');
     const { files } = buildV05Archive(outDir);
@@ -141,7 +141,7 @@ describe('v0.5 cold archive compat', () => {
     assert.deepEqual(manifest.cold ?? [], []);
   });
 
-  it('find reads every v0.5 row with no bloom/minmax index', () => {
+  it('find reads every v0.5 row with no bloom/minmax index', { timeout: 30_000 }, () => {
     const dir = scratch('compat-v05-find');
     const outDir = join(dir, 'archive');
     const { ids } = buildV05Archive(outDir);
@@ -158,7 +158,7 @@ describe('v0.5 cold archive compat', () => {
     assert.equal(mid.chunksFetched, 2);
   });
 
-  it('verify walks a v0.5 archive clean', () => {
+  it('verify walks a v0.5 archive clean', { timeout: 30_000 }, () => {
     const dir = scratch('compat-v05-verify');
     const outDir = join(dir, 'archive');
     buildV05Archive(outDir);
@@ -174,7 +174,7 @@ describe('v0.5 cold archive compat', () => {
 // Reader-side assertion, kept next to the fixture: the header ver gate (if
 // any is ever added) must keep accepting ver 0 — this is the N-2 floor.
 describe('v0.5 header floor', () => {
-  it('decodeHeader accepts ver 0 without a version error', () => {
+  it('decodeHeader accepts ver 0 without a version error', { timeout: 30_000 }, () => {
     const buf = buildV05Chunk('sales', v05Rows(1, 1));
     const header = decodeHeader(buf);
     assert.equal(header.ver, 0);

@@ -14,7 +14,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, '..', 'bin', 'moltarc.ts');
 
 function run(...args: string[]): string {
-  return execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
+  return execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8', timeout: 60_000 });
 }
 
 function plantOrphan(outDir: string): string {
@@ -24,7 +24,7 @@ function plantOrphan(outDir: string): string {
 }
 
 describe('gc orphan sweep', () => {
-  it('dry-run is the default and changes nothing', async () => {
+  it('dry-run is the default and changes nothing', { timeout: 30_000 }, async () => {
     const dir = scratch('gc-dry');
     const { hotDb } = writeHotLog(dir, { rows: 200 });
     const outDir = join(dir, 'archive');
@@ -38,7 +38,7 @@ describe('gc orphan sweep', () => {
     assert.equal(r.removed.length, 0);
   });
 
-  it('apply removes only orphans, manifest chunks survive', async () => {
+  it('apply removes only orphans, manifest chunks survive', { timeout: 30_000 }, async () => {
     const dir = scratch('gc-apply');
     const { hotDb } = writeHotLog(dir, { rows: 200 });
     const outDir = join(dir, 'archive');
@@ -55,7 +55,7 @@ describe('gc orphan sweep', () => {
 });
 
 describe('seal reserve space', () => {
-  it('refuses gracefully below 50MB free and half-writes nothing', async () => {
+  it('refuses gracefully below 50MB free and half-writes nothing', { timeout: 30_000 }, async () => {
     const dir = scratch('gc-reserve');
     const { hotDb } = writeHotLog(dir, { rows: 200 });
     const outDir = join(dir, 'archive');
@@ -70,7 +70,7 @@ describe('seal reserve space', () => {
 });
 
 describe('status command', () => {
-  it('prints chunk counts, sizes, and unacked', async () => {
+  it('prints chunk counts, sizes, and unacked', { timeout: 30_000 }, async () => {
     const dir = scratch('gc-status');
     const { hotDb } = writeHotLog(dir, { rows: 300 });
     const outDir = join(dir, 'archive');

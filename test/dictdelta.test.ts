@@ -7,7 +7,7 @@ import { measureDictDelta } from '../bench/dict-bench.js';
 import { scratch } from './util.js';
 
 describe('dict delta', () => {
-  it('trained dict never loses to plain on repetitive text', async () => {
+  it('trained dict never loses to plain on repetitive text', { timeout: 30_000 }, async () => {
     const dir = scratch('dict-delta');
     const d = await measureDictDelta(dir, 6000, 7, 16 * 1024);
     console.log(`dict-delta: plain=${d.plain.warmBytes}B dict=${d.withDict.warmBytes}B saved=${d.savedPct.toFixed(1)}%`);

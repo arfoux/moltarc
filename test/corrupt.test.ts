@@ -12,7 +12,7 @@ import { verifyAll, quarantine, repairByHash } from '../src/verify.js';
 import { scratch, writeHotLog } from './util.js';
 
 describe('corrupt chunk survival', () => {
-  it('quarantines exactly 1 chunk and repairs it from the relay', async () => {
+  it('quarantines exactly 1 chunk and repairs it from the relay', { timeout: 30_000 }, async () => {
     const dir = scratch('corrupt');
     const { hotDb, ids } = writeHotLog(dir, { rows: 4000, uniqueBodies: true });
     const outDir = join(dir, 'archive');

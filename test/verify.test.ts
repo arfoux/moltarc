@@ -17,7 +17,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, '..', 'bin', 'moltarc.ts');
 
 function run(...args: string[]): string {
-  return execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
+  return execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8', timeout: 60_000 });
 }
 
 function runFail(...args: string[]): { status: number; stdout: string } {
@@ -43,7 +43,7 @@ async function sealedArchive(name: string): Promise<{ dir: string; outDir: strin
 }
 
 describe('moltarc verify', () => {
-  it('clean archive walks ok with per-chunk ok lines and exit 0', async () => {
+  it('clean archive walks ok with per-chunk ok lines and exit 0', { timeout: 30_000 }, async () => {
     const { outDir, files } = await sealedArchive('verify-clean');
     const v = verifyFull(outDir);
     assert.ok(v.ok);
@@ -60,7 +60,7 @@ describe('moltarc verify', () => {
     assert.match(out, /verify: \d+ ok, 0 corrupt, 0 missing, 0 quarantined, 0 chain break\(s\) — OK/);
   });
 
-  it('1 flipped body bit reports exactly 1 corrupt chunk and exits 1', async () => {
+  it('1 flipped body bit reports exactly 1 corrupt chunk and exits 1', { timeout: 30_000 }, async () => {
     const { outDir, files } = await sealedArchive('verify-bitflip');
     const victim = files[1];
     const full = join(outDir, 'warm', victim);
@@ -83,7 +83,7 @@ describe('moltarc verify', () => {
     assert.match(r.stdout, /verify: \d+ ok, 1 corrupt.*— FAIL/);
   });
 
-  it('header-only flip is caught by the manifest sha check, not the crc', async () => {
+  it('header-only flip is caught by the manifest sha check, not the crc', { timeout: 30_000 }, async () => {
     const { outDir, files } = await sealedArchive('verify-sha');
     const victim = files[0];
     const full = join(outDir, 'warm', victim);
@@ -116,7 +116,7 @@ describe('moltarc verify', () => {
     assert.match(r.stdout, /manifest: CORRUPT \(primary corrupt, fell back to backup\)/);
   });
 
-  it('forgotten middle chunk shows as a hash-chain gap', async () => {
+  it('forgotten middle chunk shows as a hash-chain gap', { timeout: 30_000 }, async () => {
     const { outDir, relayDir, files } = await sealedArchive('verify-chain');
     const middle = [...files].sort()[1];
     forgetChunks(outDir, [middle], relayDir);

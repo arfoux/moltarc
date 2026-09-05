@@ -13,7 +13,7 @@ import { verifyAll, quarantine, repairByHash } from '../src/verify.js';
 import { scratch, writeHotLog } from './util.js';
 
 describe('fault injection', () => {
-  it('1 flipped bit: other chunks stay queryable, then quarantine + repair-by-hash', async () => {
+  it('1 flipped bit: other chunks stay queryable, then quarantine + repair-by-hash', { timeout: 30_000 }, async () => {
     const dir = scratch('fault-bit');
     const { hotDb } = writeHotLog(dir, { rows: 4000, uniqueBodies: true });
     const outDir = join(dir, 'archive');
@@ -46,7 +46,7 @@ describe('fault injection', () => {
     assert.equal(after.bad.length, 0);
   });
 
-  it('manifest cut mid-write falls back to .bak, then to filename rebuild', async () => {
+  it('manifest cut mid-write falls back to .bak, then to filename rebuild', { timeout: 30_000 }, async () => {
     const dir = scratch('fault-manifest');
     const { hotDb } = writeHotLog(dir, { rows: 500, uniqueBodies: true });
     const outDir = join(dir, 'archive');
@@ -66,7 +66,7 @@ describe('fault injection', () => {
     assert.equal(rebuilt.manifest.chunks.length, sealed.chunks.length);
   });
 
-  it('deleted body dictionary throws a clear error, never silent rows', async () => {
+  it('deleted body dictionary throws a clear error, never silent rows', { timeout: 30_000 }, async () => {
     const dir = scratch('fault-dict');
     const { hotDb } = writeHotLog(dir, { rows: 1200, uniqueBodies: true });
     const outDir = join(dir, 'archive');

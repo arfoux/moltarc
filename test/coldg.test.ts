@@ -18,7 +18,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, '..', 'bin', 'moltarc.ts');
 
 function run(...args: string[]): string {
-  return execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
+  return execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8', timeout: 60_000 });
 }
 
 function archiveBytes(outDir: string): number {
@@ -57,7 +57,7 @@ function writeTwoTableLog(dir: string, rowsPerTable: number): { hotDb: string; i
 }
 
 describe('cold gc end-to-end', () => {
-  it('cold sweep repacks without forgotten chunks and the archive shrinks', async () => {
+  it('cold sweep repacks without forgotten chunks and the archive shrinks', { timeout: 30_000 }, async () => {
     const dir = scratch('coldg-e2e');
     const { hotDb } = writeTwoTableLog(dir, 1500);
     const outDir = join(dir, 'archive');
@@ -116,7 +116,7 @@ describe('cold gc end-to-end', () => {
     assert.equal(found.row.id, liveId);
   });
 
-  it('fully-dead segments are pruned and status shows warm vs cold vs orphan bytes', async () => {
+  it('fully-dead segments are pruned and status shows warm vs cold vs orphan bytes', { timeout: 30_000 }, async () => {
     const dir = scratch('coldg-prune');
     const { hotDb } = writeTwoTableLog(dir, 1500);
     const outDir = join(dir, 'archive');

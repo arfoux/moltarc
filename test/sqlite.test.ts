@@ -17,7 +17,7 @@ async function getSqlite(): Promise<typeof import('bun:sqlite') | null> {
 }
 
 describe('seal from sqlite', () => {
-  it('reads hot.db tx table with magic autodetect', async (t) => {
+  it('reads hot.db tx table with magic autodetect', { timeout: 30_000 }, async (t) => {
     const sqlite = await getSqlite();
     if (!sqlite) {
       t.skip('bun:sqlite unavailable on this runtime');

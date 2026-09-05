@@ -21,7 +21,7 @@ function hotLine(device: string, seq: number, id: string): string {
 }
 
 describe('per-device seal watermark', () => {
-  it('sealing kasir-01 seq1-5 never skips kasir-02 seq1-3', async () => {
+  it('sealing kasir-01 seq1-5 never skips kasir-02 seq1-3', { timeout: 30_000 }, async () => {
     const dir = scratch('lossfix-twodevice');
     mkdirSync(dir, { recursive: true });
     const hotDb = join(dir, 'hot.jsonl');
@@ -52,7 +52,7 @@ describe('per-device seal watermark', () => {
 });
 
 describe('relay-ack guard on forget and gc', () => {
-  it('forgetting the only unshipped chunk is refused and gc keeps it', async () => {
+  it('forgetting the only unshipped chunk is refused and gc keeps it', { timeout: 30_000 }, async () => {
     const dir = scratch('lossfix-unacked');
     const { hotDb } = writeHotLog(dir, { rows: 200 });
     const outDir = join(dir, 'archive');

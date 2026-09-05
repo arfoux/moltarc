@@ -24,7 +24,7 @@ function appendSeqRows(hotDb: string, fromSeq: number, count: number, device = '
 }
 
 describe('coldfix regressions', () => {
-  it('merge-seal-merge keeps cold listing stable with no duplicate chunks', async () => {
+  it('merge-seal-merge keeps cold listing stable with no duplicate chunks', { timeout: 30_000 }, async () => {
     const dir = scratch('coldfix-msm');
     const { hotDb } = writeHotLog(dir, { rows: 1500, table: 'sales' });
     const outDir = join(dir, 'archive');
@@ -54,7 +54,7 @@ describe('coldfix regressions', () => {
     assert.equal(new Set(all).size, all.length, 'no chunk listed in two segments');
   });
 
-  it('ship reports missing warm sources as skipped with ids', async () => {
+  it('ship reports missing warm sources as skipped with ids', { timeout: 30_000 }, async () => {
     const dir = scratch('coldfix-shipskip');
     const { hotDb } = writeHotLog(dir, { rows: 1500, table: 'sales' });
     const outDir = join(dir, 'archive');

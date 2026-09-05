@@ -9,7 +9,7 @@ import { loadManifest } from '../src/manifest.js';
 import { scratch, writeHotLog } from './util.js';
 
 describe('find single chunk', () => {
-  it('fetches exactly 1 chunk for a known trx', async () => {
+  it('fetches exactly 1 chunk for a known trx', { timeout: 30_000 }, async () => {
     const dir = scratch('find');
     const { hotDb, ids } = writeHotLog(dir, { rows: 3000, uniqueBodies: true });
     const outDir = join(dir, 'archive');
@@ -33,7 +33,7 @@ describe('find single chunk', () => {
     assert.throws(() => findTrx({ outDir, trxId: 'trx-99999999' }), /not found/);
   });
 
-  it('rebuilds the manifest from filenames when both copies are lost', async () => {
+  it('rebuilds the manifest from filenames when both copies are lost', { timeout: 30_000 }, async () => {
     const dir = scratch('rebuild');
     const { hotDb } = writeHotLog(dir, { rows: 500, uniqueBodies: true });
     const outDir = join(dir, 'archive');

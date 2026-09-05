@@ -8,7 +8,7 @@ import { decodeHeader, HEADER_SIZE } from '../src/chunk.js';
 import { scratch, writeHotLog } from './util.js';
 
 describe('seal shrink ratio', () => {
-  it('repetitive log compresses >=10x with 64B UMK1 headers', async () => {
+  it('repetitive log compresses >=10x with 64B UMK1 headers', { timeout: 30_000 }, async () => {
     const dir = scratch('shrink');
     const { hotDb, inputBytes } = writeHotLog(dir, { rows: 20000 });
     const outDir = join(dir, 'archive');

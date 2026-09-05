@@ -16,7 +16,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, '..', 'bin', 'moltarc.ts');
 
 function run(...args: string[]): string {
-  return execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
+  return execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8', timeout: 60_000 });
 }
 
 async function shippedArchive(name: string): Promise<{ outDir: string; relayDir: string; files: string[] }> {
@@ -38,7 +38,7 @@ function flipBit(outDir: string, file: string): void {
 }
 
 describe('moltarc repair', () => {
-  it('corrupt-then-repair roundtrip ends verify-clean with relay bytes', async () => {
+  it('corrupt-then-repair roundtrip ends verify-clean with relay bytes', { timeout: 30_000 }, async () => {
     const { outDir, relayDir, files } = await shippedArchive('repair-roundtrip');
     const victim = files[2];
     flipBit(outDir, victim);
@@ -63,7 +63,7 @@ describe('moltarc repair', () => {
     assert.ok(verifyFull(outDir).ok);
   });
 
-  it('deleted warm file is re-fetched by hash from the relay index', async () => {
+  it('deleted warm file is re-fetched by hash from the relay index', { timeout: 30_000 }, async () => {
     const { outDir, relayDir, files } = await shippedArchive('repair-missing');
     const victim = files[0];
     unlinkSync(join(outDir, 'warm', victim));
@@ -77,7 +77,7 @@ describe('moltarc repair', () => {
     assert.ok(r.verify.ok);
   });
 
-  it('relay without the chunk fails loud and leaves the walk red', async () => {
+  it('relay without the chunk fails loud and leaves the walk red', { timeout: 30_000 }, async () => {
     const { outDir, relayDir, files } = await shippedArchive('repair-norelay');
     const victim = files[1];
     flipBit(outDir, victim);
@@ -100,7 +100,7 @@ describe('moltarc repair', () => {
     assert.ok(cliOut.includes(`FAILED ${victim}`), 'cli names the unrepairable chunk');
   });
 
-  it('tampered relay copy is rejected by hash and never written', async () => {
+  it('tampered relay copy is rejected by hash and never written', { timeout: 30_000 }, async () => {
     const { outDir, relayDir, files } = await shippedArchive('repair-tamper');
     const victim = files[1];
     flipBit(outDir, victim);

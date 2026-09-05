@@ -5,7 +5,7 @@ import { runKasirDemo } from '../examples/kasir-demo.js';
 import { scratch } from './util.js';
 
 describe('kasir demo', () => {
-  it('seals 50 struk, ships, finds one, archive smaller than input', async () => {
+  it('seals 50 struk, ships, finds one, archive smaller than input', { timeout: 30_000 }, async () => {
     const r = await runKasirDemo(scratch('kasir'));
     assert.equal(r.row.id, r.targetId);
     assert.ok(r.shipped >= 1);
