@@ -8,6 +8,7 @@ import type { HotRow } from './chunk.js';
 import { trainTableDict, saveDictAtomic } from './dict.js';
 import { checkReserve } from './gc.js';
 import { buildManifest, saveManifestAtomic } from './manifest.js';
+import type { ColdSegment } from './manifest.js';
 
 export const TARGET_BYTES = 2 * 1024 * 1024;
 export const MIN_BYTES = 1 * 1024 * 1024;
@@ -238,7 +239,18 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   fsyncFile(tmp);
   renameSync(tmp, wmPath);
 
+  // Preserve cold listing: buildManifest scans warm only, so reattach the
+  // prior cold[] (tars stay on disk) or the next merge repacks warm twice.
+  let cold: ColdSegment[] | undefined;
+  for (const name of ['manifest.json', 'manifest.bak.json']) {
+    try {
+      const prev = JSON.parse(readFileSync(join(opts.outDir, name), 'utf8')) as { cold?: ColdSegment[] };
+      if (Array.isArray(prev.cold)) { cold = prev.cold; break; }
+    } catch { /* no prior manifest: first seal */
+    }
+  }
   const manifest = buildManifest(opts.outDir);
+  if (cold !== undefined) manifest.cold = cold;
   saveManifestAtomic(opts.outDir, manifest);
   return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped };
 }

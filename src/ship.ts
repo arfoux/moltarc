@@ -129,7 +129,7 @@ export async function ship(opts: ShipOpts): Promise<ShipResult> {
   let bytes = 0;
   for (const e of missing) {
     const src = join(opts.outDir, 'warm', e.file);
-    if (!existsSync(src)) continue; // quarantined-away source: skip, never fail the lane
+    if (!existsSync(src)) { skipped.push(e.file); continue; } // missing warm source: explicit skip, never fail the lane
     const dst = join(relayChunks, e.file);
     const state = join(opts.relayDir, `.ship-state-${e.sha256.slice(0, 12)}.json`);
     const r = await sendChunked(src, dst, state, {
