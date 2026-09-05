@@ -26,6 +26,7 @@ function usageLines(): string[] {
     '  moltarc verify <outDir>',
     '  moltarc repair <outDir> <relayDir>',
     '  moltarc status <outDir> [relayDir]',
+    '  moltarc gc <outDir> [relayDir] [--apply]',
     '  moltarc merge <outDir>',
     '  moltarc forget <outDir> <relayDir> <chunk> [chunk...]',
     '  moltarc coldg <outDir> [--apply]',
@@ -105,7 +106,20 @@ async function main(): Promise<void> {
     else console.log(`swept cold: pruned ${r.pruned.length}, repacked ${r.repacked.length}, reclaimed ${r.bytesReclaimed}B`);
     for (const f of r.pruned) console.log(`pruned ${f}`);
     for (const s of r.repacked) console.log(`repacked ${s.file} ${s.before}B -> ${s.after}B`);
-    console.log(`cold: ${r.bytesBefore}B -> ${r.bytesAfter}B`);
+  } else if (cmd === 'gc') {
+    const flags = rest.filter((a) => a.startsWith('--'));
+    const positional = rest.filter((a) => !a.startsWith('--'));
+    const apply = flags.includes('--apply');
+    const [outDir, relayDir] = positional;
+    if (!outDir || positional.length > 2 || flags.some((f) => f !== '--apply')) fail('usage: moltarc gc <outDir> [relayDir] [--apply]');
+    const r = sweep(outDir, { dryRun: !apply, relayDir });
+    if (r.dryRun) console.log(`dry-run: ${r.orphans.length} orphan(s), ${r.skippedUnacked.length} retained, ${r.dictOrphans.length} dict orphan(s), ${r.bytesReclaimed + r.dictBytesReclaimed}B reclaimable`);
+    else console.log(`swept ${r.removed.length} chunk(s), ${r.dictsRemoved.length} dict(s), reclaimed ${r.bytesReclaimed + r.dictBytesReclaimed}B`);
+    for (const f of r.orphans) console.log(`orphan ${f}`);
+    for (const f of r.removed) console.log(`removed ${f}`);
+    for (const f of r.skippedUnacked) console.log(`retained ${f}`);
+    for (const f of r.dictOrphans) console.log(`dict-orphan ${f}`);
+    for (const f of r.dictsRemoved) console.log(`dict-removed ${f}`);
   } else if (cmd === 'repair') {
     const [outDir, relayDir] = rest;
     if (!outDir || !relayDir) fail('usage: moltarc repair <outDir> <relayDir>');
