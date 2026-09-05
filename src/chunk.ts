@@ -1,4 +1,4 @@
-// molt chunk codec — 64B header + columnar frame + zstd (deflate fallback).
+// moltarc chunk codec — 64B header + columnar frame + zstd (deflate fallback).
 // Header layout (all LE, total 64B):
 //   0-3  magic "UMK1" | 4-5 ver u16 | 6 codec u8 | 7 flags u8
 //   8-11 tableId u32 (fnv1a32 of table) | 12-19 seqMin u64 | 20-27 seqMax u64
@@ -133,7 +133,7 @@ export function decompressFrame(codec: number, body: Buffer, dict?: Buffer, dict
   if (codec === CODEC_ZSTD && !dict) return Buffer.from(zstdDecompressSync(body));
   if (codec === CODEC_DEFLATE) return Buffer.from(inflateSync(body));
   if (codec === CODEC_NONE) return body;
-  throw new Error(`unsupported codec ${codec} (N-2 compat: upgrade molt)`);
+  throw new Error(`unsupported codec ${codec} (N-2 compat: upgrade moltarc)`);
 }
 
 // --- columnar frame: delta (seq/ts) + dict (device_id) + RLE (body) ---

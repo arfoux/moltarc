@@ -18,7 +18,7 @@ current default (zstd); old codecs are decode-only, never re-emitted.
 
 Supported today: `CODEC_NONE` (0), `CODEC_ZSTD` (1), `CODEC_DEFLATE` (2).
 `decompressFrame` decodes all three; an unknown codec id is a hard error
-(`unsupported codec N (N-2 compat: upgrade molt)`) — never silent
+(`unsupported codec N (N-2 compat: upgrade moltarc)`) — never silent
 mis-decode. Dropping a codec id requires a major bump plus a migration
 note here. Proof: `test/compat-v05.test.ts` hand-builds ver-0 deflate
 chunks and asserts current `find`/`verify` read them.

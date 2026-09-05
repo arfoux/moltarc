@@ -1,4 +1,4 @@
-// molt cold gc — cold tar segments plus prune sweep with manifest rewrite.
+// moltarc cold gc — cold tar segments plus prune sweep with manifest rewrite.
 // Warm chunks merge into cold/seg-*.tar (plain ustar, chunks already zstd).
 // The manifest (chunks[] + cold[]) is the ref source: a tar member whose
 // name is not in chunks[] is unreferenced. sweepCold repacks partial

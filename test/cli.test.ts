@@ -1,4 +1,4 @@
-// CLI e2e: bin/molt.ts seal -> ship -> find over scratch dirs.
+// CLI e2e: bin/moltarc.ts seal -> ship -> find over scratch dirs.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'child_process';
@@ -10,7 +10,7 @@ import { ship } from '../src/ship.js';
 import { scratch, writeHotLog } from './util.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const cli = join(here, '..', 'bin', 'molt.ts');
+const cli = join(here, '..', 'bin', 'moltarc.ts');
 
 function run(...args: string[]): string {
   return execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8' });

@@ -1,4 +1,4 @@
-// molt ship — delta by hash, chunked resume, text-first lanes, exponential backoff.
+// moltarc ship — delta by hash, chunked resume, text-first lanes, exponential backoff.
 // Relay = directory (cold side): <relay>/chunks/*.chk + index.json {sha256: file}.
 // Never deletes source chunks.
 import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync, writeSync } from 'fs';

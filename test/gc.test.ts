@@ -11,7 +11,7 @@ import { sweep } from '../src/gc.js';
 import { scratch, writeHotLog } from './util.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const cli = join(here, '..', 'bin', 'molt.ts');
+const cli = join(here, '..', 'bin', 'moltarc.ts');
 
 function run(...args: string[]): string {
   return execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8' });

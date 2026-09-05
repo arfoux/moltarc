@@ -1,5 +1,5 @@
 // examples/e2e — fielog JSONL -> seal -> ship to relay dir -> find one trx.
-// Usage: bun examples/e2e.ts [--out /tmp/molt-e2e]
+// Usage: bun examples/e2e.ts [--out /tmp/moltarc-e2e]
 import { mkdirSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';

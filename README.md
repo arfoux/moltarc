@@ -1,4 +1,4 @@
-# molt — shrink + ship + find
+# moltarc — shrink + ship + find
 
 Tiered SQLite archive for UMKM-scale data: hot DB stays small and fast,
 warm chunks compress schema-aware, cold archive ships once, query stays partial.
@@ -12,9 +12,9 @@ warm chunks compress schema-aware, cold archive ships once, query stays partial.
 CLI:
 
 ```
-molt seal   # hot WAL -> warm chunks (columnar + dict + zstd)
-molt ship   # send only missing chunk hashes, resumable
-molt find <trx-id>  # fetch 1 chunk via manifest, not 100MB
+moltarc seal   # hot WAL -> warm chunks (columnar + dict + zstd)
+moltarc ship   # send only missing chunk hashes, resumable
+moltarc find <trx-id>  # fetch 1 chunk via manifest, not 100MB
 ```
 
 ## Honest SLA (measured, not planned)
@@ -55,7 +55,7 @@ is retired: too repetitive to plan from.
 - `src/ship.ts` — delta by hash, chunked resume, text-first lanes
 - `src/find.ts` — prune + bloom + single-chunk fetch + sparse index
 - `src/dict.ts` — per-table 32KB zstd dicts, trained when the sample compresses 4x+
-- `bin/molt.ts` — CLI: `seal|ship|find|status|gc|merge|forget|coldg` over archive dirs (`bun bin/molt.ts …`)
+- `bin/moltarc.ts` — CLI: `seal|ship|find|status|gc|merge|forget|coldg` over archive dirs (`bun bin/moltarc.ts …`)
 - `bench/photo-bench.ts` — 50 real noise JPEGs sealed beside text, writes Photo SLA
 - `bench/dict-bench.ts` — same corpus dict off vs on, writes Dict SLA
 - interop: fielog `kasir.log` (`type` bayar / `event` undo + `nominal`) seals with no manual conversion (`test/interop.test.ts`)

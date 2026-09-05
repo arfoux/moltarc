@@ -1,4 +1,4 @@
-// molt find — prune by min/max, bloom check, single-chunk fetch+verify, sparse index.
+// moltarc find — prune by min/max, bloom check, single-chunk fetch+verify, sparse index.
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { decodeChunk, decodeHeader, DICT_FLAG } from './chunk.js';

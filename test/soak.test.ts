@@ -1,4 +1,4 @@
-// molt randomized soak: seeded rng drives 5k+ interleaved ops
+// moltarc randomized soak: seeded rng drives 5k+ interleaved ops
 // (append/seal/ship/sync/find/forget/gc/corrupt/repair/child-kill) with
 // invariant checks every N steps: sampled live rows stay findable, manifest
 // row counts match the oracle, verifyFull is clean after repair.
@@ -199,8 +199,8 @@ async function runSoak(seed: number, ops: number): Promise<{ ops: number; seals:
     // mid-flight (lands in startup: watermark/manifest untouched), then heal
     // in-process and assert a clean walk.
     const args = mode === 'seal'
-      ? ['bin/molt.ts', 'seal', hotDb, outDir]
-      : ['bin/molt.ts', 'ship', outDir, relayDir];
+      ? ['bin/moltarc.ts', 'seal', hotDb, outDir]
+      : ['bin/moltarc.ts', 'ship', outDir, relayDir];
     const child = spawn('bun', args, { cwd: root, stdio: 'ignore' });
     await new Promise<void>((r) => setTimeout(r, 3 + pick(10)));
     try { child.kill(); } catch { /* already exited */ }

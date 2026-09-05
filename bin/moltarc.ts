@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
-// bin/molt — seal/ship/find/verify/repair over archive directories.
-//   molt seal <hot.jsonl|hot.db> <outDir>
-//   molt ship <outDir> <relayDir> [--blobs]
-//   molt find <outDir> <trxId>
-//   molt verify <outDir>
-//   molt repair <outDir> <relayDir>
+// bin/moltarc — seal/ship/find/verify/repair over archive directories.
+//   moltarc seal <hot.jsonl|hot.db> <outDir>
+//   moltarc ship <outDir> <relayDir> [--blobs]
+//   moltarc find <outDir> <trxId>
+//   moltarc verify <outDir>
+//   moltarc repair <outDir> <relayDir>
 import { seal } from '../src/seal.js';
 import { ship } from '../src/ship.js';
 import { findTrx } from '../src/find.js';
@@ -19,16 +19,16 @@ function fail(msg: string): never {
 
 function usageLines(): string[] {
   return [
-    'usage: molt <seal|ship|find|verify|repair|status|gc|merge|forget|coldg> ...',
-    '  molt seal <hot.jsonl|hot.db> <outDir>',
-    '  molt ship <outDir> <relayDir> [--blobs]',
-    '  molt find <outDir> <trxId>',
-    '  molt verify <outDir>',
-    '  molt repair <outDir> <relayDir>',
-    '  molt status <outDir> [relayDir]',
-    '  molt merge <outDir>',
-    '  molt forget <outDir> <relayDir> <chunk> [chunk...]',
-    '  molt coldg <outDir> [--apply]',
+    'usage: moltarc <seal|ship|find|verify|repair|status|gc|merge|forget|coldg> ...',
+    '  moltarc seal <hot.jsonl|hot.db> <outDir>',
+    '  moltarc ship <outDir> <relayDir> [--blobs]',
+    '  moltarc find <outDir> <trxId>',
+    '  moltarc verify <outDir>',
+    '  moltarc repair <outDir> <relayDir>',
+    '  moltarc status <outDir> [relayDir]',
+    '  moltarc merge <outDir>',
+    '  moltarc forget <outDir> <relayDir> <chunk> [chunk...]',
+    '  moltarc coldg <outDir> [--apply]',
   ];
 }
 
@@ -55,29 +55,29 @@ async function main(): Promise<void> {
   const [cmd, ...rest] = process.argv.slice(2);
   if (cmd === 'seal') {
     const [hot, outDir] = rest;
-    if (!hot || !outDir) fail('usage: molt seal <hot.jsonl|hot.db> <outDir>');
+    if (!hot || !outDir) fail('usage: moltarc seal <hot.jsonl|hot.db> <outDir>');
     const r = await seal({ hotDb: hot, outDir });
     console.log(`sealed ${r.rowsSealed} rows -> ${r.chunks.length} chunk(s), sealed_upto_seq=${r.sealedUptoSeq}`);
   } else if (cmd === 'ship') {
     const [outDir, relayDir, flag] = rest;
-    if (!outDir || !relayDir) fail('usage: molt ship <outDir> <relayDir> [--blobs]');
+    if (!outDir || !relayDir) fail('usage: moltarc ship <outDir> <relayDir> [--blobs]');
     const r = await ship({ outDir, relayDir, includeBlobs: flag === '--blobs' });
     console.log(`shipped ${r.sent.length} chunk(s), skipped ${r.skipped.length}, ${r.bytes}B`);
   } else if (cmd === 'find') {
     const [outDir, trxId] = rest;
-    if (!outDir || !trxId) fail('usage: molt find <outDir> <trxId>');
+    if (!outDir || !trxId) fail('usage: moltarc find <outDir> <trxId>');
     const f = findTrx({ outDir, trxId });
     console.log(JSON.stringify(f.row));
     console.log(`chunk ${f.chunk} fetched ${f.chunksFetched}`);
   } else if (cmd === 'verify') {
     const [outDir] = rest;
-    if (!outDir) fail('usage: molt verify <outDir>');
+    if (!outDir) fail('usage: moltarc verify <outDir>');
     const v = verifyFull(outDir);
     printVerify(v);
     if (!v.ok) process.exitCode = 1;
   } else if (cmd === 'status') {
     const [outDir, relayDir] = rest;
-    if (!outDir) fail('usage: molt status <outDir> [relayDir]');
+    if (!outDir) fail('usage: moltarc status <outDir> [relayDir]');
     const s = statusInfo(outDir, relayDir);
     console.log(`chunks: ${s.chunks}`);
     console.log(`bytes: ${s.bytes}`);
@@ -87,19 +87,19 @@ async function main(): Promise<void> {
     console.log(`orphans: ${s.orphans} (${s.orphanBytes}B)`);
   } else if (cmd === 'merge') {
     const [outDir] = rest;
-    if (!outDir) fail('usage: molt merge <outDir>');
+    if (!outDir) fail('usage: moltarc merge <outDir>');
     const r = mergeCold(outDir);
     if (!r.segment) console.log('merge: nothing new to pack');
     else console.log(`merged ${r.chunks.length} chunk(s) -> cold/${r.segment} (${r.bytes}B)`);
   } else if (cmd === 'forget') {
     const [outDir, relayDir, ...files] = rest;
-    if (!outDir || !relayDir || files.length === 0) fail('usage: molt forget <outDir> <relayDir> <chunk> [chunk...]');
+    if (!outDir || !relayDir || files.length === 0) fail('usage: moltarc forget <outDir> <relayDir> <chunk> [chunk...]');
     const r = forgetChunks(outDir, files, relayDir);
     console.log(`forgot ${r.removed.length} chunk(s)`);
     for (const f of r.removed) console.log(`forgot ${f}`);
   } else if (cmd === 'coldg') {
     const [outDir, flag] = rest;
-    if (!outDir) fail('usage: molt coldg <outDir> [--apply]');
+    if (!outDir) fail('usage: moltarc coldg <outDir> [--apply]');
     const r = sweepCold(outDir, { dryRun: flag !== '--apply' });
     if (r.dryRun) console.log(`dry-run: ${r.pruned.length} pruned, ${r.repacked.length} repacked, ${r.bytesReclaimed}B reclaimable`);
     else console.log(`swept cold: pruned ${r.pruned.length}, repacked ${r.repacked.length}, reclaimed ${r.bytesReclaimed}B`);
@@ -108,7 +108,7 @@ async function main(): Promise<void> {
     console.log(`cold: ${r.bytesBefore}B -> ${r.bytesAfter}B`);
   } else if (cmd === 'repair') {
     const [outDir, relayDir] = rest;
-    if (!outDir || !relayDir) fail('usage: molt repair <outDir> <relayDir>');
+    if (!outDir || !relayDir) fail('usage: moltarc repair <outDir> <relayDir>');
     const r = repairAll(outDir, relayDir);
     for (const f of r.repaired) console.log(`REPAIRED ${f}`);
     for (const f of r.failed) console.log(`FAILED ${f.file} (${f.error})`);

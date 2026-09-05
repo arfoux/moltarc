@@ -1,4 +1,4 @@
-// molt verify command: full walk over manifest copies, per-chunk crc+sha,
+// moltarc verify command: full walk over manifest copies, per-chunk crc+sha,
 // filename links, and hash-chain continuity. Exit 0 clean, 1 on any finding.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,7 +14,7 @@ import { verifyFull } from '../src/verify.js';
 import { scratch, writeHotLog } from './util.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const cli = join(here, '..', 'bin', 'molt.ts');
+const cli = join(here, '..', 'bin', 'moltarc.ts');
 
 function run(...args: string[]): string {
   return execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
@@ -23,7 +23,7 @@ function run(...args: string[]): string {
 function runFail(...args: string[]): { status: number; stdout: string } {
   try {
     run(...args);
-    assert.fail(`expected molt ${args[0]} to exit nonzero`);
+    assert.fail(`expected moltarc ${args[0]} to exit nonzero`);
   } catch (e) {
     const err = e as { status?: number; stdout?: string };
     return { status: err.status ?? 1, stdout: String(err.stdout ?? '') };
@@ -42,7 +42,7 @@ async function sealedArchive(name: string): Promise<{ dir: string; outDir: strin
   return { dir, outDir, relayDir, files };
 }
 
-describe('molt verify', () => {
+describe('moltarc verify', () => {
   it('clean archive walks ok with per-chunk ok lines and exit 0', async () => {
     const { outDir, files } = await sealedArchive('verify-clean');
     const v = verifyFull(outDir);

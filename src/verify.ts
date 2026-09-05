@@ -1,4 +1,4 @@
-// molt verify — hash verify, quarantine 1 bad chunk without total loss, repair-by-hash.
+// moltarc verify — hash verify, quarantine 1 bad chunk without total loss, repair-by-hash.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { crc32c, decodeHeader, HEADER_SIZE, sha256hex } from './chunk.js';

@@ -1,10 +1,10 @@
-// Shared synthetic-log helpers for molt tests.
+// Shared synthetic-log helpers for moltarc tests.
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
 export function scratch(name: string): string {
-  const dir = join(tmpdir(), `molt-${name}-${process.pid}-${Date.now()}`);
+  const dir = join(tmpdir(), `moltarc-${name}-${process.pid}-${Date.now()}`);
   mkdirSync(dir, { recursive: true });
   return dir;
 }

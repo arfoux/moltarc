@@ -1,4 +1,4 @@
-// molt gc — orphan sweep + status meter + reserve-space guard.
+// moltarc gc — orphan sweep + status meter + reserve-space guard.
 // Orphan = warm/*.chk file with refcount 0 in the manifest (not referenced
 // by any manifest entry). Sweep defaults to dry-run: lists orphans, deletes
 // nothing unless dryRun:false is passed explicitly.

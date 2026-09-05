@@ -1,4 +1,4 @@
-// molt repair command: re-fetch corrupt chunks by hash from the relay dir
+// moltarc repair command: re-fetch corrupt chunks by hash from the relay dir
 // (ship target), then re-verify clean. Corrupt-then-repair roundtrip first.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,7 +13,7 @@ import { quarantine, repairAll, repairByHash, verifyFull } from '../src/verify.j
 import { scratch, writeHotLog } from './util.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const cli = join(here, '..', 'bin', 'molt.ts');
+const cli = join(here, '..', 'bin', 'moltarc.ts');
 
 function run(...args: string[]): string {
   return execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
@@ -37,7 +37,7 @@ function flipBit(outDir: string, file: string): void {
   writeFileSync(full, buf);
 }
 
-describe('molt repair', () => {
+describe('moltarc repair', () => {
   it('corrupt-then-repair roundtrip ends verify-clean with relay bytes', async () => {
     const { outDir, relayDir, files } = await shippedArchive('repair-roundtrip');
     const victim = files[2];

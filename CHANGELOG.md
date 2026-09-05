@@ -3,6 +3,14 @@
 User-visible changes per tag, from `git log`. Test-only hardening with no
 behavior change is marked as such.
 
+## v0.14.0
+
+- Renames the package and CLI from `molt` to `moltarc` (`bin/moltarc.ts`).
+- Test-only hardening with no behavior change: every test declares an
+  explicit timeout instead of relying on the 5s default, scratch dirs are
+  collision-safe under parallel workers, and spawned CLI children in the
+  soak test can no longer crash the worker on spawn/kill races.
+
 ## v0.10.0
 
 - No behavior change: adds a seeded randomized soak test that seals,

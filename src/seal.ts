@@ -1,4 +1,4 @@
-// molt seal — hot WAL/JSONL -> warm immutable chunks (~2MB default, 1-4MB bounds).
+// moltarc seal — hot WAL/JSONL -> warm immutable chunks (~2MB default, 1-4MB bounds).
 // Never deletes input. Advances sealed_upto_seq watermark only after fsync.
 import { createHash } from 'crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'fs';
