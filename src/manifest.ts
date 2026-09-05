@@ -26,10 +26,17 @@ export interface ChunkEntry {
   quarantined?: boolean;
 }
 
+export interface ColdSegment {
+  file: string;
+  chunks: string[];
+  bytes: number;
+}
+
 export interface Manifest {
   version: number;
   createdAt: string;
   chunks: ChunkEntry[];
+  cold?: ColdSegment[];
 }
 
 function hashN(seed: number, key: string): number {
@@ -142,7 +149,10 @@ export function loadManifest(outDir: string): { manifest: Manifest; source: 'pri
   for (const { name, source } of copies) {
     try {
       const m = JSON.parse(readFileSync(join(outDir, name), 'utf8')) as Manifest;
-      if (Array.isArray(m.chunks)) return { manifest: m, source };
+      if (Array.isArray(m.chunks)) {
+        if (!Array.isArray(m.cold)) m.cold = [];
+        return { manifest: m, source };
+      }
     } catch { /* fall through to next copy */ }
   }
   if (!existsSync(join(outDir, 'warm'))) throw new Error(`no archive at ${outDir}`);

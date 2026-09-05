@@ -90,6 +90,11 @@ export interface StatusInfo {
   unacked: number;
   orphans: number;
   orphanBytes: number;
+  warmChunks: number;
+  warmBytes: number;
+  coldSegments: number;
+  coldChunks: number;
+  coldBytes: number;
 }
 
 export function statusInfo(outDir: string, relayDir?: string): StatusInfo {
@@ -99,16 +104,41 @@ export function statusInfo(outDir: string, relayDir?: string): StatusInfo {
   const refs = new Set(manifest.chunks.map((e) => e.file));
   let bytes = 0;
   for (const e of manifest.chunks) bytes += e.bytes;
+  // Warm bytes: referenced chunks present on disk (live working set).
+  let warmChunks = 0;
+  let warmBytes = 0;
   let orphans = 0;
   let orphanBytes = 0;
   try {
     for (const f of readdirSync(warm).filter((f: string) => f.endsWith('.chk'))) {
+      let size = 0;
+      try { size = statSync(join(warm, f)).size; } catch { continue; }
       if (!refs.has(f)) {
         orphans++;
-        try { orphanBytes += statSync(join(warm, f)).size; } catch { /* ignore */ }
+        orphanBytes += size;
+      } else {
+        warmChunks++;
+        warmBytes += size;
       }
     }
   } catch { /* no warm dir entries */ }
+  // Cold bytes: tar segments listed in the manifest and present on disk.
+  const listed = new Set((manifest.cold ?? []).map((s) => s.file));
+  let coldSegments = 0;
+  let coldChunks = 0;
+  let coldBytes = 0;
+  try {
+    for (const f of readdirSync(join(outDir, 'cold')).filter((f: string) => f.endsWith('.tar'))) {
+      if (!listed.has(f)) {
+        orphans++;
+        try { orphanBytes += statSync(join(outDir, 'cold', f)).size; } catch { /* ignore */ }
+        continue;
+      }
+      coldSegments++;
+      coldChunks += manifest.cold?.find((s) => s.file === f)?.chunks.length ?? 0;
+      try { coldBytes += statSync(join(outDir, 'cold', f)).size; } catch { /* ignore */ }
+    }
+  } catch { /* no cold dir yet */ }
   let unacked: number;
   if (!relayDir) {
     unacked = manifest.chunks.length;
@@ -121,5 +151,5 @@ export function statusInfo(outDir: string, relayDir?: string): StatusInfo {
       unacked = manifest.chunks.length;
     }
   }
-  return { chunks: manifest.chunks.length, bytes, unacked, orphans, orphanBytes };
+  return { chunks: manifest.chunks.length, bytes, unacked, orphans, orphanBytes, warmChunks, warmBytes, coldSegments, coldChunks, coldBytes };
 }

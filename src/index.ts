@@ -2,7 +2,7 @@
 export { seal, readHotRows, readSqliteRows, isSqliteFile, normRow, chunkName, TARGET_BYTES, MIN_BYTES, MAX_BYTES } from './seal.js';
 export type { SealOpts, SealResult } from './seal.js';
 export { buildManifest, saveManifestAtomic, loadManifest, rebuildFromFilenames, buildBloom, bloomCheck } from './manifest.js';
-export type { ChunkEntry, Manifest } from './manifest.js';
+export type { ChunkEntry, ColdSegment, Manifest } from './manifest.js';
 export { ship, planShipment, sendChunked, readRelayIndex, laneOf } from './ship.js';
 export type { ShipOpts, ShipResult, RelayIndex } from './ship.js';
 export { findTrx, candidates, buildSparseIndex } from './find.js';
@@ -13,3 +13,5 @@ export { encodeChunk, decodeChunk, encodeHeader, decodeHeader, crc32c, sha256hex
 export { trainTableDict, saveDictAtomic, loadDictFor, dictFile, dictHex, DICT_MAX_BYTES, DICT_TRAIN_ROWS } from './dict.js';
 export { sweep, statusInfo, checkReserve, freeSpaceBytes, RESERVE_BYTES } from './gc.js';
 export type { SweepOpts, SweepResult, StatusInfo } from './gc.js';
+export { mergeCold, forgetChunks, sweepCold, coldDiskBytes, writeTar, readTar } from './cold.js';
+export type { MergeResult, ColdSweepOpts, ColdSweepResult, RepackedSeg, TarMember } from './cold.js';
