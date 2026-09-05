@@ -1,7 +1,7 @@
 // molt seal — hot WAL/JSONL -> warm immutable chunks (~2MB default, 1-4MB bounds).
 // Never deletes input. Advances sealed_upto_seq watermark only after fsync.
 import { createHash } from 'crypto';
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { encodeChunk } from './chunk.js';
 import type { HotRow } from './chunk.js';
@@ -40,6 +40,17 @@ function normRow(o: Record<string, unknown>, fallbackTable: string): HotRow | nu
   };
 }
 
+export function isSqliteFile(p: string): boolean {
+  const fd = openSync(p, 'r');
+  try {
+    const head = Buffer.alloc(16);
+    readSync(fd, head, 0, 16, 0);
+    return head.toString('ascii', 0, 15) === 'SQLite format 3';
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export function readHotRows(hotDb: string, fallbackTable = 'log'): HotRow[] {
   const text = readFileSync(hotDb, 'utf8');
   const rows: HotRow[] = [];
@@ -52,6 +63,36 @@ export function readHotRows(hotDb: string, fallbackTable = 'log'): HotRow[] {
     } catch { /* skip malformed WAL line, never crash seal */ }
   }
   return rows;
+}
+
+// Hot SQLite read (tables tx/log with device_id,seq,ts,id,table,body).
+// Runs only under bun; node callers get a clear error instead of a crash.
+export async function readSqliteRows(hotDb: string, fallbackTable = 'log'): Promise<HotRow[]> {
+  let sqlite: typeof import('bun:sqlite');
+  try {
+    // Platform module absent outside bun: dynamic import is the only option.
+    sqlite = await import('bun:sqlite');
+  } catch {
+    throw new Error('hot.db sqlite input needs the bun runtime (bun:sqlite)');
+  }
+  const db = new sqlite.Database(hotDb, { readonly: true });
+  try {
+    const names = db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
+    const picked = [fallbackTable !== 'log' ? fallbackTable : '', 'tx', 'log'].find((n) => n && names.includes(n))
+      ?? names[0];
+    if (!picked) throw new Error(`no tables in ${hotDb}`);
+    const raw = db.query<Record<string, unknown>>(
+      `SELECT device_id, seq, ts, id, "table", body FROM "${picked.replace(/"/g, '')}" ORDER BY seq`,
+    ).all();
+    const rows: HotRow[] = [];
+    for (const o of raw) {
+      const r = normRow(o, picked);
+      if (r) rows.push(r);
+    }
+    return rows;
+  } finally {
+    db.close();
+  }
 }
 
 function fsyncFile(p: string): void {
@@ -77,9 +118,13 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   const watermark = existsSync(wmPath) ? Number(readFileSync(wmPath, 'utf8').trim() || '0') : 0;
 
   // Idempotent replay: dedupe by device_id+seq, keep last; skip sealed.
+  // Input auto-detect: SQLite magic -> hot.db via bun:sqlite, else JSONL WAL.
+  const source = isSqliteFile(opts.hotDb)
+    ? await readSqliteRows(opts.hotDb, opts.table ?? 'log')
+    : readHotRows(opts.hotDb, opts.table ?? 'log');
   const seen = new Map<string, HotRow>();
   let skipped = 0;
-  for (const r of readHotRows(opts.hotDb, opts.table ?? 'log')) {
+  for (const r of source) {
     if (r.seq <= watermark) { skipped++; continue; }
     seen.set(`${r.device_id}:${r.seq}`, r);
   }

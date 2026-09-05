@@ -8,5 +8,5 @@
     "declaration": true,
     "skipLibCheck": true
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "bench", "examples"]
 }

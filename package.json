@@ -6,7 +6,9 @@
   "main": "src/index.ts",
   "scripts": {
     "test": "bun test test/",
-    "build": "node node_modules/typescript/bin/tsc -p tsconfig.json"
+    "build": "node node_modules/typescript/bin/tsc -p tsconfig.json",
+    "bench": "bun bench/mixed-corpus.ts --write-readme",
+    "e2e": "bun examples/e2e.ts"
   },
   "license": "MIT",
   "devDependencies": {

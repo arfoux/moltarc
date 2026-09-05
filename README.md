@@ -17,21 +17,22 @@ molt ship   # send only missing chunk hashes, resumable
 molt find <trx-id>  # fetch 1 chunk via manifest, not 100MB
 ```
 
-- Pure repetitive text log → 30-50x (5GB → ~100-150MB) achievable
-- Mixed DB (free text + index bloat) → 8-15x
-- Photo-heavy DB → 2-5x (JPEG is incompressible; blobs ship lazy, never in the mandatory archive)
+## Honest SLA (measured, not planned)
 
-Measured (synthetic, `npm test`): 20k-row 5-template POS log, 3.45MB JSONL → 10.7KB in 1 chunk = **323x**.
-Tiny + ultra-repetitive, so it beats the 30-50x band — real 5GB WALs carry more entropy. Mixed/unique-body
-logs in the same suite land far lower; treat 30-50x / 8-15x / 2-5x as the planning bands, not the benchmark.
+- Repetitive tx text → **34.4x** (band 25-60x)
+- Mixed text + free notes + blob refs → **10.2x** (band 6-12x)
+- Photo blobs → excluded from the mandatory archive, lazy/on-demand (`blob:sha256:…` refs only)
+
+Details in [Measured SLA](#measured-sla) below. Older micro-benchmark (5-template POS log, 3.45MB → 10.7KB = 323x)
+is retired: too repetitive to plan from.
 
 ## Notes
 
 - Codec: zstd (Node 22 built-in) with deflate fallback; `codec` byte in the 64B header keeps chunks
   self-describing, dict inline in the frame (`dict_id = fnv1a32(devices + body pool)`).
-- Hot input is a JSONL WAL export (one JSON object per line: `device_id, seq, ts, id, table, body`);
-  pure-SQLite reads need no native dep this way. `sealed_upto_seq` watermark + `device_id:seq`
-  dedupe make re-seal idempotent.
+- Hot input auto-detects: `hot.db` SQLite (magic `SQLite format 3`, tables `tx`/`log` with
+  `device_id,seq,ts,id,table,body` via `bun:sqlite`) or JSONL WAL export (one object per line).
+  `sealed_upto_seq` watermark + `device_id:seq` dedupe make re-seal idempotent.
 - Text-first ship lanes: `*blob* | *photo* | *image* | *thumb*` tables ship last and are skipped
   unless `includeBlobs: true`.
 
@@ -53,3 +54,17 @@ logs in the same suite land far lower; treat 30-50x / 8-15x / 2-5x as the planni
 - `src/find.ts` — prune + bloom + single-chunk fetch + sparse index
 - `src/verify.ts` — hash verify, quarantine, repair-by-hash
 - `test/` — 5GB→100MB on synthetic repetitive log, resume mid-ship, 1-corrupt-chunk survival
+- `bench/mixed-corpus.ts` — deterministic 60/25/15 corpus, writes Measured SLA (`--write-readme`)
+- `examples/e2e.ts` — fielog JSONL -> seal -> ship to relay dir -> find one trx
+
+## Measured SLA
+
+<!-- SLA-MEASURED-START -->
+| corpus | input | warm archive | ratio |
+|---|---|---|---|
+| repetitive tx text (60% repetitive tx) | 1.64MB | 48.7KB | **34.4x** |
+| mixed text+notes+refs (blob bytes excluded) | 2.40MB | 241.0KB | **10.2x** |
+| photo blobs (3.23MB sidecar, lazy/on-demand) | excluded | excluded | n/a (incompressible) |
+
+_Measured by `bun bench/mixed-corpus.ts --write-readme`; corpus deterministic (seeded). Blob bytes never enter the mandatory archive — only `blob:sha256:…` refs do._
+<!-- SLA-MEASURED-END -->

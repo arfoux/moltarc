@@ -6,3 +6,5 @@ tmp/
 *.db
 coverage/
 .opencode/
+bench/out/
+examples/out/
