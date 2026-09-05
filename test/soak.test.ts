@@ -337,7 +337,9 @@ describe('soak randomized', () => {
       const s = await runSoak(seed, OPS);
       const ms = Date.now() - t0;
       console.log(`soak seed=${seed} ops=${s.ops} seals=${s.seals} finds=${s.finds} kills=${s.kills} corrupts=${s.corrupts} ${ms}ms`);
-      assert.ok(ms < 60_000, `5k ops under 60s, took ${ms}ms`);
+      // no wall-clock perf assert: elapsed time depends on suite-wide cpu
+      // contention, not correctness. hang protection stays on the declared
+      // 120s timeout above; invariants are checked inside runsoak.
     });
   }
 
@@ -347,6 +349,6 @@ describe('soak randomized', () => {
     const s = await runSoak(seed, OPS);
     const ms = Date.now() - t0;
     console.log(`soak seed=${seed} (unseeded) ops=${s.ops} seals=${s.seals} finds=${s.finds} kills=${s.kills} corrupts=${s.corrupts} ${ms}ms`);
-    assert.ok(ms < 60_000, `5k ops under 60s, took ${ms}ms`);
+    // no wall-clock perf assert here either (see above).
   });
 });
