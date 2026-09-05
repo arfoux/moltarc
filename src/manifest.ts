@@ -37,6 +37,11 @@ export interface Manifest {
   createdAt: string;
   chunks: ChunkEntry[];
   cold?: ColdSegment[];
+  // Generation envelope: seq bumps on every atomic save, crc32c self-validates
+  // the envelope so load can pick the best crc-valid copy. Both optional so
+  // pre-envelope (v0/v1) archives still load as seq 0.
+  seq?: number;
+  crc32c?: number;
 }
 
 function hashN(seed: number, key: string): number {
@@ -62,6 +67,77 @@ export function bloomCheck(bloomB64: string, id: string): boolean {
     if ((bits[bit >> 3] & (1 << (bit & 7))) === 0) return false;
   }
   return true;
+}
+
+// Editors on Windows leave a U+FEFF at byte 0; JSON.parse chokes on it.
+// Strip one leading BOM on every manifest/watermark text read.
+export function stripBom(text: string): string {
+  return text.length > 0 && text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
+function readManifestText(p: string): string {
+  return stripBom(readFileSync(p, 'utf8'));
+}
+
+// Canonical envelope bytes the manifest crc covers: explicit field order so
+// save and load agree regardless of key insertion order on disk.
+function envelopeBytes(m: Manifest): Buffer {
+  return Buffer.from(JSON.stringify({
+    version: m.version,
+    createdAt: m.createdAt,
+    chunks: m.chunks,
+    cold: m.cold ?? [],
+    seq: m.seq ?? 0,
+  }), 'utf8');
+}
+
+export function manifestCrc(m: Manifest): number {
+  return crc32c(envelopeBytes(m));
+}
+
+function manifestSeq(m: Manifest): number {
+  return typeof m.seq === 'number' && Number.isFinite(m.seq) && m.seq > 0 ? Math.floor(m.seq) : 0;
+}
+
+// Strict copy parse: chunks must be an array, and a present crc must match.
+// Pre-envelope copies (no seq/crc) stay valid as seq 0 for back-compat.
+function parseManifestCopy(p: string): Manifest | null {
+  try {
+    const m = JSON.parse(readManifestText(p)) as Manifest;
+    if (typeof m.version !== 'number' || !Array.isArray(m.chunks)) return null;
+    if (typeof m.crc32c === 'number' && m.crc32c >>> 0 !== manifestCrc(m)) return null;
+    return m;
+  } catch {
+    return null;
+  }
+}
+
+// Lenient cold[] salvage for the rebuilt path: even a crc-torn copy may still
+// carry a good cold listing, and the tars stay on disk either way.
+function salvageCold(outDir: string): ColdSegment[] | undefined {
+  for (const name of ['manifest.json', 'manifest.bak.json']) {
+    try {
+      const m = JSON.parse(readManifestText(join(outDir, name))) as { cold?: unknown };
+      if (Array.isArray(m.cold)) return m.cold as ColdSegment[];
+    } catch { /* torn beyond json: try the next copy */ }
+  }
+  return undefined;
+}
+
+function prevValidSeq(outDir: string): number {
+  let best = 0;
+  for (const name of ['manifest.json', 'manifest.bak.json']) {
+    const m = parseManifestCopy(join(outDir, name));
+    if (m) best = Math.max(best, manifestSeq(m));
+  }
+  return best;
+}
+
+function stampEnvelope(m: Manifest, baseSeq: number): void {
+  const want = Math.max(manifestSeq(m), baseSeq) + 1;
+  m.seq = want;
+  if (!Array.isArray(m.cold)) m.cold = [];
+  m.crc32c = manifestCrc(m);
 }
 
 function fsyncFile(p: string): void {
@@ -119,7 +195,9 @@ export function buildManifest(outDir: string): Manifest {
       });
     }
   }
-  return { version: 1, createdAt: new Date().toISOString(), chunks };
+  const m: Manifest = { version: 1, createdAt: new Date().toISOString(), chunks, cold: [], seq: 0 };
+  m.crc32c = manifestCrc(m);
+  return m;
 }
 
 // Deterministic filenames carry table+seq range; rebuild works even if both
@@ -130,6 +208,7 @@ export function rebuildFromFilenames(outDir: string): Manifest {
 
 export function saveManifestAtomic(outDir: string, m: Manifest): void {
   mkdirSync(outDir, { recursive: true });
+  stampEnvelope(m, prevValidSeq(outDir));
   const payload = `${JSON.stringify(m, null, 1)}\n`;
   for (const name of ['manifest.json', 'manifest.bak.json']) {
     const dest = join(outDir, name);
@@ -142,21 +221,52 @@ export function saveManifestAtomic(outDir: string, m: Manifest): void {
 }
 
 export function loadManifest(outDir: string): { manifest: Manifest; source: 'primary' | 'backup' | 'rebuilt' } {
-  const copies = [
-    { name: 'manifest.json', source: 'primary' },
-    { name: 'manifest.bak.json', source: 'backup' },
+  const primary = parseManifestCopy(join(outDir, 'manifest.json'));
+  const backup = parseManifestCopy(join(outDir, 'manifest.bak.json'));
+  // Best crc-valid copy wins: higher seq first, primary breaks ties. A torn
+  // primary no longer shadows a good backup.
+  const ranked = [
+    { m: primary, source: 'primary' },
+    { m: backup, source: 'backup' },
   ] as const;
-  for (const { name, source } of copies) {
-    try {
-      const m = JSON.parse(readFileSync(join(outDir, name), 'utf8')) as Manifest;
-      if (Array.isArray(m.chunks)) {
-        if (!Array.isArray(m.cold)) m.cold = [];
-        return { manifest: m, source };
-      }
-    } catch { /* fall through to next copy */ }
+  let best: Manifest | null = null;
+  let bestSource: 'primary' | 'backup' = 'primary';
+  let bestSeq = -1;
+  for (const { m, source } of ranked) {
+    if (!m) continue;
+    const seq = manifestSeq(m);
+    if (seq > bestSeq) {
+      best = m;
+      bestSource = source;
+      bestSeq = seq;
+    }
+  }
+  if (best) {
+    if (!Array.isArray(best.cold)) best.cold = [];
+    return { manifest: best, source: bestSource };
   }
   if (!existsSync(join(outDir, 'warm'))) throw new Error(`no archive at ${outDir}`);
+  // Rebuilt path owns cold[] preservation now: salvage the listing from either
+  // torn copy before the rescan, so seal no longer needs its own reattach.
+  const cold = salvageCold(outDir);
   const rebuilt = rebuildFromFilenames(outDir);
+  if (cold !== undefined) rebuilt.cold = cold;
   saveManifestAtomic(outDir, rebuilt);
   return { manifest: rebuilt, source: 'rebuilt' };
+}
+
+// Append-only fast path for seal: merge caller-scanned entries into the best
+// crc-valid manifest without a full warm rescan. Dedupe by filename; existing
+// entries win so a retry never duplicates. Bumps seq+crc via the atomic save.
+export function appendEntries(outDir: string, entries: ChunkEntry[]): Manifest {
+  const { manifest } = loadManifest(outDir);
+  const known = new Set(manifest.chunks.map((e) => e.file));
+  for (const e of entries) {
+    if (known.has(e.file)) continue;
+    known.add(e.file);
+    manifest.chunks.push({ ...e });
+  }
+  manifest.chunks.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+  saveManifestAtomic(outDir, manifest);
+  return manifest;
 }
