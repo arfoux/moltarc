@@ -1,7 +1,18 @@
 // Shared synthetic-log helpers for moltarc tests.
-import { mkdirSync, writeFileSync } from 'fs';
+import { mkdirSync, rmSync, writeFileSync } from 'fs';
+import { after } from 'node:test';
 import { join } from 'path';
 import { tmpdir } from 'os';
+
+// Every scratch dir ever allocated by this file's tests; reaped by the
+// file-level after() hook so Temp stops accumulating across suite runs.
+const live = new Set<string>();
+after(() => {
+  for (const dir of live) {
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* already gone */ }
+  }
+  live.clear();
+});
 
 export function scratch(name: string): string {
   // parallel workers share pid+clock: pid+Date.now alone collides, so add a
@@ -11,6 +22,7 @@ export function scratch(name: string): string {
     const dir = join(tmpdir(), `${base}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
     try {
       mkdirSync(dir);
+      live.add(dir);
       return dir;
     } catch { /* collision: retry with a fresh suffix */ }
   }
