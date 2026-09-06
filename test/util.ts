@@ -1,22 +1,51 @@
 // Shared synthetic-log helpers for moltarc tests.
-import { mkdirSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
 import { after } from 'node:test';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-// Every scratch dir ever allocated by this file's tests; reaped by the
+// Every scratch dir ever allocated by this process's tests; reaped by the
 // file-level after() hook so Temp stops accumulating across suite runs.
 const live = new Set<string>();
-after(() => {
+function reapAll(): void {
   for (const dir of live) {
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* already gone */ }
   }
   live.clear();
-});
+}
+after(reapAll);
+// after() is skipped when a test worker dies mid-suite (same flake class
+// that drops a random test). process exit is sync-only but rmSync fits.
+process.on('exit', reapAll);
+// Opportunistic orphan sweep: dirs carry the creator pid
+// (moltarc-<name>-<pid>-...); a dead pid means nobody will reap them.
+// One candidate per scratch() call: amortized, contention-free, and never
+// touches a live pid's dirs or this process's own live set.
+function reapOneOrphan(): void {
+  let entries: string[];
+  try { entries = readdirSync(tmpdir()); } catch { return; }
+  const here = tmpdir();
+  for (const e of entries) {
+    const m = /^moltarc-[a-z]+-(\d+)-/.exec(e);
+    if (!m) continue;
+    const full = join(here, e);
+    let alive = true;
+    try { process.kill(Number(m[1]), 0); } catch { alive = false; }
+    // mtime guard: pid reuse on a busy box could point at an unrelated
+    // newborn process; only reap what is both ownerless AND stale.
+    let stale = false;
+    try { stale = Date.now() - statSync(full).mtimeMs > 15 * 60 * 1000; } catch { continue; }
+    if (!alive && stale) {
+      try { rmSync(full, { recursive: true, force: true }); } catch { /* raced */ }
+      return;
+    }
+  }
+}
 
 export function scratch(name: string): string {
   // parallel workers share pid+clock: pid+Date.now alone collides, so add a
   // random suffix and retry on EEXIST instead of reusing a live dir.
+  reapOneOrphan();
   const base = `moltarc-${name}-${process.pid}`;
   for (let i = 0; i < 100; i++) {
     const dir = join(tmpdir(), `${base}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
