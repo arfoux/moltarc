@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'fs';
+import { scratch } from '../test/util.js';
 import { join } from 'path';
 import { decodeChunk } from '../src/chunk.js';
 import { FIND_ARITY, FIND_NAME, SEAL_NAME, moltarcFind, moltarcSeal } from './moltarc.js';
@@ -12,7 +12,7 @@ const rows = [
 ];
 
 function fixture(): { hot: string; out: string } {
-  const dir = mkdtempSync(join(tmpdir(), 'moltarc-ext-'));
+  const dir = scratch('ext');
   const hot = join(dir, 'hot.jsonl');
   writeFileSync(hot, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
   return { hot, out: join(dir, 'arc') };
