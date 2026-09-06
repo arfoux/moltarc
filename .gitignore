@@ -13,3 +13,6 @@ examples/kasir-out/
 bench/photo-out/
 bench/dict-out/
 bench/perf-out/
+ext/amalg/
+ext/*.dll
+ext/*.so

@@ -1,10 +1,12 @@
-/* moltarc sqlite extension — C ABI plan (reference, NOT compiled here).
+/* moltarc sqlite extension — C ABI (compiled, loaded, proven).
  *
- * Status: uncompiled reference. This environment has no C toolchain and no
- * sqlite3 CLI (windows, bun-only), so there is deliberately NO .so/.dll
- * beside this file. The runnable conformance implementation is
- * ext/moltarc.ts; ext/moltarc.test.ts pins the SQL contract this file
- * must satisfy once built. Do not ship a binary built from anything else.
+ * Status: BUILT + GREEN. ext/moltarc_hook.c backs the two hooks via the
+ * sanctioned subprocess path (exec `bun ext/moltarc.ts find|seal`), so zero
+ * chunk-format code lives in native land. Proof: ext/moltarc-dll.test.ts
+ * loads moltarc.dll via bun:sqlite and runs seal -> find -> miss==NULL.
+ *
+ * Build (MinGW gcc 14.2, sqlite amalgamation headers in amalg/):
+ *   gcc -shared -O2 -I amalg/sqlite-amalgamation-3530400 -DMOLTARC_TS="<abs path>/ext/moltarc.ts" moltarc.c moltarc_hook.c -o moltarc.dll
  *
  * SQL contract (both scalar, both TEXT in / TEXT out):
  *   moltarc_find(outDir TEXT, trxId TEXT) -> TEXT | NULL   -- read-only
