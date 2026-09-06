@@ -59,6 +59,15 @@ is retired: too repetitive to plan from.
 - `bench/photo-bench.ts` — 50 real noise JPEGs sealed beside text, writes Photo SLA
 - `bench/dict-bench.ts` — same corpus dict off vs on, writes Dict SLA
 - interop: fielog `kasir.log` (`type` bayar / `event` undo + `nominal`) seals with no manual conversion (`test/interop.test.ts`)
+- `src/p2p.ts` — websocket delta sync: hello/welcome summaries, want-by-sha, base64 blocks, journal resume, idempotent atomic apply (`test/p2p.test.ts`)
+- `src/timetravel.ts` — as-of query: fold chunk versions per id at timestamp ts with chunk proof + crc-stop on mismatch (`test/timetravel.test.ts`)
+- `src/migrate.ts` — forward-migrate old archives: dry-run plan + atomic apply (manifest backup first), downgrade guard refuses (`test/migrate.test.ts`)
+- `src/readonly.ts` — read-only auditor handle: find/verify/status work, every mutating op throws (`test/readonly.test.ts`)
+- `src/alerts.ts` — unacked escalation: ok/warn/critical over unacked growth + disk pressure + quarantine count, pure report (`test/alerts.test.ts`)
+- `src/sensor.ts`, `src/ticket.ts`, `src/bundle.ts` — sensor/ticket/bundle kit: hash-chained tickets + bundle packing over chunk/manifest primitives (`test/sensor.test.ts`, `test/ticket.test.ts`)
+- `ext/moltarc.ts` — SQLite extension reference (TS): read-only `moltarc_find` + trivially-safe `moltarc_seal`, zero format code (native `.so` pending C toolchain)
+- `docs/decisions.md` — why each load-bearing choice: chunks, zstd-only, dict gate, bloom, reserve, lanes, warm-find, dual manifest, no-rewrite
+- `src/seal.ts` — seal scans only new chunks and merges via `appendEntries` when a manifest copy exists, full rebuild kept for first seal (`test/seal-append.test.ts`)
 
 ## Measured SLA
 
