@@ -12,6 +12,7 @@ import { findTrx } from '../src/find.js';
 import { loadManifest, manifestCrc } from '../src/manifest.js';
 import { assertMigrated, migrate, needsMigration, planMigration } from '../src/migrate.js';
 import { verifyFull } from '../src/verify.js';
+import { ship } from '../src/ship.js';
 import { scratch } from './util.js';
 
 const V05_HEADER_VER = 0;
@@ -161,12 +162,22 @@ describe('molt archive migrator', () => {
     assert.equal(planMigration(outDir).reason, 'already v1');
     assert.doesNotThrow(() => assertMigrated(outDir));
   });
-
   it('downgrade guard refuses old manifests without corrupting', { timeout: 30_000 }, () => {
     const outDir = join(scratch('migrate-guard'), 'archive');
     buildV05Archive(outDir);
     const before = manifestBytes(outDir);
     assert.throws(() => assertMigrated(outDir), /needs migration/);
     assert.equal(manifestBytes(outDir), before);
+  });
+
+  it('guarded writers refuse old manifests until migrated', { timeout: 30_000 }, async () => {
+    const dir = scratch('migrate-ship-guard');
+    const outDir = join(dir, 'archive');
+    const relayDir = join(dir, 'relay');
+    buildV05Archive(outDir);
+    await assert.rejects(ship({ outDir, relayDir, baseDelayMs: 1 }), /needs migration/);
+    migrate(outDir);
+    const r = await ship({ outDir, relayDir, baseDelayMs: 1 });
+    assert.equal(r.sent.length, 2);
   });
 });

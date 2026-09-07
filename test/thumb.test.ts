@@ -1,7 +1,7 @@
 // thumb regression: pure-js downscale previews, hash-linked to the full blob.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash, randomBytes } from 'crypto';
+import { createHash } from 'crypto';
 import { encode } from 'jpeg-js';
 import { makeJpeg } from '../bench/photo-bench.js';
 import { THUMB_MAX_SIDE, makeThumb, readThumb, readThumbMeta, saveThumb } from '../src/thumb.js';
@@ -22,7 +22,14 @@ describe('thumb pipeline', () => {
   });
 
   it('falls back to a deterministic preview for non-jpeg bytes', { timeout: 30_000 }, () => {
-    const raw = randomBytes(1024);
+    // Fixed seed, not randomBytes: the fallback must be deterministic for the
+    // same input, and the input itself must be fixed so the proof repeats.
+    let s = 0x9e3779b9;
+    const raw = Buffer.alloc(1024);
+    for (let i = 0; i < raw.length; i++) {
+      s ^= s << 13; s ^= s >>> 17; s ^= s << 5;
+      raw[i] = s & 0xff;
+    }
     const a = makeThumb(raw);
     const b = makeThumb(raw);
     assert.equal(a.thumbSha, b.thumbSha);

@@ -45,4 +45,15 @@ describe('ticket', () => {
     assert.throws(() => issueTicket(0), /> 0/);
     assert.throws(() => issueTicket(5, 1, ''), /nonce/);
   });
+
+  it('ignores unknown ids in attempts and validates snapshots', { timeout: 30_000 }, () => {
+    const s = new TicketStore();
+    assert.deepEqual(s.redeem('t-deadbeefcafe'), { ok: false, reason: 'unknown' });
+    assert.equal(s.attemptsOf('t-deadbeefcafe'), 0);
+    assert.throws(
+      () => TicketStore.fromJSON({ issued: [{ id: 'x', value: NaN, issuedAt: 1, nonce: 'n' }], redeemed: [], attempts: [] }),
+      /invalid voucher/,
+    );
+    assert.throws(() => TicketStore.fromJSON({ issued: [], redeemed: 'nope' } as never), /arrays/);
+  });
 });

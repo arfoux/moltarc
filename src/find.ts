@@ -10,6 +10,7 @@ import { loadDictFor } from './dict.js';
 import { bloomCheck, loadManifest, loadShard, loadSparseIndex, BLOOM_BITS } from './manifest.js';
 import type { ChunkEntry, ColdSegment, Manifest, ManifestShard, SparseDisk } from './manifest.js';
 import { readTar } from './cold.js';
+import { cacheKey } from './guard.js';
 
 export interface FindOpts {
   outDir: string;
@@ -46,14 +47,16 @@ export function buildSparseIndex(entries: ChunkEntry[]): SparseEntry[] {
     .map((e) => ({ minKey: e.minKey, maxKey: e.maxKey, file: e.file, seqMin: e.seqMin }))
     .sort((a, b) => (a.minKey < b.minKey ? -1 : a.minKey > b.minKey ? 1 : 0));
 }
-const manifestCache = new Map<string, { mtimeMs: number; manifest: Manifest; source: 'primary' | 'backup' | 'rebuilt' }>();
+const manifestCache = new Map<string, { mtimeMs: number; size: number; seq: number; key: string; manifest: Manifest; source: 'primary' | 'backup' | 'rebuilt' }>();
 // Dict files are content-hash addressed and immutable; cache hits only
 // (misses stay uncached so a later-sealed dict is still discovered).
 const dictCache = new Map<string, Buffer>();
-// Persisted sparse + shard sidecars keyed by file mtime, same stability deal
-// as the manifest cache: reseal rewrites invalidate, repeat finds hit memory.
-const sparseCache = new Map<string, { mtimeMs: number; sparse: SparseDisk | null; cold: ColdSegment[]; total: number; quarantined: number }>();
-const shardCache = new Map<string, { mtimeMs: number; shard: ManifestShard | null }>();
+// Persisted sparse + shard sidecars keyed by file stat plus content seq,
+// same stability deal as the manifest cache: reseal rewrites invalidate,
+// repeat finds hit memory. The stored key strings use the shared cacheKey
+// helper so every cache validates the identical (mtimeMs, size, seq) triple.
+const sparseCache = new Map<string, { mtimeMs: number; size: number; seq: number; key: string; sparse: SparseDisk | null; cold: ColdSegment[]; total: number; quarantined: number }>();
+const shardCache = new Map<string, { mtimeMs: number; size: number; seq: number; key: string; shard: ManifestShard | null }>();
 
 export function clearFindCaches(): void {
   manifestCache.clear();
@@ -62,36 +65,42 @@ export function clearFindCaches(): void {
   shardCache.clear();
 }
 
+// File stat for cache validation: missing files hash as (-1, -1) so the
+// absent-sidecar entry stays cached instead of re-statting every query.
+function statKey(p: string): { mtimeMs: number; size: number } {
+  try {
+    const st = statSync(p);
+    return { mtimeMs: st.mtimeMs, size: st.size };
+  } catch {
+    return { mtimeMs: -1, size: -1 };
+  }
+}
+
 function loadSparseCached(outDir: string): { sparse: SparseDisk | null; cold: ColdSegment[]; total: number; quarantined: number } {
   const primary = join(outDir, 'sparse.json');
-  let mtimeMs = -1;
-  try {
-    mtimeMs = statSync(primary).mtimeMs;
-  } catch { /* no sidecar yet: legacy archives predate sharding */ }
+  const { mtimeMs, size } = statKey(primary);
   const hit = sparseCache.get(outDir);
-  if (hit && hit.mtimeMs === mtimeMs) return hit;
+  if (hit && hit.mtimeMs === mtimeMs && hit.size === size) return hit;
   const loaded = loadSparseIndex(outDir);
+  const seq = loaded ? loaded.sparse.seq : 0;
   const entry = loaded
-    ? { mtimeMs, sparse: loaded.sparse, cold: loaded.sparse.cold ?? [], total: loaded.sparse.total, quarantined: loaded.sparse.quarantined }
-    : { mtimeMs, sparse: null, cold: [], total: 0, quarantined: 0 };
+    ? { mtimeMs, size, seq, key: cacheKey(mtimeMs, size, seq), sparse: loaded.sparse, cold: loaded.sparse.cold ?? [], total: loaded.sparse.total, quarantined: loaded.sparse.quarantined }
+    : { mtimeMs, size, seq, key: cacheKey(mtimeMs, size, seq), sparse: null, cold: [], total: 0, quarantined: 0 };
   sparseCache.set(outDir, entry);
   return entry;
 }
 
 function loadShardCached(outDir: string, month: string): ManifestShard | null {
   const file = join(outDir, `manifest-${month}.json`);
-  let mtimeMs = -1;
-  try {
-    mtimeMs = statSync(file).mtimeMs;
-  } catch { /* missing sidecar: caller falls back to root */ }
-  const key = `${outDir}\n${month}`;
-  const hit = shardCache.get(key);
-  if (hit && hit.mtimeMs === mtimeMs) return hit.shard;
+  const { mtimeMs, size } = statKey(file);
+  const cacheId = `${outDir}\n${month}`;
+  const hit = shardCache.get(cacheId);
+  if (hit && hit.mtimeMs === mtimeMs && hit.size === size) return hit.shard;
   const shard = loadShard(outDir, month);
-  shardCache.set(key, { mtimeMs, shard });
+  const seq = shard?.seq ?? 0;
+  shardCache.set(cacheId, { mtimeMs, size, seq, key: cacheKey(mtimeMs, size, seq), shard });
   return shard;
 }
-
 // Sparse-level prune over persisted rows (no bloom here): binary-search the
 // first entry with minKey > trxId, prune the tail, then drop head rows whose
 // maxKey misses. Unknown-range rows stay candidates. Returns candidate files
@@ -123,17 +132,14 @@ export function sparseCandidateFiles(
 
 function loadManifestCached(outDir: string): { manifest: Manifest; source: 'primary' | 'backup' | 'rebuilt' } {
   const primary = join(outDir, 'manifest.json');
-  let mtimeMs = -1;
-  try {
-    mtimeMs = statSync(primary).mtimeMs;
-  } catch { /* missing primary: fall through, loadManifest picks backup/rebuilt */ }
+  const pre = statKey(primary);
   const hit = manifestCache.get(outDir);
-  if (hit && hit.mtimeMs === mtimeMs) return hit;
+  if (hit && hit.mtimeMs === pre.mtimeMs && hit.size === pre.size) return hit;
   const loaded = loadManifest(outDir);
-  try {
-    mtimeMs = statSync(primary).mtimeMs;
-  } catch { /* rebuilt path rewrote it; re-stat best effort */ }
-  const entry = { mtimeMs, manifest: loaded.manifest, source: loaded.source };
+  // Re-stat: the rebuilt path may have rewritten the primary underneath us.
+  const cur = statKey(primary);
+  const seq = typeof loaded.manifest.seq === 'number' && Number.isFinite(loaded.manifest.seq) ? loaded.manifest.seq : 0;
+  const entry = { mtimeMs: cur.mtimeMs, size: cur.size, seq, key: cacheKey(cur.mtimeMs, cur.size, seq), manifest: loaded.manifest, source: loaded.source };
   manifestCache.set(outDir, entry);
   return entry;
 }
@@ -164,15 +170,25 @@ function hashN(seed: number, key: string): number {
   return (fnv1a32(`${seed}:${key}`) ^ fnv1a32(key.split('').reverse().join(''))) >>> 0;
 }
 
+// Cap on a decoded bloom bitset: scaled bitsets grow with rows, but anything
+// past 1MB (8M bits, ~800k rows at 1% fp) is a bomb or garbage. Over-cap and
+// short/truncated bitsets fail OPEN (must fetch): a bad bloom must never
+// prune a row the chunk actually holds.
+export const BLOOM_MAX_BYTES = 1 << 20;
+
 export function bloomCheckScaled(bloomB64: string, id: string): boolean {
   if (!bloomB64) return true; // header-only rebuild: no bloom, must fetch
   const bits = Buffer.from(bloomB64, 'base64');
+  if (bits.length === 0) return true; // corrupt base64: fail open, must fetch
+  if (bits.length > BLOOM_MAX_BYTES) return true; // bomb bitset: fail open, never probe it
   if (bits.length * 8 === BLOOM_BITS) return bloomCheck(bloomB64, id); // legacy fast path
   const nbits = bits.length * 8;
-  if (nbits === 0) return true;
+  if (nbits < BLOOM_BITS) return true; // short/truncated bitset: fail open, must fetch
   for (let k = 0; k < 3; k++) {
     const bit = hashN(k, id) % nbits;
-    if ((bits[bit >> 3] & (1 << (bit & 7))) === 0) return false;
+    const b = bits[bit >> 3] as number | undefined;
+    if (b === undefined) return true; // short buffer: fail open, must fetch
+    if ((b & (1 << (bit & 7))) === 0) return false;
   }
   return true;
 }

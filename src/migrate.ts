@@ -6,7 +6,7 @@
 // are never touched, so history semantics (rows, seq, ts, sha) survive.
 import { copyFileSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { buildManifest, loadManifest, saveManifestAtomic } from './manifest.js';
+import { buildManifest, loadManifest, manifestCrc, saveManifestAtomic, stripBom } from './manifest.js';
 import type { ChunkEntry, ColdSegment, Manifest } from './manifest.js';
 
 export const CURRENT_MANIFEST_VERSION = 1;
@@ -37,8 +37,21 @@ export interface MigrationResult extends MigrationPlan {
 function rawManifest(outDir: string): { raw: unknown; text: string } | null {
   for (const name of ['manifest.json', 'manifest.bak.json']) {
     try {
-      const text = readFileSync(join(outDir, name), 'utf8');
-      return { raw: JSON.parse(text) as unknown, text };
+      const text = stripBom(readFileSync(join(outDir, name), 'utf8'));
+      const raw = JSON.parse(text) as unknown;
+      // Crc-aware: a present envelope crc must match or the copy is torn;
+      // skip it and try the next copy. Pre-envelope copies (no seq/crc)
+      // carry no checksum and stay readable as before.
+      if (raw !== null && typeof raw === 'object' && 'crc32c' in raw && typeof raw.crc32c === 'number') {
+        let expect = 0;
+        try {
+          expect = manifestCrc(raw as Manifest);
+        } catch {
+          continue; // unhashable shape: treat as torn, try the next copy
+        }
+        if ((raw.crc32c >>> 0) !== expect) continue;
+      }
+      return { raw, text };
     } catch { /* try next copy */ }
   }
   return null;
@@ -55,7 +68,10 @@ function entryGaps(e: ChunkEntry): string[] {
 }
 
 // Dry-run report: no disk writes. Old = version < 1, or any entry missing
-// the v1 index fields, or missing cold[]/seq+crc/shards envelope.
+// the v1 index fields. Missing cold[]/seq+crc/shards are info only: the next
+// atomic save re-stamps the envelope and rebuilds sidecars, so they must not
+// refuse writes (minimal current-shape manifests, e.g. test fixtures, heal
+// on save; only genuinely old shapes need migrate).
 export function planMigration(outDir: string): MigrationPlan {
   const found = rawManifest(outDir);
   if (!found || typeof found.raw !== 'object' || found.raw === null) {
@@ -73,7 +89,7 @@ export function planMigration(outDir: string): MigrationPlan {
   const missingEnvelope = typeof m.seq !== 'number' || typeof m.crc32c !== 'number';
   const missingShards = !Array.isArray(m.shards);
   const old = version < CURRENT_MANIFEST_VERSION;
-  const needs = old || stale.length > 0 || missingCold || missingEnvelope || missingShards;
+  const needs = old || stale.length > 0;
   const reason = !needs
     ? 'already v1'
     : old ? `manifest version ${version} < ${CURRENT_MANIFEST_VERSION} (run migrate)` : 'v1 shape incomplete (run migrate)';

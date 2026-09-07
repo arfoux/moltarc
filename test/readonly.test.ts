@@ -29,11 +29,15 @@ describe('readonly auditor mode', () => {
     const st = ro.status();
     assert.equal(st.chunks, sealed.chunks.length);
 
-    // Every mutating op throws a clear read-only error.
-    const mutating = ['seal', 'ship', 'forget', 'sweep', 'sweepCold', 'repair', 'repairByHash', 'quarantine', 'merge'] as const;
+    // Refusal list is derived from the handle src exports (not handwritten),
+    // so a new mutating stub added to src/readonly.ts fails below until it
+    // is classified here. Known reads stay callable; everything else refuses.
+    const READ_OPS: Record<string, true> = { dir: true, find: true, verify: true, verifyFull: true, status: true };
+    const mutating = Object.keys(ro).filter((k) => !READ_OPS[k]);
+    assert.deepEqual(mutating.sort(), ['seal', 'ship', 'forget', 'sweep', 'sweepCold', 'repair', 'repairByHash', 'quarantine', 'merge', 'migrate', 'syncFromPeer', 'casGc', 'packBundle'].sort());
     for (const op of mutating) {
-      assert.throws(() => (ro[op] as (...a: unknown[]) => never)(), /read-only/, `${op} must refuse`);
-      assert.throws(() => (ro[op] as (...a: unknown[]) => never)({ outDir }), new RegExp(op), `${op} error names the op`);
+      assert.throws(() => (ro[op as keyof typeof ro] as (...a: unknown[]) => never)(), /read-only/, `${op} must refuse`);
+      assert.throws(() => (ro[op as keyof typeof ro] as (...a: unknown[]) => never)({ outDir }), new RegExp(op), `${op} error names the op`);
     }
 
     // Refused mutations wrote nothing: archive untouched and still readable.

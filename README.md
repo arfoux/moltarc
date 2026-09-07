@@ -22,7 +22,7 @@ moltarc find <trx-id>  # fetch 1 chunk via manifest, not 100MB
 - Repetitive tx text, 60% tx slice of `bun bench/mixed-corpus.ts` (6000 rows, seed 7) → **34.5x**
 - Mixed text+notes+refs, full mixed corpus of `bun bench/mixed-corpus.ts` (6000 rows, seed 7, blob bytes excluded) → **10.2x**
 - Real jpeg bytes, raw zstd over the 50 real jpeg of `bun bench/photo-bench.ts` (128x128 blurred noise, q85, 600 text rows, seed 11) → **1.05x** (details in [Photo SLA](#photo-sla))
-- Trained 32KB dict on repetitive text, `bun bench/dict-bench.ts` (12000 rows, seed 7, same corpus both sides) → **1.7%** smaller warm (details in [Dict SLA](#dict-sla))
+- Trained 32KB dict on repetitive text, `bun bench/dict-bench.ts` (12000 rows, seed 7, same corpus both sides) → **1.8%** smaller warm (details in [Dict SLA](#dict-sla))
 
 Details in [Measured SLA](#measured-sla) below. Older micro-benchmark (5-template POS log, 3.45MB → 10.7KB = 323x)
 is retired: too repetitive to plan from.
@@ -65,7 +65,7 @@ is retired: too repetitive to plan from.
 - `src/readonly.ts` — read-only auditor handle: find/verify/status work, every mutating op throws (`test/readonly.test.ts`)
 - `src/alerts.ts` — unacked escalation: ok/warn/critical over unacked growth + disk pressure + quarantine count, pure report (`test/alerts.test.ts`)
 - `src/sensor.ts`, `src/ticket.ts`, `src/bundle.ts` — sensor/ticket/bundle kit: hash-chained tickets + bundle packing over chunk/manifest primitives (`test/sensor.test.ts`, `test/ticket.test.ts`)
-- `ext/moltarc.ts` — SQLite extension reference (TS): read-only `moltarc_find` + trivially-safe `moltarc_seal`, zero format code (native `.so` pending C toolchain)
+- `ext/moltarc.ts` — SQLite extension reference (TS): read-only `moltarc_find` + trivially-safe `moltarc_seal`, zero format code (native `ext/moltarc.dll` built + green via MinGW, subprocess-backed; local-only, see `docs/compat.md`)
 - `docs/decisions.md` — why each load-bearing choice: chunks, zstd-only, dict gate, bloom, reserve, lanes, warm-find, dual manifest, no-rewrite
 - `src/seal.ts` — seal scans only new chunks and merges via `appendEntries` when a manifest copy exists, full rebuild kept for first seal (`test/seal-append.test.ts`)
 
@@ -75,7 +75,7 @@ is retired: too repetitive to plan from.
 | corpus | input | warm archive | ratio |
 |---|---|---|---|
 | repetitive tx text (60% repetitive tx) | 1.64MB | 48.6KB | **34.5x** |
-| mixed text+notes+refs (blob bytes excluded) | 2.40MB | 240.9KB | **10.2x** |
+| mixed text+notes+refs (blob bytes excluded) | 2.40MB | 241.0KB | **10.2x** |
 | photo blobs (3.23MB sidecar, lazy/on-demand) | excluded | excluded | n/a (incompressible) |
 
 _Measured by `bun bench/mixed-corpus.ts --write-readme`; corpus deterministic (seeded). Blob bytes never enter the mandatory archive — only `blob:sha256:…` refs do._
@@ -89,18 +89,19 @@ _Measured by `bun bench/mixed-corpus.ts --write-readme`; corpus deterministic (s
 | 50 real jpeg (128x128 blurred noise, q85, 577KB raw) sealed as base64 lines | base64 in jsonl | per-table chunks | **1.41x** |
 | same jpeg bytes, raw zstd (the foto claim) | 577KB raw | zstd | **1.05x, inside 1.0-1.2x** |
 | tx text beside the photos | text jsonl | text chunks + dict | **26.8x** |
+| 1 gate-sized jpeg (640x640 blurred noise, q85, 273KB raw, over the 256KB foto gate) | base64 line | foto/*.bin sidecar + hash ref | quarantined (bytes excluded) |
 
-_Measured by `bun bench/photo-bench.ts --write-readme`; deterministic (seeded). The base64 line ratio rides above raw because of the text envelope — raw jpeg bytes sit at ~1.05x, which is why photo bytes never enter the mandatory archive (hash refs only, lazy fetch)._
+_Measured by `bun bench/photo-bench.ts --write-readme`; deterministic (seeded). The 128x128 variants (~12KB each) sit below the 256KB foto gate and seal inline — only the gate-sized row exercises the quarantine path. The base64 line ratio rides above raw because of the text envelope — raw jpeg bytes sit at ~1.05x, which is why photo bytes never enter the mandatory archive (hash refs only, lazy fetch)._
 <!-- PHOTO-MEASURED-END -->
 
 ## Dict SLA
 
 <!-- DICT-MEASURED-START -->
-| repetitive text, dict off vs on | warm archive | ratio |
-|---|---|---|
-| plain (no trained dict) | 108.6KB | **30.5x** |
-| with 32KB per-table dict | 106.8KB | **31.1x** |
-| saving | 1.8KB (1.7%) | — |
+| repetitive text, dict off vs on | warm (16KB chunks) | ratio | warm (2MB production chunks) | ratio |
+|---|---|---|---|---|
+| plain (no trained dict) | 109.5KB | **30.3x** | 86.7KB | **38.3x** |
+| with 32KB per-table dict | 107.6KB | **30.8x** | 86.9KB | **38.2x** |
+| saving | 2.0KB (1.8%) | — | -0.2KB (-0.2%) | — |
 
-_Measured by `bun bench/dict-bench.ts --write-readme`; same corpus both sides, only the dictionary differs. Columnar delta/RLE/inline-dict already captures most repetition — the trained dict takes what is left._
+_Measured by `bun bench/dict-bench.ts --write-readme`; same corpus both sides, only the dictionary differs. Columnar delta/RLE/inline-dict already captures most repetition — the trained dict takes what is left. Small variant sealed with targetBytes=16384 (7 chunks); production variant with targetBytes=2097152 (1 chunks), where one chunk amortizes the cold start._
 <!-- DICT-MEASURED-END -->

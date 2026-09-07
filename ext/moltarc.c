@@ -19,16 +19,13 @@
  *
  * No-format-fork rule: the chunk codec (64B UMK1 header + columnar frame +
  * zstd/deflate, crc32c + sha256 per chunk) lives in exactly one place.
- * This file MUST NOT reimplement it. Wire the canonical reader via ONE of:
- *   (a) link a future libmoltarcchunk exposing moltarc_chunk_find(), or
- *   (b) subprocess: exec `bun ext/moltarc.ts find <outDir> <trxId>` and
- *       return its stdout (exit 1 == SQL NULL). slower, zero native deps.
- * Until (a) exists, (b) is the sanctioned path; the skeletons below call
- * the (a)-shaped hook so the cutover is one function body.
- *
- * Build (once a toolchain exists):
- *   gcc -shared -fPIC -O2 -I<sqlite-src> moltarc.c -o moltarc.so
- *   cl /LD moltarc.c sqlite3.lib /Femoltarc.dll      (msvc)
+ * This file MUST NOT reimplement it. The canonical reader is wired via
+ * ext/moltarc_hook.c (sanctioned subprocess path: exec
+ * `bun ext/moltarc.ts find <outDir> <trxId>` and return its stdout,
+ * exit 1 == SQL NULL). Slower than native, zero native deps. A future
+ * libmoltarcchunk exposing moltarc_chunk_find() would drop into the same
+ * hook signature below; until then the subprocess path IS the
+ * implementation, not a placeholder.
  *
  * Stock sqlite3 CLI proof transcript (the acceptance run):
  *   .load ./moltarc

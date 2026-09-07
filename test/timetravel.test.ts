@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { encodeChunk, type HotRow } from '../src/chunk.js';
+import { chunkName } from '../src/seal.js';
 import { buildManifest, saveManifestAtomic } from '../src/manifest.js';
 import { queryAsOf } from '../src/timetravel.js';
 import { scratch } from './util.js';
@@ -13,28 +14,25 @@ function row(id: string, seq: number, ts: number, body: string): HotRow {
   return { device_id: 'pos-01', seq, ts, id, table: 'sales', body };
 }
 
-function fixedArchive(): string {
+function fixedArchive(): { outDir: string; names: string[] } {
   const dir = scratch('timetravel');
   const outDir = join(dir, 'archive');
   const warm = join(outDir, 'warm');
   mkdirSync(warm, { recursive: true });
-  const chunks: { name: string; rows: HotRow[] }[] = [
-    {
-      name: 'sales-00000001-00000003-aaaaaaaa.chk',
-      rows: [row('a', 1, 1000, 'a-v1'), row('b', 2, 2000, 'b-v1'), row('c', 3, 3000, 'c-v1')],
-    },
-    {
-      name: 'sales-00000004-00000005-bbbbbbbb.chk',
-      rows: [row('b', 4, 4000, 'b-v2'), row('d', 5, 5000, 'd-v1')],
-    },
-    {
-      name: 'sales-00000006-00000006-cccccccc.chk',
-      rows: [row('a', 6, 6000, 'a-v2')],
-    },
+  const batches: HotRow[][] = [
+    [row('a', 1, 1000, 'a-v1'), row('b', 2, 2000, 'b-v1'), row('c', 3, 3000, 'c-v1')],
+    [row('b', 4, 4000, 'b-v2'), row('d', 5, 5000, 'd-v1')],
+    [row('a', 6, 6000, 'a-v2')],
   ];
-  for (const c of chunks) writeFileSync(join(warm, c.name), encodeChunk('sales', c.rows));
+  // Fixture names carry the real content hash: chunkName over the exact
+  // bytes on disk, so filename-link checks see honest sales-seq-sha8 names.
+  const names = batches.map((rows) => {
+    const bytes = encodeChunk('sales', rows);
+    return chunkName('sales', rows[0].seq, rows[rows.length - 1].seq, bytes);
+  });
+  batches.forEach((rows, i) => writeFileSync(join(warm, names[i]), encodeChunk('sales', rows)));
   saveManifestAtomic(outDir, buildManifest(outDir));
-  return outDir;
+  return { outDir, names };
 }
 
 function snapshot(outDir: string): string {
@@ -49,28 +47,25 @@ const byId = (rows: HotRow[]) => Object.fromEntries(rows.map((r) => [r.id, `${r.
 
 describe('moltarc timetravel', () => {
   it('as-of ts 2500 sees only chunk1 versions', { timeout: 30_000 }, () => {
-    const outDir = fixedArchive();
+    const { outDir, names } = fixedArchive();
     const before = snapshot(outDir);
     const r = queryAsOf({ outDir, ts: 2500 });
     assert.deepEqual(byId(r.rows), { a: '1:1000:a-v1', b: '2:2000:b-v1' });
-    assert.deepEqual(r.proof.chunksConsulted, ['sales-00000001-00000003-aaaaaaaa.chk']);
+    assert.deepEqual(r.proof.chunksConsulted, [names[0]]);
     assert.equal(r.proof.chunksPruned, 2);
     assert.equal(snapshot(outDir), before);
   });
 
   it('as-of ts 4500 folds b update, d not yet visible', { timeout: 30_000 }, () => {
-    const outDir = fixedArchive();
+    const { outDir, names } = fixedArchive();
     const r = queryAsOf({ outDir, ts: 4500 });
     assert.deepEqual(byId(r.rows), { a: '1:1000:a-v1', b: '4:4000:b-v2', c: '3:3000:c-v1' });
-    assert.deepEqual(r.proof.chunksConsulted, [
-      'sales-00000001-00000003-aaaaaaaa.chk',
-      'sales-00000004-00000005-bbbbbbbb.chk',
-    ]);
+    assert.deepEqual(r.proof.chunksConsulted, [names[0], names[1]]);
     assert.equal(r.proof.chunksPruned, 1);
   });
 
   it('as-of ts 6500 sees latest per id across all chunks', { timeout: 30_000 }, () => {
-    const outDir = fixedArchive();
+    const { outDir } = fixedArchive();
     const r = queryAsOf({ outDir, ts: 6500 });
     assert.deepEqual(byId(r.rows), {
       a: '6:6000:a-v2', b: '4:4000:b-v2', c: '3:3000:c-v1', d: '5:5000:d-v1',

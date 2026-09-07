@@ -13,6 +13,8 @@ examples/kasir-out/
 bench/photo-out/
 bench/dict-out/
 bench/perf-out/
+# local-only native builds (absolute MOLTARC_TS path + platform ABI baked in;
+# rebuild per machine per docs/compat.md — never commit, do not un-ignore):
 ext/amalg/
 ext/*.dll
 ext/*.so

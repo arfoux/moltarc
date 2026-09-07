@@ -8,6 +8,11 @@
 // via import. Zero chunk bytes are parsed here, so this file can never fork
 // the format. The C extension must do the same (link the canonical reader,
 // never reimplement the codec).
+//
+// Status: BUILT + GREEN. ext/moltarc.c + ext/moltarc_hook.c compile to a
+// local-only ext/moltarc.dll via the subprocess path above (never committed;
+// see docs/compat.md). Proof: ext/moltarc-dll.test.ts loads the dll via
+// bun:sqlite and runs seal -> find -> miss==NULL.
 import { seal } from '../src/seal.js';
 import { findTrx } from '../src/find.js';
 

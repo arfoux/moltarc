@@ -1,5 +1,6 @@
 // moltarc verify command: full walk over manifest copies, per-chunk crc+sha,
-// filename links, and hash-chain continuity. Exit 0 clean, 1 on any finding.
+// filename links, and hash-chain continuity. Gaps are warnings (ok stays true);
+// only overlap/regression breaks fail. Exit 0 clean, 1 on any finding.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'child_process';
@@ -10,7 +11,8 @@ import { HEADER_SIZE } from '../src/chunk.js';
 import { seal } from '../src/seal.js';
 import { ship } from '../src/ship.js';
 import { forgetChunks } from '../src/cold.js';
-import { verifyFull } from '../src/verify.js';
+import { loadManifest, saveManifestAtomic } from '../src/manifest.js';
+import { printChainGaps, quarantine, repairByHash, verifyFull } from '../src/verify.js';
 import { scratch, writeHotLog } from './util.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -51,6 +53,7 @@ describe('moltarc verify', () => {
     assert.equal(v.items.length, files.length);
     assert.ok(v.items.every((i) => i.status === 'OK'));
     assert.equal(v.chain.length, 0);
+    assert.equal(v.chainGaps.length, 0);
     assert.equal(v.bad.length, 0);
 
     const out = run('verify', outDir);
@@ -116,18 +119,104 @@ describe('moltarc verify', () => {
     assert.match(r.stdout, /manifest: CORRUPT \(primary corrupt, fell back to backup\)/);
   });
 
-  it('forgotten middle chunk shows as a hash-chain gap', { timeout: 30_000 }, async () => {
+  it('forgotten middle chunk shows as a chain-gap warning, ok stays true', { timeout: 30_000 }, async () => {
     const { outDir, relayDir, files } = await sealedArchive('verify-chain');
     const middle = [...files].sort()[1];
     forgetChunks(outDir, [middle], relayDir);
 
     const v = verifyFull(outDir);
-    assert.equal(v.chain.length, 1);
+    assert.equal(v.chain.length, 0, 'forward skip is a gap, not a break');
+    assert.equal(v.chainGaps.length, 1);
+    assert.ok(v.chainGaps[0].missing >= 1, `missing count, got ${v.chainGaps[0].missing}`);
+    assert.match(v.chainGaps[0].prev, /\.chk$/);
+    assert.match(v.chainGaps[0].next, /\.chk$/);
+    assert.ok(v.ok, 'gaps are warnings only');
+    printChainGaps(v);
+
+    const out = run('verify', outDir);
+    assert.match(out, /verify: .* — OK/, 'gap does not fail the walk');
+  });
+
+  it('bounded multi-seal global-seq corpus verifies ok with chainGaps>=1', { timeout: 60_000 }, async () => {
+    const dir = scratch('verify-multiseal');
+    const outDir = join(dir, 'archive');
+    const writeBatch = (name: string, startSeq: number, rows: number): string => {
+      const lines: string[] = [];
+      for (let i = 0; i < rows; i++) {
+        const seq = startSeq + i;
+        lines.push(JSON.stringify({
+          device_id: 'pos-01', seq, ts: 1_700_000_000_000 + seq * 1000,
+          id: `trx-${String(seq).padStart(8, '0')}`, table: 'sales',
+          body: `TRANSACTION seq=${seq} ref=${((seq * 2654435761) >>> 0).toString(16)} amount=${15000 + (seq % 97)}`,
+        }));
+      }
+      const p = join(dir, name);
+      writeFileSync(p, `${lines.join('\n')}\n`);
+      return p;
+    };
+    const hot1 = writeBatch('hot1.jsonl', 1, 1500);
+    const s1 = await seal({ hotDb: hot1, outDir, targetBytes: 8 * 1024 });
+    assert.ok(s1.chunks.length >= 2, `first seal needs >=2 chunks, got ${s1.chunks.length}`);
+    // Bounded second seal skips global seq 1501..2499 (filtered tail): the hole
+    // is a legitimate forward skip, not lost history.
+    const hot2 = writeBatch('hot2.jsonl', 2500, 1500);
+    const s2 = await seal({ hotDb: hot2, outDir, targetBytes: 8 * 1024 });
+    assert.ok(s2.chunks.length >= 2, `second seal needs >=2 chunks, got ${s2.chunks.length}`);
+
+    const v = verifyFull(outDir);
+    assert.equal(v.chain.length, 0);
+    assert.ok(v.chainGaps.length >= 1, `expected >=1 gap, got ${v.chainGaps.length}`);
+    assert.ok(v.chainGaps.every((g) => g.missing >= 1));
+    assert.ok(v.chainGaps.some((g) => g.missing >= 999), 'hole 1501..2499 surfaces with a bounded missing count');
+    assert.ok(v.ok, 'multi-seal gap verifies ok');
+    printChainGaps(v);
+  });
+
+  it('overlap/regression stays a chain break and fails the walk', { timeout: 30_000 }, async () => {
+    const { outDir } = await sealedArchive('verify-overlap');
+    const loaded = loadManifest(outDir);
+    const sorted = [...loaded.manifest.chunks].sort((a, b) => a.seqMin - b.seqMin);
+    assert.ok(sorted.length >= 3, 'need >=3 chunks for an overlap probe');
+    // Force the second chunk to start inside the first: seqMin <= prev.seqMax.
+    sorted[1].seqMin = sorted[0].seqMax;
+    saveManifestAtomic(outDir, loaded.manifest);
+
+    const v = verifyFull(outDir);
+    assert.equal(v.chain.length, 1, 'overlap stays a break');
+    assert.equal(v.chainGaps.length, 0, 'overlap is not a gap');
     assert.ok(!v.ok);
-    assert.match(v.chain[0].prev, /\.chk$/);
 
     const r = runFail('verify', outDir);
     assert.equal(r.status, 1);
-    assert.ok(r.stdout.includes('CHAIN'), 'prints the chain break');
+  });
+
+  it('quarantine/repairByHash refuse traversal filenames', { timeout: 30_000 }, async () => {
+    const { outDir, relayDir, files } = await sealedArchive('verify-traversal');
+    assert.throws(() => quarantine(outDir, '../evil.chk'), /bad chunk name/);
+    assert.throws(() => quarantine(outDir, 'a/b.chk'), /bad chunk name/);
+    assert.throws(() => repairByHash(outDir, relayDir, '..\\evil.chk'), /bad chunk name/);
+    assert.throws(() => repairByHash(outDir, relayDir, 'nope-not-a-chunk'), /bad chunk name|unknown chunk/);
+    assert.ok(files.length >= 3);
+  });
+
+  it('truncated chunk reports corrupt and exits 1', { timeout: 30_000 }, async () => {
+    const { outDir, files } = await sealedArchive('verify-truncate');
+    const victim = files[1];
+    const full = join(outDir, 'warm', victim);
+    const buf = readFileSync(full);
+    writeFileSync(full, buf.subarray(0, Math.floor(buf.length / 2)));
+
+    const v = verifyFull(outDir);
+    assert.ok(!v.ok);
+    assert.deepEqual(v.bad, [victim]);
+    const hit = v.items.find((i) => i.file === victim);
+    assert.equal(hit?.status, 'CORRUPT');
+    assert.match(hit?.reason ?? '', /truncated body|bad header/);
+    assert.ok(v.items.filter((i) => i.file !== victim).every((i) => i.status === 'OK'));
+
+    const r = runFail('verify', outDir);
+    assert.equal(r.status, 1);
+    assert.ok(r.stdout.includes(`CORRUPT ${victim}`), 'names the truncated chunk');
+    assert.match(r.stdout, /verify: \d+ ok, 1 corrupt.*— FAIL/);
   });
 });

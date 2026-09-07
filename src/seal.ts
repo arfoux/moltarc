@@ -8,9 +8,11 @@ import { encodeChunk, sha256hex } from './chunk.js';
 import type { HotRow } from './chunk.js';
 import { trainTableDict, saveDictAtomic } from './dict.js';
 import { checkReserve } from './gc.js';
+import { assertMigrated } from './migrate.js';
 import { appendEntries, buildManifest, saveManifestAtomic, scanChunk } from './manifest.js';
 import type { ChunkEntry, ColdSegment } from './manifest.js';
 import { saveThumb } from './thumb.js';
+import { atomicWrite } from './guard.js';
 
 export const TARGET_BYTES = 2 * 1024 * 1024;
 export const MIN_BYTES = 1 * 1024 * 1024;
@@ -37,6 +39,7 @@ export interface SealResult {
   rowsSealed: number;
   rowsSkipped: number;
   rowsMalformed: number; // input lines that failed to parse/normalize
+  rowsReplaced: number; // same-key different-body overwrites (keep-last dedupe)
   probeEncodes: number; // full chunk encodes spent on size probing
 }
 
@@ -45,6 +48,8 @@ export interface SealResult {
 export function normRow(o: Record<string, unknown>, fallbackTable: string): HotRow | null {
   const seq = Number(o.seq ?? o.no ?? o.nomor);
   if (!Number.isFinite(seq)) return null;
+  const ts = Number(o.ts ?? o.timestamp ?? o.waktu ?? Date.now());
+  if (!Number.isFinite(ts)) return null;
   const kind = o.type ?? o.event ?? o.jenis;
   const nominal = o.nominal ?? o.amount ?? o.total;
   const bodyRaw = o.body ?? o.payload ?? o.msg ?? o.data ?? o.catatan ?? o.note ?? o.keterangan ?? '';
@@ -61,7 +66,7 @@ export function normRow(o: Record<string, unknown>, fallbackTable: string): HotR
   return {
     device_id: device,
     seq,
-    ts: Number(o.ts ?? o.timestamp ?? o.waktu ?? Date.now()),
+    ts,
     id: String(o.id ?? o.trxId ?? o.trx_id ?? o.trx ?? o.key ?? `${device}:${seq}`),
     table: String(o.table ?? kind ?? fallbackTable),
     body,
@@ -224,6 +229,11 @@ function readWatermark(wmPath: string): Record<string, number> {
 }
 
 export async function seal(opts: SealOpts): Promise<SealResult> {
+  // Downgrade guard first: refuse old manifests, but a fresh outDir with no
+  // manifest yet seals normally (nothing to migrate).
+  if (existsSync(join(opts.outDir, 'manifest.json')) || existsSync(join(opts.outDir, 'manifest.bak.json'))) {
+    assertMigrated(opts.outDir);
+  }
   const target = opts.targetBytes ?? TARGET_BYTES;
   const warm = join(opts.outDir, 'warm');
   mkdirSync(warm, { recursive: true });
@@ -233,7 +243,7 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   const wmPath = join(opts.outDir, 'sealed_upto_seq');
   const wm = readWatermark(wmPath);
 
-  // Idempotent replay: dedupe by device_id+seq, keep last; skip sealed.
+  // Idempotent replay: dedupe by device_id+seq+table, keep last; skip sealed.
   // Input auto-detect: SQLite magic -> hot.db via bun:sqlite, else JSONL WAL.
   const counted = isSqliteFile(opts.hotDb)
     ? await readSqliteRowsCounted(opts.hotDb, opts.table ?? 'log')
@@ -246,9 +256,13 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   const source = counted.rows;
   const seen = new Map<string, HotRow>();
   let skipped = 0;
+  let replaced = 0;
   for (const r of source) {
     if (r.seq <= Math.max(wm[r.device_id] ?? 0, wm[''] ?? 0)) { skipped++; continue; }
-    seen.set(`${r.device_id}:${r.seq}`, r);
+    const key = `${r.device_id}:${r.seq}:${r.table}`;
+    const prev = seen.get(key);
+    if (prev !== undefined && prev.body !== r.body) replaced++;
+    seen.set(key, r);
   }
   const sorted = [...seen.values()].sort((a, b) => a.seq - b.seq || (a.device_id < b.device_id ? -1 : a.device_id > b.device_id ? 1 : 0));
   // Bounded seal: only the head of the queue seals this call; the tail stays
@@ -259,7 +273,7 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   if (pending.length === 0) {
     const byDevice: Record<string, number> = {};
     for (const [k, v] of Object.entries(wm)) if (k !== '') byDevice[k] = v;
-    return { chunks: [], sealedUptoSeq: wmMax, sealedByDevice: byDevice, rowsSealed: 0, rowsSkipped: skipped, rowsMalformed: malformed, probeEncodes: 0 };
+    return { chunks: [], sealedUptoSeq: wmMax, sealedByDevice: byDevice, rowsSealed: 0, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes: 0 };
   }
 
   // Foto gate first: oversize base64 never reaches a chunk inline.
@@ -276,10 +290,7 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   const persistWatermark = (): void => {
     const ordered: Record<string, number> = {};
     for (const k of Object.keys(advanced).sort()) ordered[k] = advanced[k];
-    const tmp = `${wmPath}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify(ordered)}\n`);
-    fsyncFile(tmp);
-    renameSync(tmp, wmPath);
+    atomicWrite(wmPath, `${JSON.stringify(ordered)}\n`);
   };
 
   // Pack rows per table; a raw-bytes x last-ratio estimate gates full encodes,
@@ -297,7 +308,7 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   for (const [table, rows] of byTable) {
     // Per-table dictionary from leading rows when repetitive; saved content-hashed.
     // trainDict:false skips training (bench control for the dict on/off delta).
-    const trained = (opts.trainDict ?? true) ? trainTableDict(rows.map((r) => r.body)) : null;
+    const trained = (opts.trainDict ?? true) ? trainTableDict(rows.map((r) => r.body), table) : null;
     if (trained) saveDictAtomic(dictDir, trained.dict, trained.dictId);
     const dict = trained?.dict;
     const dictId = trained?.dictId ?? 0;
@@ -393,7 +404,7 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
       }
     }
     appendEntries(opts.outDir, entries);
-    return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, probeEncodes };
+    return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes };
   }
 
   // First seal (no prior manifest): full rebuild owns the listing.
@@ -410,5 +421,5 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   const manifest = buildManifest(opts.outDir);
   if (cold !== undefined) manifest.cold = cold;
   saveManifestAtomic(opts.outDir, manifest);
-  return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, probeEncodes };
+  return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes };
 }

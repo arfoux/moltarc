@@ -9,7 +9,7 @@ import { ship } from '../src/ship.js';
 import { findTrx } from '../src/find.js';
 import { loadManifest } from '../src/manifest.js';
 import { loadDictFor } from '../src/dict.js';
-import { verifyAll, quarantine, repairByHash } from '../src/verify.js';
+import { verifyAll, verifyFull, quarantine, repairByHash } from '../src/verify.js';
 import { scratch, writeHotLog } from './util.js';
 
 describe('fault injection', () => {
@@ -94,5 +94,43 @@ describe('fault injection', () => {
     writeFileSync(victim, fresh);
 
     assert.throws(() => findTrx({ outDir, trxId: targetId }), /frame corrupt: body dictionary deleted/);
+  });
+
+  it('swapped chunk bytes flag both files, then quarantine + repair-by-hash heals', { timeout: 30_000 }, async () => {
+    const dir = scratch('fault-swap');
+    const { hotDb } = writeHotLog(dir, { rows: 4000, uniqueBodies: true });
+    const outDir = join(dir, 'archive');
+    const relayDir = join(dir, 'relay');
+    const sealed = await seal({ hotDb, outDir, targetBytes: 8 * 1024 });
+    assert.ok(sealed.chunks.length >= 3, `need >=3 chunks, got ${sealed.chunks.length}`);
+    await ship({ outDir, relayDir, baseDelayMs: 1 });
+
+    // Exchange the full bytes of two chunks: each file still passes its own
+    // internal crc, but neither matches its manifest sha, so both flag.
+    const [first, second] = sealed.chunks;
+    const saved = readFileSync(first);
+    writeFileSync(first, readFileSync(second));
+    writeFileSync(second, saved);
+    const swapped = [first, second].map((c) => c.split(/[\\/]/).pop() as string);
+
+    const v = verifyFull(outDir);
+    assert.deepEqual([...v.bad].sort(), [...swapped].sort());
+    for (const f of swapped) assert.equal(v.items.find((i) => i.file === f)?.status, 'CORRUPT');
+
+    // A chunk outside the swap stays queryable while the bad ones sit in place.
+    const lastEntry = loadManifest(outDir).manifest.chunks
+      .filter((e) => !swapped.includes(e.file))
+      .sort((a, b) => a.seqMax - b.seqMax)
+      .pop() as { maxKey: string };
+    const found = findTrx({ outDir, trxId: lastEntry.maxKey });
+    assert.equal(found.row.id, lastEntry.maxKey);
+
+    quarantine(outDir, swapped[0]);
+    quarantine(outDir, swapped[1]);
+    repairByHash(outDir, relayDir, swapped[0]);
+    repairByHash(outDir, relayDir, swapped[1]);
+    const after = verifyFull(outDir);
+    assert.ok(after.ok);
+    assert.equal(after.bad.length, 0);
   });
 });

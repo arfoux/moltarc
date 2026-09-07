@@ -5,6 +5,7 @@ import { crc32c, decodeHeader, HEADER_SIZE, sha256hex } from './chunk.js';
 import { loadManifest, saveManifestAtomic, scanChunk } from './manifest.js';
 import type { ChunkEntry, Manifest } from './manifest.js';
 import { readRelayIndex } from './ship.js';
+import { assertChunkName, assertSha } from './guard.js';
 export interface VerifyItem {
   file: string;
   ok: boolean;
@@ -34,7 +35,15 @@ export function verifyChunk(full: string): VerifyItem {
 
 export function verifyAll(outDir: string): VerifyResult {
   const { manifest } = loadManifest(outDir);
-  const items = manifest.chunks.map((e) => verifyChunk(join(outDir, 'warm', e.file)));
+  const items = manifest.chunks.map((e) => {
+    const v = verifyChunk(join(outDir, 'warm', e.file));
+    // Bind bytes to the manifest: a swapped-but-well-formed chunk (valid crc)
+    // must not verify clean. Quarantined entries skip the bind (bytes parked).
+    if (v.ok && !e.quarantined && v.sha256 !== e.sha256) {
+      return { file: v.file, ok: false, sha256: v.sha256, error: 'sha256 differs from manifest' };
+    }
+    return v;
+  });
   const bad = items.filter((i) => !i.ok).map((i) => i.file);
   return { ok: bad.length === 0, items, bad };
 }
@@ -78,7 +87,9 @@ function loadManifestStrict(outDir: string): Manifest {
 }
 
 // Quarantine exactly the bad chunk; every other chunk stays readable.
+// Rename is atomic (same-filesystem move): crash lands on old or new path.
 export function quarantine(outDir: string, file: string): void {
+  assertChunkName(file);
   const manifest = loadManifestStrict(outDir);
   const warm = join(outDir, 'warm');
   const qdir = join(outDir, 'quarantine');
@@ -96,9 +107,14 @@ export function quarantine(outDir: string, file: string): void {
 // Lookup is by manifest sha256 through the relay index (ship target layout);
 // plain filename under relay/chunks is the fallback for index-less relays.
 function fetchRelayBytes(relayDir: string, entry: ChunkEntry): Buffer {
+  assertChunkName(entry.file);
+  assertSha(entry.sha256);
   let relayFile = join(relayDir, 'chunks', entry.file);
   const mapped = readRelayIndex(relayDir).chunks[entry.sha256];
-  if (mapped) relayFile = join(relayDir, 'chunks', mapped);
+  if (mapped) {
+    assertChunkName(mapped);
+    relayFile = join(relayDir, 'chunks', mapped);
+  }
   if (!existsSync(relayFile)) throw new Error(`relay has no copy of ${entry.file}`);
   const good = readFileSync(relayFile);
   if (sha256hex(good) !== entry.sha256) throw new Error('relay copy hash differs from manifest');
@@ -106,9 +122,12 @@ function fetchRelayBytes(relayDir: string, entry: ChunkEntry): Buffer {
 }
 
 export function repairByHash(outDir: string, relayDir: string, file: string): void {
+  assertChunkName(file);
   const manifest = loadManifestStrict(outDir);
   const entry = manifest.chunks.find((e) => e.file === file);
   if (!entry) throw new Error(`unknown chunk ${file}`);
+  assertChunkName(entry.file);
+  assertSha(entry.sha256);
   const good = fetchRelayBytes(relayDir, entry);
   const dest = join(outDir, 'warm', file);
   writeChunkAtomic(dest, good);
@@ -143,11 +162,19 @@ export interface ChainBreak {
   next: string;
 }
 
+export interface ChainGap {
+  table: string;
+  prev: string;
+  next: string;
+  missing: number;
+}
+
 export interface VerifyFullResult {
   ok: boolean;
   manifest: ManifestCheck;
   items: FullVerifyItem[];
   chain: ChainBreak[];
+  chainGaps: ChainGap[];
   bad: string[];
 }
 
@@ -216,7 +243,10 @@ function checkOne(outDir: string, entry: ChunkEntry): FullVerifyItem {
 }
 
 // Hash-chain links: per table, ordered chunks must continue prev.seqMax + 1.
-// A gap means a lost or forgotten chunk in the middle of claimed history.
+// Overlap/regression (seqMin <= prev.seqMax) is a break: history forks or
+// runs backwards. A forward skip (seqMin > prev.seqMax + 1) is a gap warning:
+// bounded multi-seal corpora legitimately skip filtered seq, so gaps never
+// fail the walk — they report with a missing-seq count for the CLI to print.
 function checkChain(entries: ChunkEntry[]): ChainBreak[] {
   const breaks: ChainBreak[] = [];
   const byTable = new Map<string, ChunkEntry[]>();
@@ -229,7 +259,7 @@ function checkChain(entries: ChunkEntry[]): ChainBreak[] {
   for (const [table, list] of byTable) {
     list.sort((a, b) => a.seqMin - b.seqMin || (a.file < b.file ? -1 : 1));
     for (let i = 1; i < list.length; i++) {
-      if (list[i].seqMin !== list[i - 1].seqMax + 1) {
+      if (list[i].seqMin <= list[i - 1].seqMax) {
         breaks.push({ table, prev: list[i - 1].file, next: list[i].file });
       }
     }
@@ -237,8 +267,33 @@ function checkChain(entries: ChunkEntry[]): ChainBreak[] {
   return breaks;
 }
 
+function checkChainGaps(entries: ChunkEntry[]): ChainGap[] {
+  const gaps: ChainGap[] = [];
+  const byTable = new Map<string, ChunkEntry[]>();
+  for (const e of entries) {
+    if (e.quarantined || e.rows === 0 || e.seqMax === 0) continue;
+    const arr = byTable.get(e.table);
+    if (arr) arr.push(e);
+    else byTable.set(e.table, [e]);
+  }
+  for (const [table, list] of byTable) {
+    list.sort((a, b) => a.seqMin - b.seqMin || (a.file < b.file ? -1 : 1));
+    for (let i = 1; i < list.length; i++) {
+      if (list[i].seqMin > list[i - 1].seqMax + 1) {
+        gaps.push({ table, prev: list[i - 1].file, next: list[i].file, missing: list[i].seqMin - list[i - 1].seqMax - 1 });
+      }
+    }
+  }
+  return gaps;
+}
+
+export function printChainGaps(v: VerifyFullResult): void {
+  for (const g of v.chainGaps) console.log(`GAP ${g.table} ${g.prev} -> ${g.next} missing ${g.missing}`);
+}
+
 // Full walk: manifest copies, per-chunk crc + sha against the manifest,
 // filename links, then hash-chain continuity. Read-only, exit-code source.
+// Gaps are warnings only: ok ignores chainGaps.
 export function verifyFull(outDir: string): VerifyFullResult {
   const primary = parseManifestCopy(join(outDir, 'manifest.json'));
   const backup = parseManifestCopy(join(outDir, 'manifest.bak.json'));
@@ -250,10 +305,11 @@ export function verifyFull(outDir: string): VerifyFullResult {
   const entries = primary?.chunks ?? backup?.chunks ?? [];
   const items = entries.map((e) => checkOne(outDir, e));
   const chain = checkChain(entries);
+  const chainGaps = checkChainGaps(entries);
   const bad = items.filter((i) => i.status === 'CORRUPT' || i.status === 'MISSING').map((i) => i.file);
   const pending = items.filter((i) => i.status === 'QUARANTINED').map((i) => i.file);
   const ok = manifest.ok && bad.length === 0 && pending.length === 0 && chain.length === 0;
-  return { ok, manifest, items, chain, bad: [...bad, ...pending] };
+  return { ok, manifest, items, chain, chainGaps, bad: [...bad, ...pending] };
 }
 
 // Re-fetch every bad chunk by hash from the relay, then re-verify clean.
@@ -266,6 +322,7 @@ export function repairAll(outDir: string, relayDir: string): RepairResult {
     for (const item of first.items) {
       if (item.status === 'OK') continue;
       try {
+        assertChunkName(item.file);
         const entry = manifest.chunks.find((e) => e.file === item.file);
         if (!entry) throw new Error(`unknown chunk ${item.file}`);
         const good = fetchRelayBytes(relayDir, entry);

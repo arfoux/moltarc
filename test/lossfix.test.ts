@@ -99,7 +99,8 @@ describe('relay-ack guard on forget and gc', () => {
     forgetChunks(outDir, [middle], relayDir);
 
     const v = verifyFull(outDir);
-    assert.equal(v.chain.length, 1);
-    assert.ok(!v.ok);
+    assert.equal(v.chain.length, 0);
+    assert.equal(v.chainGaps.length, 1);
+    assert.ok(v.ok);
   });
 });

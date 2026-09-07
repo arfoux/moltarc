@@ -4,6 +4,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { sha256hex, crc32c } from './chunk.js';
+import { assertSha } from './guard.js';
 
 export interface BundleMember {
   name: string;
@@ -79,6 +80,7 @@ export function loadBundleManifest(dir: string): BundleManifest {
 }
 
 export function readBundleRef(dir: string, ref: BundleRef): Buffer {
+  assertSha(ref.sha256);
   return readFileSync(join(dir, BUNDLE_REFS_DIR, ref.sha256));
 }
 
@@ -97,6 +99,7 @@ export function verifyBundle(dir: string): BundleVerify {
   for (const r of m.refs) {
     let data: Buffer;
     try {
+      assertSha(r.sha256);
       data = readFileSync(join(dir, BUNDLE_REFS_DIR, r.sha256));
     } catch {
       errors.push(`missing ref: ${r.name}`);

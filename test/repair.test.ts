@@ -114,4 +114,26 @@ describe('moltarc repair', () => {
     assert.match(r.failed[0].error, /relay copy hash differs from manifest/);
     assert.deepEqual(verifyFull(outDir).bad, [victim]);
   });
+
+  it('truncated chunk is re-fetched by hash from the relay', { timeout: 30_000 }, async () => {
+    const { outDir, relayDir, files } = await shippedArchive('repair-truncate');
+    const victim = files[1];
+    const full = join(outDir, 'warm', victim);
+    const buf = readFileSync(full);
+    writeFileSync(full, buf.subarray(0, Math.floor(buf.length / 2)));
+
+    const before = verifyFull(outDir);
+    assert.deepEqual(before.bad, [victim]);
+    assert.equal(before.items.find((i) => i.file === victim)?.status, 'CORRUPT');
+
+    const r = repairAll(outDir, relayDir);
+    assert.ok(r.ok);
+    assert.deepEqual(r.repaired, [victim]);
+    assert.equal(r.failed.length, 0);
+    assert.ok(r.verify.ok);
+    assert.ok(
+      readFileSync(join(outDir, 'warm', victim)).equals(readFileSync(join(relayDir, 'chunks', victim))),
+      'repaired bytes equal the relay copy',
+    );
+  });
 });

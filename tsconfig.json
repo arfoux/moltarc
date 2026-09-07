@@ -8,5 +8,5 @@
     "declaration": true,
     "skipLibCheck": true
   },
-  "include": ["src", "test", "bench", "examples", "bin"]
+  "include": ["src", "test", "bench", "examples", "bin", "ext/moltarc.ts"]
 }

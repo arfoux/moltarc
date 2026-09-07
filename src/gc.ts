@@ -12,12 +12,6 @@ import { dictHex } from './dict.js';
 // Reserve policy: sweep only deletes (no tar/manifest writes), so it never
 // trips the 50MB reserve. Write paths (seal, mergeCold, sweepCold --apply)
 // call checkReserve first and throw before any half-write; see cold.ts.
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, statfsSync, unlinkSync } from 'fs';
-import { join } from 'path';
-import { loadManifest } from './manifest.js';
-import { readRelayIndex } from './ship.js';
-import { sha256hex } from './chunk.js';
-import { dictHex } from './dict.js';
 
 // Seal refuses below this much free space so it never half-writes a chunk,
 // watermark, or manifest copy.
@@ -56,6 +50,8 @@ export interface SweepResult {
   dictOrphans: string[]; // dict files unreferenced by any live manifest entry
   dictsRemoved: string[]; // orphan dicts deleted (dryRun:false only)
   dictBytesReclaimed: number;
+  litter: string[]; // tmp/state litter found (relative sub/file), reported even on dry-run
+  litterRemoved: string[]; // litter deleted (dryRun:false only)
   bytesReclaimed: number;
   dryRun: boolean;
   chunks: number;
@@ -174,7 +170,32 @@ export function sweep(outDir: string, opts: SweepOpts = {}): SweepResult {
     } catch { /* no dicts dir yet: nothing orphaned */ }
     if (dryRun) dictBytesReclaimed = dictOrphanBytes;
   }
-  return { orphans, removed, skippedUnacked, dictOrphans, dictsRemoved, dictBytesReclaimed, bytesReclaimed, dryRun, chunks, bytes };
+  // Tmp/state litter: crashed writers leave <name>.tmp.<pid> / <name>.tmp
+  // fragments behind (chunk, manifest, tar, dict, thumb, ship-index writes
+  // all stage through a .tmp name). They are never referenced by the
+  // manifest, so sweep collects them here. Live data never carries a .tmp
+  // fragment in its name, and the dict-survey keep above still gates every
+  // real dict delete: this only removes tmp fragments, never live dicts.
+  const litter: string[] = [];
+  const litterRemoved: string[] = [];
+  for (const sub of ['warm', 'cold', 'dicts', '.']) {
+    const dir = sub === '.' ? outDir : join(outDir, sub);
+    let names: string[] = [];
+    try {
+      names = readdirSync(dir).filter((f: string) => f.includes('.tmp')).sort();
+    } catch { continue; } // dir absent: nothing littered here
+    for (const f of names) {
+      const rel = sub === '.' ? f : `${sub}/${f}`;
+      litter.push(rel);
+      if (!dryRun) {
+        try {
+          unlinkSync(join(dir, f));
+          litterRemoved.push(rel);
+        } catch { /* raced delete: ignore */ }
+      }
+    }
+  }
+  return { orphans, removed, skippedUnacked, dictOrphans, dictsRemoved, dictBytesReclaimed, litter, litterRemoved, bytesReclaimed, dryRun, chunks, bytes };
 }
 
 export interface StatusInfo {

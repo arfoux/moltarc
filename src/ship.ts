@@ -1,10 +1,12 @@
 // moltarc ship — delta by hash, chunked resume, text-first lanes, exponential backoff.
 // Relay = directory (cold side): <relay>/chunks/*.chk + index.json {sha256: file}.
 // Never deletes source chunks.
-import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from 'fs';
+import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync, writeSync } from 'fs';
 import { join } from 'path';
 import { sha256hex } from './chunk.js';
+import { atomicWrite } from './guard.js';
 import { loadManifest } from './manifest.js';
+import { assertMigrated } from './migrate.js';
 import type { ChunkEntry } from './manifest.js';
 
 export interface ShipOpts {
@@ -38,13 +40,18 @@ export function laneOf(e: ChunkEntry): number {
   return isBlobTable(e.table) ? 1 : 0;
 }
 
-export function planShipment(entries: ChunkEntry[], remote: RelayIndex, includeBlobs: boolean): { missing: ChunkEntry[]; skipped: string[] } {
+export interface ShipmentSkip {
+  file: string;
+  reason: 'quarantined' | 'blob-deferred' | 'already-acked';
+}
+
+export function planShipment(entries: ChunkEntry[], remote: RelayIndex, includeBlobs: boolean): { missing: ChunkEntry[]; skipped: ShipmentSkip[] } {
   const missing: ChunkEntry[] = [];
-  const skipped: string[] = [];
+  const skipped: ShipmentSkip[] = [];
   for (const e of entries) {
-    if (e.quarantined) { skipped.push(e.file); continue; }
-    if (!includeBlobs && laneOf(e) === 1) { skipped.push(e.file); continue; }
-    if (remote.chunks[e.sha256]) { skipped.push(e.file); continue; }
+    if (e.quarantined) { skipped.push({ file: e.file, reason: 'quarantined' }); continue; }
+    if (!includeBlobs && laneOf(e) === 1) { skipped.push({ file: e.file, reason: 'blob-deferred' }); continue; }
+    if (remote.chunks[e.sha256]) { skipped.push({ file: e.file, reason: 'already-acked' }); continue; }
     missing.push(e);
   }
   missing.sort((a, b) => laneOf(a) - laneOf(b) || a.seqMin - b.seqMin);
@@ -57,15 +64,6 @@ export function readRelayIndex(relayDir: string): RelayIndex {
   } catch {
     return { chunks: {} };
   }
-}
-
-function saveRelayIndex(relayDir: string, idx: RelayIndex): void {
-  const dest = join(relayDir, 'index.json');
-  const tmp = `${dest}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(idx, null, 1)}\n`);
-  const fd = openSync(tmp, 'r+');
-  try { fsyncSync(fd); } finally { closeSync(fd); }
-  renameSync(tmp, dest);
 }
 
 const sleepDefault = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -126,11 +124,17 @@ export async function sendChunked(src: string, dst: string, statePath: string, o
 }
 
 export async function ship(opts: ShipOpts): Promise<ShipResult> {
+  // Downgrade guard first: refuse old manifests, but an outDir with no
+  // manifest yet ships normally (nothing to migrate; loadManifest rebuilds).
+  if (existsSync(join(opts.outDir, 'manifest.json')) || existsSync(join(opts.outDir, 'manifest.bak.json'))) {
+    assertMigrated(opts.outDir);
+  }
   const { manifest } = loadManifest(opts.outDir);
   const relayChunks = join(opts.relayDir, 'chunks');
   mkdirSync(relayChunks, { recursive: true });
   const remote = readRelayIndex(opts.relayDir);
-  const { missing, skipped } = planShipment(manifest.chunks, remote, opts.includeBlobs ?? false);
+  const { missing, skipped: planned } = planShipment(manifest.chunks, remote, opts.includeBlobs ?? false);
+  const skipped: string[] = planned.map((s) => s.file);
   const blockBytes = opts.blockBytes ?? 64 * 1024;
   const sleep = opts.sleep ?? sleepDefault;
   const sent: string[] = [];
@@ -154,7 +158,9 @@ export async function ship(opts: ShipOpts): Promise<ShipResult> {
     remote.chunks[e.sha256] = e.file;
     try { unlinkSync(join(opts.relayDir, `.ship-state-${e.sha256.slice(0, 12)}.json`)); } catch { /* legacy journal name: best-effort */ }
   }
-  if (sent.length > 0) saveRelayIndex(opts.relayDir, remote);
+  // Atomic relay index: pid tmp + fsync + rename + dir fsync via the shared
+  // guard, so a kill lands on the old index or the new one, never a torn write.
+  if (sent.length > 0) atomicWrite(join(opts.relayDir, 'index.json'), `${JSON.stringify(remote, null, 1)}\n`);
   // Dictionaries are tiny, immutable, content-hashed: copy-if-missing, no resume needed.
   const dictSrc = join(opts.outDir, 'dicts');
   const dictDst = join(opts.relayDir, 'dicts');

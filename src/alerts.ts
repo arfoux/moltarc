@@ -20,6 +20,8 @@ export interface UnackedAlert {
   quarantined: number;
   freeBytes: number;
   reasons: string[];
+  /** dimensions that could not be read; counts for them are zero, not measured. */
+  unknown: string[];
 }
 
 const D_WARN_UNACKED = 5;
@@ -41,15 +43,16 @@ export function checkUnacked(outDir: string, relayDir: string, thresholds: Alert
 
   let unacked = 0;
   let quarantined = 0;
+  const unknown: string[] = [];
   try {
     unacked = statusInfo(outDir, relayDir).unacked;
   } catch {
-    unacked = 0;
+    unknown.push('status unreadable: unacked unknown');
   }
   try {
     quarantined = loadManifest(outDir).manifest.chunks.filter((e) => e.quarantined).length;
   } catch {
-    quarantined = 0;
+    unknown.push('manifest unreadable: quarantined unknown');
   }
   const override = thresholds.freeBytes;
   const avail = typeof override === "number" && Number.isFinite(override) ? override : freeSpaceBytes(outDir);
@@ -67,8 +70,8 @@ export function checkUnacked(outDir: string, relayDir: string, thresholds: Alert
 
   if (quarantined >= critQuar) escalate('critical', `quarantined ${quarantined} >= critical ${critQuar}`);
   else if (quarantined >= warnQuar) escalate('warn', `quarantined ${quarantined} >= warn ${warnQuar}`);
-
   if (avail <= critFree) escalate("critical", `free ${avail} <= critical ${critFree}`);
   else if (avail <= warnFree) escalate("warn", `free ${avail} <= warn ${warnFree}`);
-  return { level, unacked, quarantined, freeBytes: avail, reasons };
+  for (const u of unknown) escalate('warn', u);
+  return { level, unacked, quarantined, freeBytes: avail, reasons, unknown };
 }

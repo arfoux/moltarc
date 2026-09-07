@@ -28,10 +28,15 @@ export interface PerfMeasure {
   findId: string;
   findIters: number;
   findMedianMs: number;
+  findP50Ms: number;
+  findP99Ms: number;
+  findIds: string[];
+  findColdMs: number;
   findFetched: number;
   findPruned: number;
   machine: string;
 }
+export const FIND_ID_COUNT = 6;
 
 function warmBytesOf(outDir: string): { bytes: number; chunks: number } {
   const warm = join(outDir, 'warm');
@@ -45,8 +50,12 @@ function machineSpec(): string {
 }
 
 function median(xs: number[]): number {
+  return percentile(xs, 50);
+}
+function percentile(xs: number[], p: number): number {
+  if (xs.length === 0) return 0;
   const s = [...xs].sort((a, b) => a - b);
-  return s[Math.floor(s.length / 2)];
+  return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))];
 }
 
 function args(): Record<string, string> {
@@ -94,15 +103,27 @@ export async function measurePerf(dir: string, rows: number, seed: number, findI
   await seal({ hotDb: corpus.mixedPath, outDir });
   const delta = await ship({ outDir, relayDir: relay });
 
-  // 1/3 point of the seeded corpus is a sales row: the lookup fetches exactly
-  // 1 chunk (mid-corpus ids can be photo-ref rows needing 2 fetches).
-  const findId = `trx-${String(Math.floor(rows / 3)).padStart(8, '0')}`;
-  const probe = findTrx({ outDir, trxId: findId });
+  // Spread ids across the corpus so p50/p99 covers early/late chunks, not one
+  // lucky chunk. The first lookup of each id is cold (manifest/dict caches
+  // miss); the timed samples after it are warm.
+  const findIds = Array.from({ length: FIND_ID_COUNT }, (_, k) =>
+    `trx-${String(Math.floor((rows * (k + 1)) / (FIND_ID_COUNT + 1))).padStart(8, '0')}`);
+  const findId = findIds[Math.floor(findIds.length / 3)];
+  const cold: number[] = [];
   const samples: number[] = [];
-  for (let i = 0; i < findIters; i++) {
-    const t = performance.now();
-    findTrx({ outDir, trxId: findId });
-    samples.push(performance.now() - t);
+  let findFetched = 0;
+  let findPruned = 0;
+  for (const id of findIds) {
+    const t0 = performance.now();
+    const probe = findTrx({ outDir, trxId: id });
+    cold.push(performance.now() - t0);
+    findFetched += probe.chunksFetched;
+    findPruned += probe.chunksPruned;
+    for (let i = 0; i < findIters; i++) {
+      const t = performance.now();
+      findTrx({ outDir, trxId: id });
+      samples.push(performance.now() - t);
+    }
   }
 
   return {
@@ -113,7 +134,9 @@ export async function measurePerf(dir: string, rows: number, seed: number, findI
     deltaRows, deltaShipBytes: delta.bytes, deltaShipChunks: delta.sent.length,
     deltaVsFull: fullShipBytes > 0 ? delta.bytes / fullShipBytes : 0,
     findId, findIters, findMedianMs: median(samples),
-    findFetched: probe.chunksFetched, findPruned: probe.chunksPruned,
+    findP50Ms: percentile(samples, 50), findP99Ms: percentile(samples, 99),
+    findIds, findColdMs: median(cold),
+    findFetched, findPruned,
     machine: machineSpec(),
   };
 }
@@ -128,7 +151,8 @@ async function main(): Promise<void> {
   const p = await measurePerf(out, rows, seed, findIters);
   console.log(`seal: input=${p.inputBytes}B warm=${p.warmBytes}B chunks=${p.chunks} time=${p.sealMs.toFixed(0)}ms rate=${p.sealMBs.toFixed(1)}MB/s`);
   console.log(`ship: full=${p.fullShipBytes}B in ${p.fullShipChunks} chunk(s), delta(${p.deltaRows} rows)=${p.deltaShipBytes}B in ${p.deltaShipChunks} chunk(s), delta/full=${p.deltaVsFull.toFixed(3)}`);
-  console.log(`find: ${p.findId} median=${p.findMedianMs.toFixed(2)}ms over ${p.findIters} iters (fetched=${p.findFetched} pruned=${p.findPruned})`);
+  console.log(`find: ${p.findIds.length} ids x${p.findIters} iters cold-median=${p.findColdMs.toFixed(2)}ms warm p50=${p.findP50Ms.toFixed(2)}ms p99=${p.findP99Ms.toFixed(2)}ms (fetched=${p.findFetched} pruned=${p.findPruned})`);
+  console.log('find note: first lookup per id is cold (manifest/dict cache miss); p50/p99 pool warm lookups only');
   console.log(`machine: ${p.machine}`);
   recordMeasured(here, 'perf', {
     rows: p.rows, seed: p.seed,
@@ -137,8 +161,11 @@ async function main(): Promise<void> {
     fullShipBytes: p.fullShipBytes, fullShipChunks: p.fullShipChunks,
     deltaRows: p.deltaRows, deltaShipBytes: p.deltaShipBytes,
     deltaShipChunks: p.deltaShipChunks, deltaVsFull: p.deltaVsFull.toFixed(3),
-    findId: p.findId, findIters: p.findIters,
+    findId: p.findId, findIds: p.findIds.join(','), findIters: p.findIters,
     findMedianMs: p.findMedianMs.toFixed(2),
+    findP50Ms: p.findP50Ms.toFixed(2), findP99Ms: p.findP99Ms.toFixed(2),
+    findColdMs: p.findColdMs.toFixed(2),
+    findNote: 'first lookup per id is cold (manifest/dict cache miss); p50/p99 pool warm lookups only',
     findFetched: p.findFetched, findPruned: p.findPruned,
     machine: p.machine,
   });

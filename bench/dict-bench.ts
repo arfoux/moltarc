@@ -5,23 +5,41 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { generateMixedCorpus, measureArchive, recordMeasured } from './mixed-corpus.js';
+import { TARGET_BYTES } from '../src/seal.js';
 import type { ArchiveMeasure } from './mixed-corpus.js';
+export const DICT_SMALL_TARGET = 16 * 1024;
+export const DICT_PROD_TARGET = TARGET_BYTES;
 
 export interface DictDelta {
   plain: ArchiveMeasure;
   withDict: ArchiveMeasure;
   savedBytes: number;
   savedPct: number;
+  targetBytes?: number;
+  prodPlain?: ArchiveMeasure;
+  prodWithDict?: ArchiveMeasure;
+  prodSavedBytes?: number;
+  prodSavedPct?: number;
+  prodTargetBytes?: number;
 }
 
-export async function measureDictDelta(dir: string, rows: number, seed: number, targetBytes = 16 * 1024): Promise<DictDelta> {
+export async function measureDictDelta(dir: string, rows: number, seed: number, targetBytes = DICT_SMALL_TARGET): Promise<DictDelta> {
   // Small target => several chunks: each chunk starts zstd cold, so the shared
   // trained dict is where it can actually help.
   const corpus = generateMixedCorpus(dir, rows, seed);
   const plain = await measureArchive(corpus.textPath, join(dir, 'arch-plain'), { trainDict: false, targetBytes });
   const withDict = await measureArchive(corpus.textPath, join(dir, 'arch-dict'), { trainDict: true, targetBytes });
   const savedBytes = plain.warmBytes - withDict.warmBytes;
-  return { plain, withDict, savedBytes, savedPct: (100 * savedBytes) / plain.warmBytes };
+  // Production honesty: the same corpus at the 2MB production chunk size,
+  // where one chunk amortizes the cold start and the dict has less to add.
+  const prodPlain = await measureArchive(corpus.textPath, join(dir, 'arch-plain-prod'), { trainDict: false, targetBytes: DICT_PROD_TARGET });
+  const prodWithDict = await measureArchive(corpus.textPath, join(dir, 'arch-dict-prod'), { trainDict: true, targetBytes: DICT_PROD_TARGET });
+  const prodSavedBytes = prodPlain.warmBytes - prodWithDict.warmBytes;
+  return {
+    plain, withDict, savedBytes, savedPct: (100 * savedBytes) / plain.warmBytes, targetBytes,
+    prodPlain, prodWithDict, prodSavedBytes, prodSavedPct: (100 * prodSavedBytes) / prodPlain.warmBytes,
+    prodTargetBytes: DICT_PROD_TARGET,
+  };
 }
 
 const DICT_START = '<!-- DICT-MEASURED-START -->';
@@ -29,17 +47,22 @@ const DICT_END = '<!-- DICT-MEASURED-END -->';
 
 export function dictTable(d: DictDelta): string {
   const kb = (n: number) => `${(n / 1024).toFixed(1)}KB`;
+  const smallLabel = d.targetBytes ? `${Math.round(d.targetBytes / 1024)}KB chunks` : 'small chunks';
+  const prodLabel = d.prodTargetBytes ? `${Math.round(d.prodTargetBytes / 1024 / 1024)}MB production chunks` : '2MB production chunks';
+  const prod = d.prodPlain && d.prodWithDict && d.prodSavedBytes !== undefined && d.prodSavedPct !== undefined;
   return [
     `${DICT_START}`,
-    '| repetitive text, dict off vs on | warm archive | ratio |',
-    '|---|---|---|',
-    `| plain (no trained dict) | ${kb(d.plain.warmBytes)} | **${d.plain.ratio.toFixed(1)}x** |`,
-    `| with 32KB per-table dict | ${kb(d.withDict.warmBytes)} | **${d.withDict.ratio.toFixed(1)}x** |`,
-    `| saving | ${kb(d.savedBytes)} (${d.savedPct.toFixed(1)}%) | — |`,
+    `| repetitive text, dict off vs on | warm (${smallLabel}) | ratio | warm (${prodLabel}) | ratio |`,
+    '|---|---|---|---|---|',
+    `| plain (no trained dict) | ${kb(d.plain.warmBytes)} | **${d.plain.ratio.toFixed(1)}x** | ${prod && d.prodPlain ? `${kb(d.prodPlain.warmBytes)}` : 'n/a (re-run bench)'} | ${prod && d.prodPlain ? `**${d.prodPlain.ratio.toFixed(1)}x**` : 'n/a'} |`,
+    `| with 32KB per-table dict | ${kb(d.withDict.warmBytes)} | **${d.withDict.ratio.toFixed(1)}x** | ${prod && d.prodWithDict ? `${kb(d.prodWithDict.warmBytes)}` : 'n/a (re-run bench)'} | ${prod && d.prodWithDict ? `**${d.prodWithDict.ratio.toFixed(1)}x**` : 'n/a'} |`,
+    `| saving | ${kb(d.savedBytes)} (${d.savedPct.toFixed(1)}%) | — | ${prod ? `${kb(d.prodSavedBytes as number)} (${(d.prodSavedPct as number).toFixed(1)}%)` : 'n/a (re-run bench)'} | — |`,
     '',
     '_Measured by `bun bench/dict-bench.ts --write-readme`; same corpus both sides, ' +
     'only the dictionary differs. Columnar delta/RLE/inline-dict already captures most ' +
-    'repetition — the trained dict takes what is left._',
+    `repetition — the trained dict takes what is left. Small variant sealed with targetBytes=${d.targetBytes ?? 'unknown'} ` +
+    `(${d.withDict.chunks} chunks); production variant with targetBytes=${d.prodTargetBytes ?? 'unknown'} ` +
+    `(${d.prodWithDict ? d.prodWithDict.chunks : 'unknown'} chunks), where one chunk amortizes the cold start._`,
     `${DICT_END}`,
   ].join('\n');
 }
@@ -58,12 +81,19 @@ async function main(): Promise<void> {
   const here = dirname(fileURLToPath(import.meta.url));
   const out = get('out', join(here, 'dict-out'));
   const d = await measureDictDelta(out, rows, seed);
-  console.log(`dict: plain=${d.plain.warmBytes}B dict=${d.withDict.warmBytes}B saved=${d.savedBytes}B (${d.savedPct.toFixed(1)}%) chunks=${d.withDict.chunks}`);
+  console.log(`dict: plain=${d.plain.warmBytes}B dict=${d.withDict.warmBytes}B saved=${d.savedBytes}B (${d.savedPct.toFixed(1)}%) chunks=${d.withDict.chunks} targetBytes=${d.targetBytes ?? DICT_SMALL_TARGET}`);
+  console.log(`dict-prod: plain=${d.prodPlain?.warmBytes}B dict=${d.prodWithDict?.warmBytes}B saved=${d.prodSavedBytes}B (${d.prodSavedPct?.toFixed(1)}%) chunks=${d.prodWithDict?.chunks} targetBytes=${d.prodTargetBytes ?? DICT_PROD_TARGET}`);
   recordMeasured(here, 'dict', {
     corpus: 'repetitive tx text, same corpus both sides, dict off vs on', rows, seed,
+    targetBytes: d.targetBytes ?? DICT_SMALL_TARGET, plainChunks: d.plain.chunks, dictChunks: d.withDict.chunks,
     plainWarm: d.plain.warmBytes, plainRatio: d.plain.ratio.toFixed(1),
     dictWarm: d.withDict.warmBytes, dictRatio: d.withDict.ratio.toFixed(1),
     savedBytes: d.savedBytes, savedPct: d.savedPct.toFixed(1),
+    prodTargetBytes: d.prodTargetBytes ?? DICT_PROD_TARGET,
+    prodPlainWarm: d.prodPlain?.warmBytes ?? 0, prodPlainRatio: d.prodPlain?.ratio.toFixed(1) ?? '0',
+    prodDictWarm: d.prodWithDict?.warmBytes ?? 0, prodDictRatio: d.prodWithDict?.ratio.toFixed(1) ?? '0',
+    prodSavedBytes: d.prodSavedBytes ?? 0, prodSavedPct: (d.prodSavedPct ?? 0).toFixed(1),
+    prodPlainChunks: d.prodPlain?.chunks ?? 0, prodDictChunks: d.prodWithDict?.chunks ?? 0,
   });
   if (argv.includes('--write-readme')) {
     const readme = join(here, '..', 'README.md');

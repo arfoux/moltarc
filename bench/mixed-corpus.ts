@@ -2,7 +2,7 @@
 // Split: 60% repetitive tx text, 25% free-form notes, 15% blob hash-refs whose
 // bytes live in a sidecar and NEVER enter the mandatory archive.
 // Usage: bun bench/mixed-corpus.ts [--rows 6000] [--seed 7] [--out bench/out] [--write-readme]
-import { mkdirSync, readFileSync, statSync, readdirSync, writeFileSync, existsSync, rmSync } from 'fs';
+import { mkdirSync, readFileSync, statSync, readdirSync, writeFileSync, existsSync, rmSync, renameSync, openSync, fsyncSync, closeSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { randomBytes, createHash } from 'crypto';
@@ -157,11 +157,29 @@ export const MEASURED_PATH = 'measured.json';
 export function recordMeasured(benchDir: string, key: string, value: Record<string, number | string>): void {
   const dest = join(benchDir, MEASURED_PATH);
   let cur: Record<string, unknown> = {};
+  let hadFile = false;
   try {
     cur = JSON.parse(readFileSync(dest, 'utf8')) as Record<string, unknown>;
-  } catch { /* first bench run: start empty */ }
+    hadFile = true;
+  } catch (err) {
+    // Missing file is the normal first-run case. A torn file must abort loud:
+    // silently resetting would drop every other bench's numbers.
+    if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+      throw new Error(`recordMeasured: refusing to overwrite torn ${dest}: ${(err as Error).message}`);
+    }
+  }
+  if (hadFile && (cur === null || typeof cur !== 'object' || Array.isArray(cur))) {
+    throw new Error(`recordMeasured: refusing to overwrite non-object ${dest}`);
+  }
   cur[key] = value;
-  writeFileSync(dest, `${JSON.stringify(cur, null, 1)}\n`);
+  // Atomic tmp+rename in the same dir: readers never see a half-written file.
+  const tmp = `${dest}.${process.pid}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(cur, null, 1)}\n`);
+  try {
+    const fd = openSync(tmp, 'r');
+    try { fsyncSync(fd); } finally { closeSync(fd); }
+  } catch { /* fsync best effort: the rename below is still atomic */ }
+  renameSync(tmp, dest);
 }
 
 const README_START = '<!-- SLA-MEASURED-START -->';

@@ -18,6 +18,7 @@ interface Measured {
   mixed: Record<string, number | string>;
   photo: Record<string, number | string>;
   dict: Record<string, number | string>;
+  perf: Record<string, number | string>;
 }
 
 function loadMeasured(): Measured {
@@ -31,6 +32,7 @@ function loadMeasured(): Measured {
   for (const key of ['mixed', 'photo', 'dict'] as const) {
     assert.ok(m[key], `bench/measured.json missing ${key}: re-run that bench with --write-readme`);
   }
+  assert.ok(m.perf, 'bench/measured.json missing perf: run bun bench/perf.ts');
   return m as Measured;
 }
 
@@ -68,15 +70,30 @@ describe('readme numbers come from benches', () => {
       rawJpegRatio: num(m.photo.rawJpegRatio),
       photoWarm: num(m.photo.photoWarm), textWarm: num(m.photo.textWarm),
     };
+    const gate = {
+      jpegBytes: num(m.photo.gateJpegBytes),
+      quarantined: String(m.photo.gateQuarantined) === 'true',
+      warmBytes: num(m.photo.gateWarm),
+    };
     assert.equal(
       section(readme, '<!-- PHOTO-MEASURED-START -->', '<!-- PHOTO-MEASURED-END -->'),
-      photoTable(photo, num(m.photo.jpegBytes)).trim(),
+      photoTable(photo, num(m.photo.jpegBytes), gate).trim(),
     );
 
+    assert.ok(
+      m.dict.prodPlainChunks !== undefined && m.dict.prodDictChunks !== undefined,
+      'bench/measured.json dict missing prodPlainChunks/prodDictChunks: ' +
+      'bench/dict-bench.ts must record prod chunk counts alongside prodPlainWarm/prodDictWarm, then re-run with --write-readme',
+    );
     const dict = {
-      plain: { inputBytes: 0, warmBytes: num(m.dict.plainWarm), ratio: num(m.dict.plainRatio), chunks: 0 },
-      withDict: { inputBytes: 0, warmBytes: num(m.dict.dictWarm), ratio: num(m.dict.dictRatio), chunks: 0 },
+      plain: { inputBytes: 0, warmBytes: num(m.dict.plainWarm), ratio: num(m.dict.plainRatio), chunks: num(m.dict.plainChunks) },
+      withDict: { inputBytes: 0, warmBytes: num(m.dict.dictWarm), ratio: num(m.dict.dictRatio), chunks: num(m.dict.dictChunks) },
       savedBytes: num(m.dict.savedBytes), savedPct: num(m.dict.savedPct),
+      targetBytes: num(m.dict.targetBytes),
+      prodPlain: { inputBytes: 0, warmBytes: num(m.dict.prodPlainWarm), ratio: num(m.dict.prodPlainRatio), chunks: num(m.dict.prodPlainChunks) },
+      prodWithDict: { inputBytes: 0, warmBytes: num(m.dict.prodDictWarm), ratio: num(m.dict.prodDictRatio), chunks: num(m.dict.prodDictChunks) },
+      prodSavedBytes: num(m.dict.prodSavedBytes), prodSavedPct: num(m.dict.prodSavedPct),
+      prodTargetBytes: num(m.dict.prodTargetBytes),
     };
     assert.equal(
       section(readme, '<!-- DICT-MEASURED-START -->', '<!-- DICT-MEASURED-END -->'),
@@ -111,5 +128,16 @@ describe('readme numbers come from benches', () => {
       assert.ok(v, `unparseable ratio token: **${b}**`);
       assert.ok(measured.has(v), `**${b}** matches no bench in measured.json`);
     }
+  });
+
+  it('perf bench records seal/ship/find including warm p50/p99', { timeout: 30_000 }, () => {
+    const m = loadMeasured();
+    for (const key of ['sealMs', 'sealMBs', 'fullShipBytes', 'deltaShipBytes', 'findMedianMs', 'findP50Ms', 'findP99Ms', 'findColdMs', 'findIters', 'machine']) {
+      assert.ok(m.perf[key] !== undefined && m.perf[key] !== '', `bench/measured.json perf missing ${key}: run bun bench/perf.ts`);
+    }
+    const p50 = Number(m.perf.findP50Ms);
+    const p99 = Number(m.perf.findP99Ms);
+    assert.ok(Number.isFinite(p50) && Number.isFinite(p99), 'perf p50/p99 must be numeric: run bun bench/perf.ts');
+    assert.ok(p99 >= p50, `perf p99 (${p99}ms) below p50 (${p50}ms): re-run bun bench/perf.ts`);
   });
 });

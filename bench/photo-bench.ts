@@ -11,6 +11,9 @@ import { mulberry32, recordMeasured } from './mixed-corpus.js';
 
 export const PHOTO_QUALITY = 85;
 export const PHOTO_SIZE = 128;
+// Gate-sized variant: decoded bytes clear the 256KB foto gate
+// (FOTO_INLINE_LIMIT_BYTES), so it seals via the quarantine path.
+export const PHOTO_GATE_SIZE = 640;
 
 export interface PhotoCorpus {
   hotPath: string;
@@ -23,8 +26,11 @@ export interface PhotoCorpus {
 // Deterministic sensor-noise JPEGs, box-blurred toward natural-image
 // statistics: incompressible by construction, real jpeg container.
 export function makeJpeg(seed: number): Buffer {
+  return makeJpegSized(seed, PHOTO_SIZE);
+}
+export function makeJpegSized(seed: number, size: number): Buffer {
   const rnd = mulberry32(seed);
-  const w = PHOTO_SIZE;
+  const w = size;
   const n = w * w;
   const px = Buffer.alloc(n * 3);
   for (let i = 0; i < n; i++) {
@@ -134,11 +140,40 @@ function concatJpegs(_dir: string, photos: number, seed: number): Buffer {
   for (let p = 0; p < photos; p++) parts.push(makeJpeg(seed * 1000 + p));
   return Buffer.concat(parts);
 }
+export interface PhotoGateMeasure {
+  jpegBytes: number;
+  quarantined: boolean;
+  warmBytes: number;
+}
+
+// Gate path: one jpeg whose decoded bytes clear FOTO_INLINE_LIMIT_BYTES
+// (256KB), sealed alone. Proves oversize base64 quarantines to foto/*.bin
+// instead of sealing inline like the small variants below.
+export async function measureGateJpeg(dir: string, seed: number): Promise<PhotoGateMeasure> {
+  const jpeg = makeJpegSized(seed, PHOTO_GATE_SIZE);
+  mkdirSync(dir, { recursive: true });
+  const hotPath = join(dir, 'hot-gate.jsonl');
+  const line = JSON.stringify({ device_id: 'cam-01', seq: 1, ts: 1_700_000_000_000, id: 'trx-00000001', table: 'photo', body: jpeg.toString('base64') });
+  writeFileSync(hotPath, `${line}\n`);
+  const outDir = join(dir, 'arch-gate');
+  rmSync(outDir, { recursive: true, force: true });
+  await seal({ hotDb: hotPath, outDir });
+  let quarantined = false;
+  try {
+    quarantined = readdirSync(join(outDir, 'foto')).length > 0;
+  } catch { /* no foto dir: the jpeg sealed inline */ }
+  const warm = join(outDir, 'warm');
+  const warmBytes = readdirSync(warm).filter((f: string) => f.endsWith('.chk')).reduce((n: number, f: string) => n + statSync(join(warm, f)).size, 0);
+  return { jpegBytes: jpeg.length, quarantined, warmBytes };
+}
 
 const PHOTO_START = '<!-- PHOTO-MEASURED-START -->';
 const PHOTO_END = '<!-- PHOTO-MEASURED-END -->';
 
-export function photoTable(m: PhotoMeasure, jpegBytes: number): string {
+export function photoTable(m: PhotoMeasure, jpegBytes: number, gate?: PhotoGateMeasure): string {
+  const gateRow = gate
+    ? `| 1 gate-sized jpeg (${PHOTO_GATE_SIZE}x${PHOTO_GATE_SIZE} blurred noise, q85, ${Math.round(gate.jpegBytes / 1024)}KB raw, over the 256KB foto gate) | base64 line | foto/*.bin sidecar + hash ref | ${gate.quarantined ? 'quarantined (bytes excluded)' : '**NOT quarantined — sealed inline**'} |`
+    : '| 1 gate-sized jpeg (>=256KB, over the 256KB foto gate) | base64 line | foto/*.bin sidecar + hash ref | not measured — re-run bench |';
   return [
     `${PHOTO_START}`,
     '| bytes | input | warm archive | ratio |',
@@ -146,8 +181,11 @@ export function photoTable(m: PhotoMeasure, jpegBytes: number): string {
     `| 50 real jpeg (128x128 blurred noise, q85, ${Math.round(jpegBytes / 1024)}KB raw) sealed as base64 lines | base64 in jsonl | per-table chunks | **${m.photoRatio.toFixed(2)}x** |`,
     `| same jpeg bytes, raw zstd (the foto claim) | ${Math.round(jpegBytes / 1024)}KB raw | zstd | **${m.rawJpegRatio.toFixed(2)}x, inside 1.0-1.2x** |`,
     `| tx text beside the photos | text jsonl | text chunks + dict | **${m.textRatio.toFixed(1)}x** |`,
+    gateRow,
     '',
     '_Measured by `bun bench/photo-bench.ts --write-readme`; deterministic (seeded). ' +
+    'The 128x128 variants (~12KB each) sit below the 256KB foto gate and seal inline — ' +
+    'only the gate-sized row exercises the quarantine path. ' +
     'The base64 line ratio rides above raw because of the text envelope — raw jpeg bytes sit ' +
     'at ~1.05x, which is why photo bytes never enter the mandatory archive (hash refs only, lazy fetch)._',
     `${PHOTO_END}`,
@@ -170,17 +208,20 @@ async function main(): Promise<void> {
   const here = dirname(fileURLToPath(import.meta.url));
   const out = get('out', join(here, 'photo-out'));
   const { corpus, measure } = await measurePhotoCorpus(out, photos, rows, seed);
+  const gate = await measureGateJpeg(join(out, 'gate'), seed);
   console.log(`photos: jpeg=${corpus.jpegBytes}B photo-lines=${corpus.photoInputBytes}B warm=${measure.photoWarm}B ratio=${measure.photoRatio.toFixed(2)}x`);
   console.log(`raw jpeg zstd ratio=${measure.rawJpegRatio.toFixed(2)}x text ratio=${measure.textRatio.toFixed(1)}x`);
+  console.log(`gate: jpeg=${gate.jpegBytes}B (${Math.round(gate.jpegBytes / 1024)}KB) quarantined=${gate.quarantined} warm=${gate.warmBytes}B`);
   recordMeasured(here, 'photo', {
     corpus: `${photos} real jpeg 128x128 blurred noise q${PHOTO_QUALITY} plus ${rows} tx text rows`, photos, rows, seed,
     jpegBytes: corpus.jpegBytes, photoWarm: measure.photoWarm, photoRatio: measure.photoRatio.toFixed(2),
     rawJpegRatio: measure.rawJpegRatio.toFixed(2), textRatio: measure.textRatio.toFixed(1), textWarm: measure.textWarm,
+    gateSize: PHOTO_GATE_SIZE, gateJpegBytes: gate.jpegBytes, gateQuarantined: String(gate.quarantined), gateWarm: gate.warmBytes,
   });
   if (argv.includes('--write-readme')) {
     const readme = join(here, '..', 'README.md');
     const cur = readFileSync(readme, 'utf8');
-    const table = photoTable(measure, corpus.jpegBytes);
+    const table = photoTable(measure, corpus.jpegBytes, gate);
     const pattern = new RegExp(`${PHOTO_START}[\\s\\S]*${PHOTO_END}`);
     const next = existsSync(readme) && pattern.test(cur)
       ? cur.replace(pattern, () => table)

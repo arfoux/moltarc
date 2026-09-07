@@ -14,13 +14,15 @@
 // Reserve policy: every write path below (merge tar + manifest, sweep repack
 // tmp + manifest) calls checkReserve first and throws before any byte lands,
 // so a full disk never leaves a torn tar or a half-rewritten manifest.
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from 'fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync, unlinkSync, writeSync } from 'fs';
 import { join } from 'path';
 import { loadManifest, saveManifestAtomic } from './manifest.js';
 import { readRelayIndex } from './ship.js';
 import { checkReserve } from './gc.js';
 import { HEADER_SIZE, decodeHeader, DICT_FLAG } from './chunk.js';
 import { dictFile, dictHex } from './dict.js';
+import { assertMigrated } from './migrate.js';
+import { atomicWrite } from './guard.js';
 
 export interface TarMember {
   name: string;
@@ -53,6 +55,12 @@ function tarHeader(name: string, size: number): Buffer {
   return h;
 }
 
+// Tar decode caps: a corrupt size field must fail loud instead of slicing
+// gigabytes. Members are sealed chunks (<=4MB) or 32KB dicts; 32MB per
+// member and 50k members bound any bomb while real segments pass untouched.
+export const TAR_MEMBER_MAX_BYTES = 32 * 1024 * 1024;
+export const TAR_MAX_MEMBERS = 50_000;
+
 export function writeTar(members: TarMember[]): Buffer {
   const parts: Buffer[] = [];
   for (const m of members) {
@@ -76,10 +84,19 @@ export function readTar(buf: Buffer): TarMember[] {
     const sizeField = h.subarray(124, 136).toString('ascii').replace(/\0| /g, '');
     const size = sizeField === '' ? 0 : parseInt(sizeField, 8);
     if (!name || !Number.isFinite(size) || size < 0) throw new Error(`bad tar header at offset ${off}`);
+    if (size > TAR_MEMBER_MAX_BYTES) throw new Error(`tar member ${name} size ${size}B exceeds ${TAR_MEMBER_MAX_BYTES}B cap (likely corrupt)`);
+    // Checksum: the stored octal at 148..156 must match the header with the
+    // field counted as spaces, else the header (name/size) is untrusted.
+    const storedRaw = h.subarray(148, 156).toString('ascii').replace(/\0| /g, '');
+    const stored = storedRaw === '' ? NaN : parseInt(storedRaw, 8);
+    if (!Number.isFinite(stored) || stored !== checksum(h)) {
+      throw new Error(`tar checksum mismatch for ${name || '(unnamed)'} at offset ${off} (corrupt header)`);
+    }
     const start = off + 512;
     const data = Buffer.from(buf.subarray(start, start + size));
     if (data.length < size) throw new Error(`truncated tar member ${name}`);
     out.push({ name, data });
+    if (out.length > TAR_MAX_MEMBERS) throw new Error(`tar member count exceeds ${TAR_MAX_MEMBERS} cap (likely corrupt)`);
     off = start + size + ((512 - (size % 512)) % 512);
   }
   return out;
@@ -102,6 +119,11 @@ export interface MergeResult {
 }
 
 export function mergeCold(outDir: string, opts: MergeOpts = {}): MergeResult {
+  // Downgrade guard: refuse old manifests, but a manifest-less outDir merges
+  // normally (nothing to migrate; loadManifest rebuilds from warm files).
+  if (existsSync(join(outDir, 'manifest.json')) || existsSync(join(outDir, 'manifest.bak.json'))) {
+    assertMigrated(outDir);
+  }
   const warm = join(outDir, 'warm');
   const cold = join(outDir, 'cold');
   mkdirSync(cold, { recursive: true });
@@ -156,11 +178,30 @@ export function mergeCold(outDir: string, opts: MergeOpts = {}): MergeResult {
     ...pending.map((p) => ({ name: p.name, full: join(warm, p.name), size: p.size })),
     ...dictMembers,
   ];
+  // Monotonic segment counter: max(disk, manifest) alone reuses numbers
+  // after a fully-dead segment is pruned, so the high-water mark persists
+  // in cold/.seg-seq. Gaps on crash are fine; reuse is not (a stale reader
+  // holding seg-N must never see a different seg-N). Bumped only after the
+  // reserve check passes, so a refused merge writes nothing at all.
   const existing = existsSync(cold) ? readdirSync(cold).map(segIndex).filter((n) => n >= 0) : [];
-  const next = existing.length === 0 ? 1 : Math.max(...existing) + 1;
+  let floor = 0;
+  try {
+    const rawSeq = readFileSync(join(cold, '.seg-seq'), 'utf8').trim();
+    const parsed = Number.parseInt(rawSeq, 10);
+    if (Number.isFinite(parsed) && parsed > 0) floor = Math.floor(parsed);
+  } catch { /* no counter yet: derive from disk + manifest */ }
+  for (const s of manifest.cold) {
+    const n = segIndex(s.file);
+    if (n > floor) floor = n;
+  }
+  for (const n of existing) {
+    if (n > floor) floor = n;
+  }
+  const next = floor + 1;
   const segment = `seg-${String(next).padStart(6, '0')}.tar`;
   // Reserve first: fail-closed before the tar tmp or the manifest moves.
   checkReserve(outDir, opts.freeSpaceBytes, 'merge');
+  atomicWrite(join(cold, '.seg-seq'), `${String(next)}\n`);
   const dest = join(cold, segment);
   const tmp = `${dest}.tmp.${process.pid}`;
   // Pass 2 (streaming copy): header + file windows + pad per member, one
@@ -212,8 +253,17 @@ export function mergeCold(outDir: string, opts: MergeOpts = {}): MergeResult {
     try { unlinkSync(tmp); } catch { /* ignore: nothing torn left behind */ }
     throw err;
   }
-  if (outFd >= 0) closeSync(outFd);
+  // Durability: fsync the tmp tar before the rename, then the dir after, so
+  // a crash lands on the old segment or the full new one, never a torn tar.
+  if (outFd >= 0) {
+    try { fsyncSync(outFd); } finally { closeSync(outFd); }
+    outFd = -1;
+  }
   renameSync(tmp, dest);
+  try {
+    const dfd = openSync(cold, 'r+');
+    try { fsyncSync(dfd); } finally { closeSync(dfd); }
+  } catch { /* Windows: dir fsync unsupported, rename is enough */ }
   manifest.cold.push({ file: segment, chunks: pending.map((m) => m.name), bytes: total });
   saveManifestAtomic(outDir, manifest);
   return { segment, chunks: pending.map((m) => m.name), dicts: dictMembers.map((m) => m.name), bytes: total };
@@ -258,6 +308,9 @@ function readHeaderPrefix(full: string): { ok: boolean; flags: number; dictId: n
 // silently. The check is atomic: all-or-nothing, no partial forget.
 export function forgetChunks(outDir: string, files: string[], relayDir: string): { removed: string[] } {
   if (!relayDir) throw new Error('forget needs the relayDir ship wrote to (refusing silent unacked delete)');
+  if (existsSync(join(outDir, 'manifest.json')) || existsSync(join(outDir, 'manifest.bak.json'))) {
+    assertMigrated(outDir);
+  }
   const { manifest } = loadManifest(outDir);
   const drop = new Set(files);
   const targets = manifest.chunks.filter((e) => drop.has(e.file));
@@ -288,6 +341,7 @@ export interface ColdSweepResult {
   segments: string[];
   pruned: string[];
   repacked: RepackedSeg[];
+  corrupt: string[]; // segments that failed tar decode: left on disk, never counted as reclaimed
   bytesBefore: number;
   bytesAfter: number;
   bytesReclaimed: number;
@@ -301,6 +355,11 @@ export function sweepCold(outDir: string, opts: ColdSweepOpts = {}): ColdSweepRe
   // Reserve first when writes may follow: fail-closed before any repack tmp
   // or manifest rewrite lands. Read-only dry-runs never touch the disk.
   if (!dryRun) checkReserve(outDir, opts.freeSpaceBytes, 'cold sweep');
+  // Downgrade guard on mutating runs only: dry-run is read-only and must
+  // keep reporting on old archives; apply refuses to rewrite them.
+  if (!dryRun && (existsSync(join(outDir, 'manifest.json')) || existsSync(join(outDir, 'manifest.bak.json')))) {
+    assertMigrated(outDir);
+  }
   const { manifest } = loadManifest(outDir);
   manifest.cold ??= [];
   const refs = new Set(manifest.chunks.map((e) => e.file));
@@ -312,6 +371,7 @@ export function sweepCold(outDir: string, opts: ColdSweepOpts = {}): ColdSweepRe
   const segments = readdirSync(cold).filter((f) => segIndex(f) >= 0).sort();
   const pruned: string[] = [];
   const repacked: RepackedSeg[] = [];
+  const corrupt: string[] = [];
   let bytesBefore = 0;
   let bytesAfter = 0;
   for (const file of segments) {
@@ -328,7 +388,11 @@ export function sweepCold(outDir: string, opts: ColdSweepOpts = {}): ColdSweepRe
     try {
       members = readTar(raw);
     } catch {
-      continue; // corrupt segment: quarantine by leaving it, never delete blind
+      // Corrupt segment: report it and leave it on disk, never delete blind.
+      // Its bytes stay in bytesAfter so they are NOT counted as reclaimed.
+      corrupt.push(file);
+      bytesAfter += raw.length;
+      continue;
     }
     const live = members.filter((m) => (m.name.startsWith('dicts/') ? liveDicts.has(m.name) : refs.has(m.name) && (known === null || known.has(m.name))));
     const liveNames = new Set(live.filter((m) => !m.name.startsWith('dicts/')).map((m) => m.name));
@@ -352,10 +416,9 @@ export function sweepCold(outDir: string, opts: ColdSweepOpts = {}): ColdSweepRe
     repacked.push({ file, before: raw.length, after: next.length });
     bytesAfter += next.length;
     if (!dryRun) {
-      const dest = join(cold, file);
-      const tmp = `${dest}.tmp.${process.pid}`;
-      writeFileSync(tmp, next);
-      renameSync(tmp, dest);
+      // Atomic repack: tmp + fsync + rename + dir fsync via the shared
+      // guard, so a crash keeps the old segment, never a torn repack.
+      atomicWrite(join(cold, file), next);
       const seg = manifest.cold.find((s) => s.file === file);
       if (seg) {
         seg.chunks = [...liveNames].sort();
@@ -367,7 +430,7 @@ export function sweepCold(outDir: string, opts: ColdSweepOpts = {}): ColdSweepRe
   if (!dryRun && (pruned.length > 0 || repacked.length > 0)) {
     saveManifestAtomic(outDir, manifest);
   }
-  return { segments, pruned, repacked, bytesBefore, bytesAfter, bytesReclaimed, dryRun };
+  return { segments, pruned, repacked, corrupt, bytesBefore, bytesAfter, bytesReclaimed, dryRun };
 }
 
 export function coldDiskBytes(outDir: string): { segments: number; chunks: number; bytes: number } {

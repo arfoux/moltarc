@@ -85,3 +85,108 @@ describe('p2p transport', () => {
     }
   });
 });
+
+describe('p2p hardening', () => {
+  function startEvilServer(script: (send: (m: unknown) => void) => void): { url: string; stop: () => void } {
+    const server = Bun.serve({
+      port: 0,
+      fetch(req, server) {
+        if (server.upgrade(req)) return;
+        return new Response('evil p2p', { status: 426 });
+      },
+      websocket: {
+        message(ws, raw) {
+          let msg: unknown;
+          try {
+            msg = JSON.parse(String(raw));
+          } catch {
+            return;
+          }
+          if (!msg || typeof msg !== 'object' || !('t' in msg) || msg.t !== 'hello') return;
+          const send = (m: unknown) => {
+            try {
+              ws.send(JSON.stringify(m));
+            } catch {
+              /* peer gone */
+            }
+          };
+          send({ t: 'welcome', have: [] });
+          script(send);
+        },
+      },
+    });
+    return { url: `ws://127.0.0.1:${server.port}/p2p`, stop: () => server.stop() };
+  }
+
+  it('drops malicious wire entries without storing or escaping warm/', { timeout: 60_000 }, async () => {
+    const dir = scratch('p2p-evil');
+    const bDir = join(dir, 'node-b');
+    const goodSha = sha256hex(Buffer.from('good-bytes'));
+    const evil = startEvilServer((send) => {
+      const badEntries = [
+        { file: '../evil.chk', sha256: goodSha, bytes: 4 },
+        { file: 'evil.chk', sha256: 'not-hex', bytes: 4 },
+      ];
+      for (const e of badEntries) {
+        send({ t: 'meta', entry: e, blocks: 1, blockBytes: 1024 });
+        send({ t: 'block', sha256: e.sha256, offset: 0, data: Buffer.from('evil').toString('base64') });
+        send({ t: 'end', sha256: e.sha256 });
+      }
+      send({ t: 'endbatch' });
+    });
+    try {
+      const r = await syncFromPeer(evil.url, bDir, { blockBytes: 1024 });
+      assert.equal(r.received.length, 0);
+      assert.ok(r.failed.length >= 2, `malicious entries surface in failed, got ${JSON.stringify(r.failed)}`);
+      assert.ok(!existsSync(join(dir, 'evil.chk')), 'path-traversal entry escaped warm/');
+      assert.ok(!existsSync(join(bDir, 'evil.chk')), 'bad-sha entry stored at top level');
+      const warm = existsSync(join(bDir, 'warm')) ? readdirSync(join(bDir, 'warm')) : [];
+      assert.ok(warm.every((f) => !f.includes('evil')), `nothing evil stored in warm/: ${warm.join(',')}`);
+    } finally {
+      evil.stop();
+    }
+  });
+
+  it('rejects oversize blocks that exceed entry.bytes and blockBytes*4', { timeout: 60_000 }, async () => {
+    const dir = scratch('p2p-oversize');
+    const bDir = join(dir, 'node-b');
+    const sha = sha256hex(Buffer.from('big-bytes'));
+    const evil = startEvilServer((send) => {
+      send({ t: 'meta', entry: { file: 'big.chk', sha256: sha, bytes: 16 }, blocks: 1, blockBytes: 1024 });
+      send({ t: 'block', sha256: sha, offset: 0, data: Buffer.alloc(32 * 1024, 7).toString('base64') });
+      send({ t: 'end', sha256: sha });
+      send({ t: 'endbatch' });
+    });
+    try {
+      await assert.rejects(syncFromPeer(evil.url, bDir, { blockBytes: 1024 }), /oversize/);
+      assert.ok(!existsSync(join(bDir, 'warm', 'big.chk')), 'oversize chunk must not land as a usable chunk');
+    } finally {
+      evil.stop();
+    }
+  });
+
+  it('serve:false fetches without leaking local chunks to the peer', { timeout: 60_000 }, async () => {
+    const dirA = scratch('p2p-serve-a');
+    const dirB = scratch('p2p-serve-b');
+    const { hotDb: hotA } = writeHotLog(dirA, { rows: 3000, uniqueBodies: true });
+    const { hotDb: hotB } = writeHotLog(dirB, { rows: 3000, uniqueBodies: true, table: 'returns' });
+    const aDir = join(dirA, 'node-a');
+    const bDir = join(dirB, 'node-b');
+    const ra = await seal({ hotDb: hotA, outDir: aDir, targetBytes: 16 * 1024 });
+    const rb = await seal({ hotDb: hotB, outDir: bDir, targetBytes: 16 * 1024 });
+    assert.ok(ra.chunks.length >= 1 && rb.chunks.length >= 1);
+    const before = readdirSync(join(aDir, 'warm')).sort();
+    const bFiles = readdirSync(join(bDir, 'warm'));
+    assert.ok(bFiles.some((f) => !before.includes(f)), 'setup: B holds a chunk A lacks');
+    const a = startNode({ outDir: aDir, port: 0, blockBytes: 4096 });
+    try {
+      const r = await syncFromPeer(a.url, bDir, { blockBytes: 4096, serve: false });
+      assert.ok(r.received.length >= 1, 'fetch-only still receives the peer chunks');
+      assert.deepEqual(readdirSync(join(aDir, 'warm')).sort(), before, 'fetch-only served nothing back');
+      const v = verifyAll(bDir);
+      assert.ok(v.ok, `fetch-only copy verifies clean, bad=${v.bad.join(',')}`);
+    } finally {
+      a.stop();
+    }
+  });
+});

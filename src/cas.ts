@@ -2,15 +2,11 @@
 // Identical sha bytes store once; per-owner ref files give the refcount, so
 // two sealed forks link the same object and neither deletes it while the
 // other still holds a ref. Pure fs, no sqlite, no native deps.
-import { createHash } from 'crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { sha256hex } from './chunk.js';
 
 const SHA_RE = /^[0-9a-f]{64}$/;
-
-export function sha256hex(data: Uint8Array): string {
-  return createHash('sha256').update(data).digest('hex');
-}
 
 function assertSha(sha: string): void {
   if (!SHA_RE.test(sha)) throw new Error(`cas: bad sha ${sha.slice(0, 32)}`);

@@ -4,6 +4,7 @@ import { sha256hex } from './chunk.js';
 import { appendEntries, loadManifest, saveManifestAtomic } from './manifest.js';
 import type { ChunkEntry } from './manifest.js';
 import { verifyChunk } from './verify.js';
+import { assertChunkName, assertSha } from './guard.js';
 //   the manifest entry is merged once via appendentries; never duplicated.
 // hash reuse: sha256hex only, imported from chunk.js. verify via verifychunk.
 
@@ -23,16 +24,23 @@ export interface P2PNodeOpts {
   port: number;
   blockBytes?: number;
   failAtBytes?: number;
+  /** aggregate bytes accepted per connection; excess drops the chunk and closes. */
+  maxSessionBytes?: number;
 }
-
 export interface P2PSyncOpts {
   blockBytes?: number;
   timeoutMs?: number;
+  /** fetch-only: receive from the peer but ignore inbound want (serve nothing). */
+  serve?: boolean;
+  /** aggregate bytes accepted per sync run; excess rejects like an oversize chunk. */
+  maxSessionBytes?: number;
 }
 
 export interface P2PSyncResult {
   received: string[];
   skipped: string[];
+  /** remote error messages and ack-false shas surfaced without failing the sync. */
+  failed: string[];
   bytes: number;
   resumed: boolean;
 }
@@ -221,6 +229,41 @@ function storeBlock(outDir: string, entry: ChunkEntry, offset: number, data: Buf
   return end;
 }
 
+/** Upper bound for any single chunk accepted off the wire. */
+export const MAX_CHUNK_BYTES = 4 * 1024 * 1024;
+/** Default aggregate cap per connection / sync run against volume fill. */
+export const MAX_SESSION_BYTES = 256 * 1024 * 1024;
+
+/** Wire entries must name a real chunk file, carry a valid sha, and fit the cap. */
+function validWireEntry(entry: ChunkEntry): boolean {
+  try {
+    if (!entry || typeof entry !== 'object') return false;
+    assertChunkName(entry.file);
+    assertSha(entry.sha256);
+    if (!Number.isFinite(entry.bytes) || entry.bytes <= 0 || entry.bytes > MAX_CHUNK_BYTES) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Per-chunk receive cap: the entry's own byte count, 4MB when absent/invalid. */
+function chunkCapFor(entry: ChunkEntry): number {
+  return Number.isFinite(entry.bytes) && (entry.bytes as number) > 0
+    ? Math.min(entry.bytes as number, MAX_CHUNK_BYTES)
+    : MAX_CHUNK_BYTES;
+}
+
+function validHave(h: P2PHave): boolean {
+  try {
+    assertSha(h.sha256);
+    assertChunkName(h.file);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 interface Conn {
   send: (msg: WireMsg) => void;
   close: () => void;
@@ -229,6 +272,12 @@ interface Conn {
 async function serveItems(outDir: string, conn: Conn, items: P2PWantItem[], blockBytes: number, failState: { armed: number | undefined }): Promise<void> {
   let sentBytes = 0;
   for (const item of items) {
+    try {
+      assertSha(item.sha256);
+    } catch {
+      conn.send({ t: 'error', message: `bad chunk request ${String(item?.sha256).slice(0, 12)}` });
+      continue;
+    }
     const hit = entryBySha(outDir, item.sha256);
     if (!hit) {
       conn.send({ t: 'error', message: `unknown chunk ${item.sha256.slice(0, 12)}` });
@@ -263,9 +312,30 @@ async function serveItems(outDir: string, conn: Conn, items: P2PWantItem[], bloc
 export function startNode(opts: P2PNodeOpts): { port: number; url: string; stop: () => void } {
   ensureArchive(opts.outDir);
   const outDir = opts.outDir;
+  // Pending receives are per-connection: a malicious peer must not be able to
+  // poison or complete another connection's chunks.
+  const pendingByConn = new WeakMap<object, Map<string, { entry: ChunkEntry }>>();
+  const pendingFor = (ws: object): Map<string, { entry: ChunkEntry }> => {
+    let m = pendingByConn.get(ws);
+    if (!m) {
+      m = new Map();
+      pendingByConn.set(ws, m);
+    }
+    return m;
+  };
+  // Aggregate volume per connection against disk-fill by many valid chunks.
+  const sessionUsedByConn = new WeakMap<object, { used: number }>();
+  const maxSessionBytes = opts.maxSessionBytes ?? MAX_SESSION_BYTES;
+  const sessionFor = (ws: object): { used: number } => {
+    let st = sessionUsedByConn.get(ws);
+    if (!st) {
+      st = { used: 0 };
+      sessionUsedByConn.set(ws, st);
+    }
+    return st;
+  };
   const blockBytes = opts.blockBytes ?? 16 * 1024;
   const failState: { armed: number | undefined } = { armed: opts.failAtBytes };
-  const pendingAcks = new Map<string, { entry: ChunkEntry }>();
   const server = Bun.serve({
     port: opts.port,
     fetch(req, server) {
@@ -275,6 +345,9 @@ export function startNode(opts: P2PNodeOpts): { port: number; url: string; stop:
     websocket: {
       open() {
         /* hello drives */
+      },
+      close(ws) {
+        pendingByConn.delete(ws);
       },
       async message(ws, raw) {
         const send = (msg: WireMsg) => {
@@ -291,31 +364,69 @@ export function startNode(opts: P2PNodeOpts): { port: number; url: string; stop:
           return;
         }
         const conn: Conn = { send, close: () => { try { ws.close(); } catch { /* gone */ } } };
+        const pendingAcks = pendingFor(ws);
         if (msg.t === 'hello') {
           const local = summaryOf(outDir);
           const localShas = new Set(local.map((h) => h.sha256));
           send({ t: 'welcome', have: local });
           // delta this node still needs from the dialer.
           const need: P2PWantItem[] = [];
-          for (const h of msg.have) {
+          const have = Array.isArray(msg.have) ? msg.have : [];
+          for (const h of have) {
+            if (!validHave(h)) continue;
             if (!localShas.has(h.sha256) && !existsSync(join(outDir, 'warm', h.file))) need.push({ sha256: h.sha256, offset: 0 });
           }
           if (need.length > 0) send({ t: 'want', items: need });
           return;
         }
         if (msg.t === 'want') {
-          await serveItems(outDir, conn, msg.items, blockBytes, failState);
+          const items = Array.isArray(msg.items) ? msg.items : [];
+          await serveItems(outDir, conn, items, blockBytes, failState);
           return;
         }
         if (msg.t === 'meta') {
+          if (!validWireEntry(msg.entry)) {
+            send({ t: 'error', message: `bad entry ${String(msg.entry?.file ?? '?')}` });
+            return;
+          }
           pendingAcks.set(msg.entry.sha256, { entry: msg.entry });
           // resume: drop stale bytes when the sender restarts at 0 for a new sha.
           return;
         }
         if (msg.t === 'block') {
+          try {
+            assertSha(msg.sha256);
+          } catch {
+            return;
+          }
           const rec = pendingAcks.get(msg.sha256);
           if (!rec) return;
-          storeBlock(outDir, rec.entry, msg.offset, Buffer.from(msg.data, 'base64'));
+          let buf: Buffer;
+          try {
+            buf = Buffer.from(msg.data, 'base64');
+          } catch {
+            return;
+          }
+          if (!Number.isFinite(msg.offset) || (msg.offset as number) < 0) return;
+          if (buf.length > blockBytes * 4) {
+            send({ t: 'error', message: `oversize block for ${rec.entry.file}` });
+            pendingAcks.delete(msg.sha256);
+            conn.close();
+            return;
+          }
+          const end = storeBlock(outDir, rec.entry, msg.offset, buf);
+          if (end > chunkCapFor(rec.entry)) {
+            send({ t: 'error', message: `oversize chunk ${rec.entry.file}` });
+            pendingAcks.delete(msg.sha256);
+            conn.close();
+          }
+          const st = sessionFor(ws);
+          st.used += buf.length;
+          if (st.used > maxSessionBytes) {
+            send({ t: 'error', message: `session cap exceeded` });
+            pendingAcks.delete(msg.sha256);
+            conn.close();
+          }
           return;
         }
         if (msg.t === 'end') {
@@ -347,12 +458,16 @@ export function startNode(opts: P2PNodeOpts): { port: number; url: string; stop:
 export function syncFromPeer(peerUrl: string, outDir: string, opts: P2PSyncOpts = {}): Promise<P2PSyncResult> {
   ensureArchive(outDir);
   const timeoutMs = opts.timeoutMs ?? 30_000;
+  const blockBytes = opts.blockBytes ?? 16 * 1024;
   return new Promise<P2PSyncResult>((resolve, reject) => {
     const received: string[] = [];
     const skipped: string[] = [];
+    const failed: string[] = [];
     let bytes = 0;
+    const pendingIn = new Map<string, { entry: ChunkEntry; expected: number; got: number }>();
+    let sessionUsed = 0;
+    const maxSessionBytes = opts.maxSessionBytes ?? MAX_SESSION_BYTES;
     let resumed = false;
-    let pendingIn = new Map<string, { entry: ChunkEntry; expected: number; got: number }>();
     let endbatch = false;
     let settled = false;
     const done = (fn: () => void) => {
@@ -361,14 +476,21 @@ export function syncFromPeer(peerUrl: string, outDir: string, opts: P2PSyncOpts 
       clearTimeout(timer);
       fn();
     };
-    const timer = setTimeout(() => {
+    const onTimeout = () => {
       done(() => reject(new Error('p2p sync timeout')));
       try {
         ws.close();
       } catch {
         /* gone */
       }
-    }, timeoutMs);
+    };
+    let timer = setTimeout(onTimeout, timeoutMs);
+    // Any wire progress pushes the deadline out; only a stalled peer times out.
+    const poke = () => {
+      if (settled) return;
+      clearTimeout(timer);
+      timer = setTimeout(onTimeout, timeoutMs);
+    };
     const ws = new WebSocket(peerUrl) as WebSocket & { close(): void };
     const send = (msg: WireMsg) => ws.send(JSON.stringify(msg));
     const maybeFinish = () => {
@@ -378,7 +500,7 @@ export function syncFromPeer(peerUrl: string, outDir: string, opts: P2PSyncOpts 
         } catch {
           /* closing anyway */
         }
-        const result: P2PSyncResult = { received, skipped, bytes, resumed };
+        const result: P2PSyncResult = { received, skipped, failed, bytes, resumed };
         done(() => resolve(result));
         try {
           ws.close();
@@ -397,12 +519,15 @@ export function syncFromPeer(peerUrl: string, outDir: string, opts: P2PSyncOpts 
       } catch {
         return;
       }
+      poke();
       if (msg.t === 'welcome') {
         const local = new Set(summaryOf(outDir).map((h) => h.sha256));
         const journals = new Map(listJournals(outDir).map((j) => [j.sha256, j.offset]));
         if (journals.size > 0) resumed = true;
         const items: P2PWantItem[] = [];
-        for (const h of msg.have) {
+        const have = Array.isArray(msg.have) ? msg.have : [];
+        for (const h of have) {
+          if (!validHave(h)) continue;
           if (local.has(h.sha256)) {
             skipped.push(h.file);
             continue;
@@ -415,20 +540,84 @@ export function syncFromPeer(peerUrl: string, outDir: string, opts: P2PSyncOpts 
         return;
       }
       if (msg.t === 'want') {
+        // Fetch-only mode serves nothing back: ignore inbound want.
+        if (opts.serve === false) return;
         const conn: Conn = { send, close: () => ws.close() };
-        void serveItems(outDir, conn, msg.items, opts.blockBytes ?? 16 * 1024, { armed: undefined });
+        const items = Array.isArray(msg.items) ? msg.items : [];
+        void serveItems(outDir, conn, items, blockBytes, { armed: undefined });
         return;
       }
       if (msg.t === 'meta') {
+        if (!validWireEntry(msg.entry)) {
+          failed.push(String(msg.entry?.sha256 ?? 'bad-entry'));
+          try {
+            send({ t: 'error', message: `bad entry ${String(msg.entry?.file ?? '?')}` });
+          } catch {
+            /* closing anyway */
+          }
+          return;
+        }
         pendingIn.set(msg.entry.sha256, { entry: msg.entry, expected: msg.entry.bytes, got: 0 });
         return;
       }
       if (msg.t === 'block') {
         const rec = pendingIn.get(msg.sha256);
         if (!rec) return;
-        const n = storeBlock(outDir, rec.entry, msg.offset, Buffer.from(msg.data, 'base64'));
+        let buf: Buffer;
+        try {
+          buf = Buffer.from(msg.data, 'base64');
+        } catch {
+          return;
+        }
+        if (!Number.isFinite(msg.offset) || (msg.offset as number) < 0) return;
+        if (buf.length > blockBytes * 4) {
+          pendingIn.delete(msg.sha256);
+          failed.push(msg.sha256);
+          done(() => reject(new Error(`oversize block for ${rec.entry.file} rejected`)));
+          try {
+            ws.close();
+          } catch {
+            /* closing anyway */
+          }
+          return;
+        }
+        if ((msg.offset as number) + buf.length > chunkCapFor(rec.entry)) {
+          pendingIn.delete(msg.sha256);
+          failed.push(msg.sha256);
+          done(() => reject(new Error(`oversize chunk ${rec.entry.file} rejected`)));
+          try {
+            ws.close();
+          } catch {
+            /* closing anyway */
+          }
+          return;
+        }
+        const n = storeBlock(outDir, rec.entry, msg.offset, buf);
+        if (n > chunkCapFor(rec.entry)) {
+          pendingIn.delete(msg.sha256);
+          failed.push(msg.sha256);
+          done(() => reject(new Error(`oversize chunk ${rec.entry.file} rejected`)));
+          try {
+            ws.close();
+          } catch {
+            /* closing anyway */
+          }
+          return;
+        }
+        sessionUsed += buf.length;
+        if (sessionUsed > maxSessionBytes) {
+          pendingIn.delete(msg.sha256);
+          failed.push(msg.sha256);
+          done(() => reject(new Error(`session cap exceeded`)));
+          try {
+            ws.close();
+          } catch {
+            /* closing anyway */
+          }
+          return;
+        }
         rec.got = n;
-        bytes += Buffer.byteLength(msg.data, 'base64');
+        bytes += buf.length;
         return;
       }
       if (msg.t === 'end') {
@@ -440,6 +629,7 @@ export function syncFromPeer(peerUrl: string, outDir: string, opts: P2PSyncOpts 
           if (how === 'written') received.push(rec.entry.file);
           else skipped.push(rec.entry.file);
         } catch (e) {
+          failed.push(msg.sha256);
           done(() => reject(e as Error));
           try {
             ws.close();
@@ -452,6 +642,7 @@ export function syncFromPeer(peerUrl: string, outDir: string, opts: P2PSyncOpts 
         return;
       }
       if (msg.t === 'ack') {
+        if (!msg.ok) failed.push(msg.sha256);
         return;
       }
       if (msg.t === 'endbatch') {
@@ -460,9 +651,8 @@ export function syncFromPeer(peerUrl: string, outDir: string, opts: P2PSyncOpts 
         return;
       }
       if (msg.t === 'error') {
-        // non-fatal per-chunk errors are already acked; fatal ones reject only
-        // when nothing can still complete.
-        void msg.message;
+        // Non-fatal per-chunk errors are surfaced in failed[]; the batch still completes.
+        failed.push(msg.message);
         return;
       }
     };
@@ -475,7 +665,7 @@ export function syncFromPeer(peerUrl: string, outDir: string, opts: P2PSyncOpts 
         done(() => reject(new Error('connection lost mid-transfer')));
         return;
       }
-      const result: P2PSyncResult = { received, skipped, bytes, resumed };
+      const result: P2PSyncResult = { received, skipped, failed, bytes, resumed };
       done(() => resolve(result));
     };
   });

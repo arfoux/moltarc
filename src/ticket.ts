@@ -1,8 +1,7 @@
-// moltarc ticket — single-spend voucher: offline double-use detection via a
-// local bloom pre-check plus an exact redeemed set for the verdict, with a
-// reconcile report on sync. bloom/hash primitives are import-only reuse.
+// moltarc ticket — single-spend voucher: offline double-use detection via an
+// exact redeemed set, with a reconcile report on sync. hash primitives are
+// import-only reuse.
 import { sha256hex } from './chunk.js';
-import { buildBloom, bloomCheck } from './manifest.js';
 
 export interface Voucher {
   id: string;
@@ -26,7 +25,8 @@ export interface ReconcileReport {
 }
 
 function randNonce(): string {
-  return Math.random().toString(36).slice(2, 10);
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(8));
+  return Buffer.from(bytes).toString('hex');
 }
 
 // deterministic id: same (value, issuedAt, nonce) reissues the same voucher.
@@ -38,11 +38,13 @@ export function issueTicket(value: number, issuedAt: number = Date.now(), nonce:
   return { id, value, issuedAt, nonce };
 }
 
+// in-memory only: the redeemed set lives in this process. callers MUST persist
+// toJSON snapshots and restore via fromJSON, or a restart loses redemption
+// history and spent vouchers become spendable again.
 export class TicketStore {
   private issued = new Map<string, Voucher>();
   private redeemed = new Set<string>();
   private attempts = new Map<string, number>();
-  private bloom = '';
 
   issue(value: number, issuedAt?: number, nonce?: string): Voucher {
     const v = issueTicket(value, issuedAt, nonce);
@@ -62,16 +64,15 @@ export class TicketStore {
     return this.redeemed.has(id);
   }
 
-  // offline redeem: bloom pre-check, exact set decides. second redeem of the
+  // offline redeem: the exact redeemed set decides, O(1) — no scan, no bloom
+  // rebuild. unknown ids are rejected before any attempt is recorded, so
+  // unissued ids never pollute the attempts map. second redeem of the
   // same id reports double-use; unissued ids report unknown.
   redeem(id: string): RedeemResult {
-    this.attempts.set(id, (this.attempts.get(id) ?? 0) + 1);
     if (!this.issued.has(id)) return { ok: false, reason: 'unknown' };
-    if (this.redeemed.has(id) || (this.bloom !== '' && bloomCheck(this.bloom, id) && this.redeemed.has(id))) {
-      return { ok: false, reason: 'double-use' };
-    }
+    this.attempts.set(id, (this.attempts.get(id) ?? 0) + 1);
+    if (this.redeemed.has(id)) return { ok: false, reason: 'double-use' };
     this.redeemed.add(id);
-    this.bloom = buildBloom([...this.redeemed]);
     return { ok: true, reason: 'ok' };
   }
 
@@ -101,11 +102,31 @@ export class TicketStore {
   }
 
   static fromJSON(snap: { issued: Voucher[]; redeemed: string[]; attempts: [string, number][] }): TicketStore {
+    if (typeof snap !== 'object' || snap === null) throw new Error('TicketStore.fromJSON: snapshot must be an object');
+    if (!Array.isArray(snap.issued) || !Array.isArray(snap.redeemed) || !Array.isArray(snap.attempts)) {
+      throw new Error('TicketStore.fromJSON: snapshot needs issued/redeemed/attempts arrays');
+    }
     const s = new TicketStore();
-    for (const v of snap.issued) s.issued.set(v.id, v);
-    for (const id of snap.redeemed) s.redeemed.add(id);
-    for (const [id, n] of snap.attempts) s.attempts.set(id, n);
-    if (s.redeemed.size > 0) s.bloom = buildBloom([...s.redeemed]);
+    for (const v of snap.issued) {
+      if (
+        typeof v !== 'object' || v === null || typeof v.id !== 'string' || v.id === '' ||
+        !Number.isFinite(v.value) || v.value <= 0 || !Number.isFinite(v.issuedAt) ||
+        typeof v.nonce !== 'string' || v.nonce === ''
+      ) {
+        throw new Error('TicketStore.fromJSON: invalid voucher');
+      }
+      s.issued.set(v.id, { id: v.id, value: v.value, issuedAt: v.issuedAt, nonce: v.nonce });
+    }
+    for (const id of snap.redeemed) {
+      if (typeof id !== 'string' || id === '') throw new Error('TicketStore.fromJSON: invalid redeemed id');
+      s.redeemed.add(id);
+    }
+    for (const e of snap.attempts) {
+      if (!Array.isArray(e) || typeof e[0] !== 'string' || e[0] === '' || !Number.isInteger(e[1]) || e[1] < 0) {
+        throw new Error('TicketStore.fromJSON: invalid attempts entry');
+      }
+      s.attempts.set(e[0], e[1]);
+    }
     return s;
   }
 }

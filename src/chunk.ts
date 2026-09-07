@@ -221,12 +221,20 @@ export function decodeRows(raw: Buffer): HotRow[] {
   if (f.dev.length === 0 && f.ids.length > 0) {
     throw new Error('frame corrupt: device dictionary deleted');
   }
-  const bodies: string[] = [];
+  // Pre-check before expansion: a bomb run (n >> ids) would otherwise push
+  // gigabytes of duplicated refs before the count check below ever runs.
+  // Validated indexes make the expansion loop below provably in-range.
+  let planned = 0;
   for (const [p, n] of f.runs) {
     if (!Number.isInteger(p) || p < 0 || p >= f.pool.length) {
       throw new Error(`frame corrupt: body dictionary index ${String(p)} out of range`);
     }
     if (!Number.isInteger(n) || n <= 0) throw new Error('frame corrupt: bad run length');
+    planned += n;
+    if (planned > f.ids.length) throw new Error('frame corrupt: body run count exceeds rows');
+  }
+  const bodies: string[] = [];
+  for (const [p, n] of f.runs) {
     for (let i = 0; i < n; i++) bodies.push(f.pool[p]);
   }
   if (bodies.length !== f.ids.length) throw new Error('frame corrupt: body run count mismatch');

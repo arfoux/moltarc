@@ -28,6 +28,25 @@ describe('sensor', () => {
     assert.equal(flags[12], true);
   });
 
+  it('two-pass baseline: one huge spike does not mask the next spike', { timeout: 30_000 }, () => {
+    const calm = pts(12, 0, 1000, 20);
+    const huge: SensorPoint = { ts: 12_000, value: 10_000, id: 's-huge' };
+    const next: SensorPoint = { ts: 13_000, value: 200, id: 's-next' };
+    const flags = flagAnomalies([...calm, huge, next], { window: 8, z: 3 });
+    assert.equal(flags.slice(0, 12).every((f) => f === false), true);
+    assert.equal(flags[12], true);
+    assert.equal(flags[13], true, 'second spike stays flagged once the first is excluded from the baseline');
+  });
+
+  it('downsample marks buckets containing flagged points', { timeout: 30_000 }, () => {
+    const p = pts(10, 0, 1000, 5);
+    const b = downsample(p, 5000, p.map((_, i) => i === 7));
+    assert.equal(b.length, 2);
+    assert.equal(b[0].anomalous, false);
+    assert.equal(b[1].anomalous, true);
+    assert.throws(() => downsample(p, 5000, [true]), /mismatch/);
+  });
+
   it('routes stale and anomalous points to cold, keeps the rest hot', { timeout: 30_000 }, () => {
     const p = pts(6, 0, 1000, 10);
     const flags = [false, false, true, false, false, false];

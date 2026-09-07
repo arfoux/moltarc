@@ -31,6 +31,10 @@ export interface ReadOnlyArchive {
   repairByHash(...args: unknown[]): never;
   quarantine(...args: unknown[]): never;
   merge(...args: unknown[]): never;
+  migrate(...args: unknown[]): never;
+  syncFromPeer(...args: unknown[]): never;
+  casGc(...args: unknown[]): never;
+  packBundle(...args: unknown[]): never;
 }
 
 export function openArchiveReadOnly(dir: string): ReadOnlyArchive {
@@ -49,6 +53,10 @@ export function openArchiveReadOnly(dir: string): ReadOnlyArchive {
     repairByHash: (..._args: unknown[]): never => { throw refused('repairByHash', dir); },
     quarantine: (..._args: unknown[]): never => { throw refused('quarantine', dir); },
     merge: (..._args: unknown[]): never => { throw refused('merge', dir); },
+    migrate: (..._args: unknown[]): never => { throw refused('migrate', dir); },
+    syncFromPeer: (..._args: unknown[]): never => { throw refused('syncFromPeer', dir); },
+    casGc: (..._args: unknown[]): never => { throw refused('casGc', dir); },
+    packBundle: (..._args: unknown[]): never => { throw refused('packBundle', dir); },
   };
   return Object.freeze(ro);
 }
