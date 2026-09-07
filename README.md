@@ -1,8 +1,6 @@
 # moltarc — shrink + ship + find
 
-Tiered SQLite archive for UMKM-scale data: hot DB stays small and fast,
-warm chunks compress schema-aware, cold archive ships once, query stays partial.
-
+[![ci](https://github.com/arfoux/moltarc/actions/workflows/ci.yml/badge.svg)](https://github.com/arfoux/moltarc/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/moltarc.svg)](https://www.npmjs.com/package/moltarc) [![license](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 ## Pipeline
 
 ```
