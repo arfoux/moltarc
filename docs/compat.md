@@ -53,7 +53,14 @@ empty list serves anyone (LAN default). A non-empty list rejects
 token-less peers and wrong tokens (`not allowed`), never downgrading to
 open. Tokens travel only in `hello`; chunk bytes are unchanged.
 
+## decompress transient (accepted bound, not a bug)
 
+`decompressFrame` allocates the full frame first, then `checkFrameCap`
+enforces 16mb. accepted because: an attacker needs chunk-write access
+already (cheaper DoS exists at that point), aggregate caps bound fan-out
+(p2p session, tar member count/size), and streaming inflate would rewrite
+every decode caller to save a transient allocation that is already bounded.
+re-litigate only with a reachable fan-out sink, not theory.
 ## native extension binary (not a compat surface)
 
 `ext/moltarc.dll` (Windows) / `moltarc.so` (Linux) are local-only build
