@@ -1,6 +1,6 @@
 # moltarc — shrink + ship + find
 
-Tiered SQLite archive for small-business data: hot DB stays small and fast,
+Tiered SQLite database system: hot DB stays small and fast,
 warm chunks compress schema-aware, cold archive ships once, query stays partial.
 
 ```
