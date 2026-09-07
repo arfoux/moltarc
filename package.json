@@ -2,7 +2,7 @@
   "name": "moltarc",
   "version": "0.19.0",
   "description": "Moltarc — shrink + ship + find. Tiered SQLite archive: hot DB, warm chunks, cold archive + manifest.",
-  "keywords": ["sqlite", "archive", "zstd", "offline-first", "pos", "tiered-storage", "bun", "edge", "umkm"],
+  "keywords": ["sqlite", "archive", "zstd", "offline-first", "pos", "point-of-sale", "tiered-storage", "typescript", "data-sync", "umkm"],
   "homepage": "https://github.com/arfoux/moltarc#readme",
   "bugs": { "url": "https://github.com/arfoux/moltarc/issues" },
   "repository": { "type": "git", "url": "git+https://github.com/arfoux/moltarc.git" },
