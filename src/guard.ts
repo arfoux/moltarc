@@ -29,7 +29,8 @@ function fsyncDir(p: string): void {
 }
 
 export function atomicWrite(dest: string, data: Buffer | string): void {
-  const tmp = `${dest}.tmp.${process.pid}`;
+  const nonce = Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0');
+  const tmp = `${dest}.tmp.${process.pid}.${nonce}`;
   writeFileSync(tmp, data);
   fsyncFile(tmp);
   renameSync(tmp, dest);

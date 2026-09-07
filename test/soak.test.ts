@@ -43,7 +43,7 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
 }
 
 
-const OPS = 5000;
+const OPS = Number(process.env.SOAK_OPS) || 5000;
 const CHECK_EVERY = 250;
 const TARGET = 12 * 1024;
 const SEEDS = [1, 7];

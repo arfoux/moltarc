@@ -3,6 +3,21 @@
 User-visible changes per tag, from `git log`. Test-only hardening with no
 behavior change is marked as such.
 
+## unreleased
+
+- Traversal gates: chunk/sha/owner/bundle names reject `/`, `\`, `..`
+  so relay and archive paths can never escape their directories.
+- Chain gaps: `verifyFull` keeps hard chain breaks fatal and reports
+  forward seq skips as `chainGaps` warnings only.
+- Foto ship: `ship --include-blobs` sends `foto/*.bin` sidecars (small
+  copy-if-missing, large resumable) with thumb companions; text ships
+  unchanged without the flag.
+- PSK: opt-in P2P token allowlist (`allowPeers` holds `sha256(token)`);
+  empty serves anyone (LAN default), non-empty rejects unknown peers.
+- Shard pointers: root `chunks[]` stays complete; additive per-month
+  `shards`/`pointers` plus best-effort `manifest-YYYY-MM.json` sidecars
+  speed finds, readers fall back to root on skew.
+
 ## v0.14.0
 
 - Renames the package and CLI from `molt` to `moltarc` (`bin/moltarc.ts`).

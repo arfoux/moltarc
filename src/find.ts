@@ -8,7 +8,7 @@ import { decodeChunk, decodeHeader, fnv1a32, DICT_FLAG } from './chunk.js';
 import type { HotRow } from './chunk.js';
 import { loadDictFor } from './dict.js';
 import { bloomCheck, loadManifest, loadShard, loadSparseIndex, BLOOM_BITS } from './manifest.js';
-import type { ChunkEntry, ColdSegment, Manifest, ManifestShard, SparseDisk } from './manifest.js';
+import type { ChunkEntry, ColdSegment, Manifest, ManifestShard, ShardPointer, SparseDisk } from './manifest.js';
 import { readTar } from './cold.js';
 
 export interface FindOpts {
@@ -236,9 +236,10 @@ export function candidates(entries: ChunkEntry[], trxId: string): { hit: ChunkEn
   return { hit, pruned };
 }
 
-// Shard-resolved warm index: sparse.json picks candidate files with no
-// full-manifest parse, then only candidate months load from their sidecars.
-// Null on any stale/missing sidecar so the caller keeps root behavior.
+// Shard-resolved warm index: sparse.json picks candidate files, then root
+// pointers prune whole months by minKey/maxKey BEFORE any manifest-<month>.json
+// sidecar loads. Null on any absent/stale sidecar or pointer so the caller
+// keeps root behavior.
 function tryShardIndex(outDir: string, trxId: string): {
   hit: ChunkEntry[]; pruned: number; shardsLoaded: number; shardsPruned: number; cold: ColdSegment[];
 } | null {
@@ -258,20 +259,55 @@ function tryShardIndex(outDir: string, trxId: string): {
     if (!month) return null; // sparse/file skew: stay on root
     months.add(month);
   }
+  // Pointer-first prune: drop months whose stamped range misses the key, so
+  // only surviving months pay a shard-file load. Unknown-range or unlisted
+  // months stay candidates; absent/stale pointers keep the old behavior.
+  const pointers = loadPointersForPrune(outDir, sparse.seq);
+  const byPointer = new Map((pointers ?? []).map((p) => [p.name, p]));
+  if (pointers) {
+    for (const month of months) {
+      const p = byPointer.get(month);
+      if (!p || !p.minKey || !p.maxKey) continue;
+      if (trxId < p.minKey || trxId > p.maxKey) months.delete(month);
+    }
+  }
   const loaded: ChunkEntry[] = [];
   for (const month of months) {
     const shard = loadShardCached(outDir, month);
     if (!shard) return null;
     if (shard.seq !== sparse.seq) return null; // reseal raced the sidecars
+    const p = byPointer.get(month);
+    if (p && typeof p.crc32c === 'number' && typeof shard.crc32c === 'number'
+      && (p.crc32c >>> 0) !== (shard.crc32c >>> 0)) return null; // pointer/shard skew: stay on root
     for (const e of shard.chunks) loaded.push(e);
   }
   const loadedFiles = new Set(loaded.map((e) => e.file));
   for (const f of wantFiles) {
-    if (!loadedFiles.has(f)) return null; // shard skew: stay on root
+    if (loadedFiles.has(f)) continue;
+    // Pointer-pruned months never load: expected absence. A file missing from
+    // a month we did load is shard skew: stay on root.
+    const m = monthOf.get(f);
+    if (!m || months.has(m)) return null;
   }
   const { hit, pruned: prunedWithin } = candidates(loaded, trxId);
   const pruned = quarantined + (total - quarantined - loaded.length) + prunedWithin;
   return { hit, pruned, shardsLoaded: months.size, shardsPruned: allMonths.size - months.size, cold };
+}
+
+// Root pointers for the prune above: null when the manifest has none (old
+// archives), is unreadable, or raced the sparse sidecar seq. Null restores
+// the pre-pointer path (load every candidate month).
+function loadPointersForPrune(outDir: string, sparseSeq: number): ShardPointer[] | null {
+  let manifest: Manifest;
+  try {
+    manifest = loadManifestCached(outDir).manifest;
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(manifest.pointers) || manifest.pointers.length === 0) return null;
+  const seq = typeof manifest.seq === 'number' && Number.isFinite(manifest.seq) ? Math.floor(manifest.seq) : 0;
+  if (seq !== sparseSeq) return null;
+  return manifest.pointers;
 }
 
 export function findTrx(opts: FindOpts): FindResult {

@@ -2,19 +2,21 @@
 // rebuilt cold[] preservation, bom strip, appendentries fast path.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { seal } from '../src/seal.js';
 import { mergeCold } from '../src/cold.js';
 import {
   appendEntries,
+  assertShardPointersSize,
   buildManifest,
   loadManifest,
   manifestCrc,
   saveManifestAtomic,
   stripBom,
 } from '../src/manifest.js';
-import type { Manifest } from '../src/manifest.js';
+import type { Manifest, ShardPointer } from '../src/manifest.js';
+import { clearFindCaches, findTrx } from '../src/find.js';
 import { scratch, writeHotLog } from './util.js';
 
 async function sealedArchive(name: string, rows = 800): Promise<{ dir: string; outDir: string }> {
@@ -134,5 +136,66 @@ describe('manifest waste-fix', () => {
     // buildmanifest alone never resurrects it: proves append went through the copy, not disk.
     const scanned = buildManifest(outDir);
     assert.ok(!scanned.chunks.some((e) => e.file === fresh.file));
+  });
+});
+
+describe('manifest shard pointers', () => {
+  async function multiMonthArchive(name: string): Promise<{ dir: string; outDir: string; ids: string[] }> {
+    const dir = scratch(name);
+    // 3-day row steps spread chunks across distinct UTC months; 600 rows pass
+    // seal's 100-row probe cadence so targetBytes actually splits chunks.
+    const { hotDb, ids } = writeHotLog(dir, { rows: 600, uniqueBodies: true, tsStepMs: 3 * 86400 * 1000 });
+    const outDir = join(dir, 'archive');
+    const r = await seal({ hotDb, outDir, targetBytes: 2 * 1024 });
+    assert.ok(r.chunks.length >= 2, `need >=2 chunks, got ${r.chunks.length}`);
+    return { dir, outDir, ids };
+  }
+
+  it('stamps per-month pointers; root keeps chunks; pointers fit 2KB', { timeout: 30_000 }, async () => {
+    const { outDir } = await multiMonthArchive('waste-pointers');
+    const m = loadManifest(outDir).manifest;
+    assert.ok(Array.isArray(m.pointers) && m.pointers.length >= 2, `need >=2 pointers, got ${m.pointers?.length}`);
+    // Root keeps every chunk; pointer counts partition them (additive only).
+    assert.equal(m.pointers.reduce((n, p) => n + p.count, 0), m.chunks.length);
+    for (const p of m.pointers) {
+      assert.match(p.name, /^\d{4}-\d{2}$/, `month key ${p.name}`);
+      assert.equal(p.file, `manifest-${p.name}.json`);
+      assert.ok(p.count >= 1, `${p.name} covers at least one chunk`);
+      assert.ok(p.minKey === '' || p.minKey <= p.maxKey, `${p.name} key range ordered`);
+      assert.ok(p.minTs <= p.maxTs, `${p.name} ts range ordered`);
+      assert.equal(typeof p.crc32c, 'number');
+      assert.ok(existsSync(join(outDir, p.file)), `sidecar ${p.file} on disk`);
+    }
+    assert.deepEqual(m.shards, m.pointers.map((p) => p.name), 'month list matches pointer names');
+    assertShardPointersSize(m.pointers);
+    const bloated: ShardPointer[] = Array.from({ length: 400 }, (_, i) => ({
+      name: `20${String(10 + (i % 80)).padStart(2, '0')}-${String(1 + (i % 12)).padStart(2, '0')}`,
+      file: `manifest-x-${i}.json`,
+      count: 1, minKey: 'a', maxKey: 'z', minTs: 1, maxTs: 2, crc32c: 3,
+    }));
+    assert.throws(() => assertShardPointersSize(bloated), /2048/, 'oversized pointer list throws');
+    // Additive: a resave without changes keeps every stamped month.
+    const months = m.shards?.length ?? 0;
+    saveManifestAtomic(outDir, loadManifest(outDir).manifest);
+    assert.equal(loadManifest(outDir).manifest.shards?.length, months, 'resave never drops months');
+  });
+
+  it('find prunes via pointers to exactly 1 shard month; missing shard falls back to root', { timeout: 30_000 }, async () => {
+    const { outDir, ids } = await multiMonthArchive('waste-pointer-prune');
+    const target = ids[Math.floor(ids.length / 2)];
+    clearFindCaches();
+    const hit = findTrx({ outDir, trxId: target });
+    assert.equal(hit.row.id, target);
+    assert.equal(hit.shardsLoaded, 1, 'pointer prune loads exactly the owning month');
+    assert.ok((hit.shardsPruned ?? 0) >= 1, `pruned ${(hit.shardsPruned ?? 0)} other month(s)`);
+    // Delete the sidecar owning the target month: root fallback still finds it.
+    const mp = loadManifest(outDir).manifest;
+    const owner = mp.pointers?.find((p) => p.minKey !== '' && p.minKey <= target && target <= p.maxKey);
+    assert.ok(owner, 'a pointer owns the target key');
+    unlinkSync(join(outDir, owner.file));
+    clearFindCaches();
+    const fb = findTrx({ outDir, trxId: target });
+    assert.equal(fb.row.id, target, 'root fallback finds the row without its shard');
+    assert.equal(fb.shardsLoaded, undefined, 'fallback path carries no shard counts');
   });
 });

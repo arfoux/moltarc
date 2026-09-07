@@ -37,11 +37,22 @@ chunks and asserts current `find`/`verify` read them.
 - `version` is informational: `loadManifest` accepts any numeric version
   with a sane `chunks` array.
 
-## cold segments
+## shard pointers (additive month list)
 
-`cold/seg-*.tar` members are plain ustar over already-compressed chunks;
-the tar layer has no version and needs none — compat lives in the chunk
-and manifest layers above.
+Root `manifest.json` keeps the full `chunks[]`; `shards`/`pointers`
+(per-month `ShardPointer` month list) are additive only. Shard sidecars
+`manifest-YYYY-MM.json` plus `sparse.json` are best-effort: readers fall
+back to root `chunks[]` on missing sidecars, seq skew, or crc mismatch,
+so old readers work untouched. Proof: `src/find.ts` shard fast path
+returns null to the root scan on any skew.
+
+## p2p token / allowlist
+
+P2P auth is opt-in PSK: `allowPeers` holds `sha256(token)` strings and an
+empty list serves anyone (LAN default). A non-empty list rejects
+token-less peers and wrong tokens (`not allowed`), never downgrading to
+open. Tokens travel only in `hello`; chunk bytes are unchanged.
+
 
 ## native extension binary (not a compat surface)
 

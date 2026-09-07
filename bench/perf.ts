@@ -162,6 +162,10 @@ async function main(): Promise<void> {
   recordMeasured(here, 'perf', {
     rows: p.rows, seed: p.seed,
     inputBytes: p.inputBytes, warmBytes: p.warmBytes, chunks: p.chunks,
+    // Deterministic CI baseline alias: perf seals the same mixed corpus
+    // (rows/seed) as mixed-corpus.ts, so warmBytes is the exact mixed warm
+    // byte count. Wall-ms fields below stay informational only, never gated.
+    mixedWarmBytes: p.warmBytes,
     mixedRatio: p.mixedRatio.toFixed(1),
     sealMs: Math.round(p.sealMs), sealMBs: p.sealMBs.toFixed(1),
     fullShipBytes: p.fullShipBytes, fullShipChunks: p.fullShipChunks,

@@ -199,6 +199,42 @@ describe('p2p hardening', () => {
     });
   });
 
+  it('token guards sync: wrong token syncs nothing, right token syncs', { timeout: 60_000 }, async () => {
+    await withRetry(async () => {
+      const dir = scratch('p2p-token');
+      const { hotDb } = writeHotLog(dir, { rows: 500, uniqueBodies: true });
+      const aDir = join(dir, 'node-a');
+      const bDir = join(dir, 'node-b');
+      await seal({ hotDb, outDir: aDir, targetBytes: 16 * 1024 });
+      const a = startNode({ outDir: aDir, port: 0, token: 'warung-1' });
+      try {
+        await assert.rejects(syncFromPeer(a.url, bDir, { blockBytes: 1024, timeoutMs: 8000 }), /connection lost|timeout/);
+        const allowed = await syncFromPeer(a.url, bDir, { blockBytes: 1024, token: 'warung-1', timeoutMs: 15000 });
+        assert.ok(allowed.received.length >= 1, 'peer with token syncs');
+      } finally {
+        a.stop();
+      }
+    });
+  });
+
+  it('allowlist refuses serve to unlisted peers', { timeout: 60_000 }, async () => {
+    await withRetry(async () => {
+      const dirA = scratch('p2p-allow-a');
+      const dirB = scratch('p2p-allow-b');
+      const { hotDb: hotA } = writeHotLog(dirA, { rows: 500, uniqueBodies: true });
+      const aDir = join(dirA, 'node-a');
+      const bDir = join(dirB, 'node-b');
+      await seal({ hotDb: hotA, outDir: aDir, targetBytes: 16 * 1024 });
+      const other = sha256hex(Buffer.from('warung-lain', 'utf8'));
+      const a = startNode({ outDir: aDir, port: 0, token: 'warung-1', allowPeers: [other] });
+      try {
+        await assert.rejects(syncFromPeer(a.url, bDir, { blockBytes: 1024, token: 'warung-1', timeoutMs: 8000 }), /not allowed|connection lost|timeout/);
+      } finally {
+        a.stop();
+      }
+    });
+  });
+
   it('serve:false fetches without leaking local chunks to the peer', { timeout: 60_000 }, async () => {
     await withRetry(async () => {
       const dirA = scratch('p2p-serve-a');
@@ -240,5 +276,53 @@ describe('p2p hardening', () => {
         a.stop();
       }
     });
+  });
+});
+
+describe('p2p bind retry', () => {
+  it('retries Bun.serve on EADDRINUSE up to 5x; other errors throw at once', { timeout: 30_000 }, () => {
+    const dir = scratch('p2p-bindretry');
+    const bunCtl = Bun as unknown as { serve: typeof Bun.serve };
+    const realServe = bunCtl.serve;
+    try {
+      // Transient contention: two EADDRINUSE then a bind.
+      let flaky = 0;
+      bunCtl.serve = ((opts: Parameters<typeof Bun.serve>[0]) => {
+        flaky++;
+        if (flaky <= 2) {
+          const e = new Error('simulated EADDRINUSE') as NodeJS.ErrnoException;
+          e.code = 'EADDRINUSE';
+          throw e;
+        }
+        return realServe(opts);
+      }) as typeof Bun.serve;
+      const n = startNode({ outDir: join(dir, 'a1'), port: 0 });
+      try {
+        assert.equal(flaky, 3, 'two EADDRINUSE retries then a successful bind');
+        assert.ok(n.port > 0, `bound port ${n.port}`);
+      } finally {
+        n.stop();
+      }
+      // Persistent contention: exactly 5 attempts, then the error surfaces.
+      let stuck = 0;
+      bunCtl.serve = (() => {
+        stuck++;
+        const e = new Error('port still busy') as NodeJS.ErrnoException;
+        e.code = 'EADDRINUSE';
+        throw e;
+      }) as typeof Bun.serve;
+      assert.throws(() => startNode({ outDir: join(dir, 'a2'), port: 0 }), /port still busy/);
+      assert.equal(stuck, 5, 'gives up after 5 attempts');
+      // Unrelated failures are never retried.
+      let other = 0;
+      bunCtl.serve = (() => {
+        other++;
+        throw new Error('boom');
+      }) as typeof Bun.serve;
+      assert.throws(() => startNode({ outDir: join(dir, 'a3'), port: 0 }), /boom/);
+      assert.equal(other, 1, 'non-EADDRINUSE throws at once');
+    } finally {
+      bunCtl.serve = realServe;
+    }
   });
 });

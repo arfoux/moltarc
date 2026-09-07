@@ -10,6 +10,7 @@ import { ship } from '../src/ship.js';
 import { dictHex } from '../src/dict.js';
 import { sweep } from '../src/gc.js';
 import { loadManifest, saveManifestAtomic } from '../src/manifest.js';
+import { atomicWrite } from '../src/guard.js';
 import { quarantine } from '../src/verify.js';
 import { forgetChunks, mergeCold, readTar, sweepCold } from '../src/cold.js';
 import { scratch, writeHotLog } from './util.js';
@@ -245,5 +246,22 @@ describe('gc deep foto', () => {
     assert.ok(local.fotoRemoved.includes(`foto/${deadSha}.bin`), 'local-only apply collects');
     assert.ok(!existsSync(join(outDir, 'foto', `${deadSha}.bin`)), 'dead sidecar gone');
     assert.ok(existsSync(join(outDir, 'foto', `${refSha}.bin`)), 'referenced sidecar kept');
+  });
+});
+
+describe('guard atomic tmp', () => {
+  it('atomicWrite never reuses a pid-only tmp name', { timeout: 30_000 }, () => {
+    const dir = scratch('guard-tmp-nonce');
+    const dest = join(dir, 'w.json');
+    const planted = `${dest}.tmp.${process.pid}`;
+    writeFileSync(planted, 'stale');
+    atomicWrite(dest, 'fresh');
+    assert.equal(readFileSync(dest, 'utf8'), 'fresh');
+    assert.equal(readFileSync(planted, 'utf8'), 'stale', 'pid-only tmp untouched: the real tmp carried a random suffix');
+    assert.deepEqual(
+      readdirSync(dir).filter((f) => f.includes('.tmp.')),
+      [`w.json.tmp.${process.pid}`],
+      'no tmp litter left behind',
+    );
   });
 });

@@ -223,10 +223,24 @@ async function main(): Promise<void> {
   const corpus = generateMixedCorpus(out, rows, seed);
   const text = await measureArchive(corpus.textPath, join(out, 'arch-text'));
   const mixed = await measureArchive(corpus.mixedPath, join(out, 'arch-mixed'));
+  // Dict on/off delta on the fixed dict-baseline corpus (NOT the --rows/--seed
+  // corpus above): bench/dict-bench.ts defaults rows=12000 seed=7 at a small
+  // chunk target, where every chunk starts zstd cold and the shared trained
+  // dict is where it can actually help. dictSavedBytes is the exact
+  // deterministic saving and, alongside mixedWarmBytes, a CI byte baseline
+  // (never wall-ms timings).
+  const dictBaseRows = 12000;
+  const dictBaseSeed = 7;
+  const dictTargetBytes = 16 * 1024;
+  const dictBase = generateMixedCorpus(join(out, 'dict-base'), dictBaseRows, dictBaseSeed);
+  const dictPlain = await measureArchive(dictBase.textPath, join(out, 'arch-plain'), { trainDict: false, targetBytes: dictTargetBytes });
+  const dictTrained = await measureArchive(dictBase.textPath, join(out, 'arch-dict'), { trainDict: true, targetBytes: dictTargetBytes });
+  const dictSavedBytes = dictPlain.warmBytes - dictTrained.warmBytes;
   console.log(`corpus: ${CORPUS_SPEC} rows=${rows} seed=${seed}`);
   console.log(`text : input=${text.inputBytes}B warm=${text.warmBytes}B ratio=${text.ratio.toFixed(1)}x chunks=${text.chunks}`);
   console.log(`mixed: input=${mixed.inputBytes}B warm=${mixed.warmBytes}B ratio=${mixed.ratio.toFixed(1)}x chunks=${mixed.chunks}`);
   console.log(`blobs: sidecar=${corpus.blobBytes}B excluded from mandatory archive`);
+  console.log(`dict : plain=${dictPlain.warmBytes}B trained=${dictTrained.warmBytes}B saved=${dictSavedBytes}B target=${dictTargetBytes}B`);
   recordMeasured(here, 'mixed', {
     corpus: CORPUS_SPEC, rows, seed,
     textInputBytes: text.inputBytes, textWarmBytes: text.warmBytes,
@@ -234,6 +248,9 @@ async function main(): Promise<void> {
     mixedInputBytes: mixed.inputBytes, mixedWarmBytes: mixed.warmBytes,
     mixedRatio: mixed.ratio.toFixed(1), mixedChunks: mixed.chunks,
     blobBytes: corpus.blobBytes,
+    dictBaseRows, dictBaseSeed, dictTargetBytes,
+    dictPlainWarm: dictPlain.warmBytes, dictWithDictWarm: dictTrained.warmBytes,
+    dictSavedBytes,
   });
   if (a['write-readme']) {
     const root = join(here, '..');

@@ -33,6 +33,26 @@ export interface ColdSegment {
   bytes: number;
 }
 
+export interface ShardPointer {
+  /** UTC month key, e.g. '2024-05'; matches ManifestShard.month. */
+  name: string;
+  /** Shard sidecar filename, e.g. 'manifest-2024-05.json'. */
+  file: string;
+  /** Chunk entries grouped into this month. */
+  count: number;
+  /** Min/max chunk key over the month's entries; '' when unknown. */
+  minKey: string;
+  maxKey: string;
+  /** Min tsMin / max tsMax over the month's entries. */
+  minTs: number;
+  maxTs: number;
+  /** crc32c of the shard envelope; lets readers detect shard skew. */
+  crc32c: number;
+}
+
+/** Budget for the serialized pointers array inside the root manifest. */
+export const MAX_SHARD_POINTER_BYTES = 2048;
+
 export interface Manifest {
   version: number;
   createdAt: string;
@@ -41,6 +61,10 @@ export interface Manifest {
   // Monthly-shard pointer: sorted YYYY-MM months with a manifest-<month>.json
   // sidecar. Root chunks[] stays complete so old readers work untouched.
   shards?: string[];
+  // Per-month stats for the shard sidecars: lets find prune whole months via
+  // minKey/maxKey before loading any shard file. Optional so pre-pointer
+  // archives load untouched and fall back to the root chunks[].
+  pointers?: ShardPointer[];
   // Generation envelope: seq bumps on every atomic save, crc32c self-validates
   // the envelope so load can pick the best crc-valid copy. Both optional so
   // pre-envelope (v0/v1) archives still load as seq 0.
@@ -121,6 +145,7 @@ function envelopeBytes(m: Manifest): Buffer {
     seq: m.seq ?? 0,
   };
   if (m.shards !== undefined) env.shards = m.shards;
+  if (m.pointers !== undefined) env.pointers = m.pointers;
   return Buffer.from(JSON.stringify(env), 'utf8');
 }
 
@@ -170,7 +195,14 @@ function stampEnvelope(m: Manifest, baseSeq: number): void {
   const want = Math.max(manifestSeq(m), baseSeq) + 1;
   m.seq = want;
   if (!Array.isArray(m.cold)) m.cold = [];
-  m.shards = shardMonthsFor(m.chunks);
+  // Additive month pointer: union with the previous list so a month never
+  // drops out of the pointer once stamped (root chunks[] is the source of
+  // truth; a dangling month falls back to root at find time).
+  const prevShards = Array.isArray(m.shards) ? m.shards : [];
+  const prevPointers = Array.isArray(m.pointers) ? m.pointers : [];
+  m.shards = [...new Set([...prevShards, ...shardMonthsFor(m.chunks)])].sort();
+  m.pointers = buildShardPointers(m.chunks, m.version, want, prevPointers);
+  assertShardPointersSize(m.pointers);
   m.crc32c = manifestCrc(m);
 }
 
@@ -197,6 +229,69 @@ export function shardMonthsFor(chunks: ChunkEntry[]): string[] {
   const months = new Set<string>();
   for (const e of chunks) months.add(shardMonthForEntry(e));
   return [...months].sort();
+}
+
+// Per-month rollup over the current chunks. Pointer crc32c is computed over
+// the exact shard envelope saveShardSidecars writes (same version, month,
+// file-sorted entries, seq), so readers can match pointer against sidecar.
+// prev carries months with no current chunks forward unchanged (additive
+// only); fresh months always rebuild from live entries.
+export function buildShardPointers(
+  chunks: ChunkEntry[],
+  version: number,
+  seq: number,
+  prev: ShardPointer[] = [],
+): ShardPointer[] {
+  const byMonth = new Map<string, ChunkEntry[]>();
+  for (const e of chunks) {
+    const month = shardMonthForEntry(e);
+    const list = byMonth.get(month);
+    if (list) list.push(e);
+    else byMonth.set(month, [e]);
+  }
+  const out: ShardPointer[] = [];
+  for (const month of [...byMonth.keys()].sort()) {
+    const entries = (byMonth.get(month) ?? []).slice().sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+    let minKey = '';
+    let maxKey = '';
+    let minTs = Number.POSITIVE_INFINITY;
+    let maxTs = Number.NEGATIVE_INFINITY;
+    for (const e of entries) {
+      if (e.minKey && (minKey === '' || e.minKey < minKey)) minKey = e.minKey;
+      if (e.maxKey && (maxKey === '' || e.maxKey > maxKey)) maxKey = e.maxKey;
+      if (typeof e.tsMin === 'number' && e.tsMin < minTs) minTs = e.tsMin;
+      if (typeof e.tsMax === 'number' && e.tsMax > maxTs) maxTs = e.tsMax;
+    }
+    const shard: ManifestShard = { version, month, chunks: entries, seq };
+    out.push({
+      name: month,
+      file: shardFileForMonth(month),
+      count: entries.length,
+      minKey,
+      maxKey,
+      minTs: minTs === Number.POSITIVE_INFINITY ? 0 : minTs,
+      maxTs: maxTs === Number.NEGATIVE_INFINITY ? 0 : maxTs,
+      crc32c: shardCrc(shard),
+    });
+  }
+  const fresh = new Set(out.map((p) => p.name));
+  for (const p of prev) {
+    if (typeof p?.name !== 'string' || fresh.has(p.name)) continue;
+    fresh.add(p.name);
+    out.push({ ...p });
+  }
+  out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return out;
+}
+
+// Save-path budget check: the pointers array must serialize within
+// MAX_SHARD_POINTER_BYTES. Load never calls this, so old archives with a
+// missing or oversized pointer list still parse and fall back to root.
+export function assertShardPointersSize(pointers: ShardPointer[] | undefined): void {
+  const bytes = Buffer.byteLength(JSON.stringify(pointers ?? []), 'utf8');
+  if (bytes > MAX_SHARD_POINTER_BYTES) {
+    throw new Error(`shard pointer list exceeds ${MAX_SHARD_POINTER_BYTES} bytes (got ${bytes})`);
+  }
 }
 
 function shardEnvelopeBytes(s: ManifestShard): Buffer {
@@ -345,7 +440,8 @@ export function loadChunksForMonths(outDir: string, months: string[]): {
 }
 
 function writeFileAtomicSync(dest: string, payload: string): void {
-  const tmp = `${dest}.tmp.${process.pid}`;
+  const nonce = Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0');
+  const tmp = `${dest}.tmp.${process.pid}.${nonce}`;
   writeFileSync(tmp, payload);
   fsyncFile(tmp);
   renameSync(tmp, dest);
@@ -437,6 +533,7 @@ export function buildManifest(outDir: string): Manifest {
     }
   }
   const m: Manifest = { version: 1, createdAt: new Date().toISOString(), chunks, cold: [], shards: shardMonthsFor(chunks), seq: 0 };
+  m.pointers = buildShardPointers(chunks, m.version, 0);
   m.crc32c = manifestCrc(m);
   return m;
 }
@@ -453,7 +550,8 @@ export function saveManifestAtomic(outDir: string, m: Manifest): void {
   const payload = `${JSON.stringify(m, null, 1)}\n`;
   for (const name of ['manifest.json', 'manifest.bak.json']) {
     const dest = join(outDir, name);
-    const tmp = `${dest}.tmp.${process.pid}`;
+    const nonce = Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0');
+    const tmp = `${dest}.tmp.${process.pid}.${nonce}`;
     writeFileSync(tmp, payload);
     fsyncFile(tmp);
     renameSync(tmp, dest);
