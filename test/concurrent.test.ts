@@ -10,7 +10,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import { clearFindCaches, findTrx } from '../src/find.js';
 import { loadManifest } from '../src/manifest.js';
 import { readHotRowsCounted, seal } from '../src/seal.js';
@@ -97,7 +98,7 @@ describe('concurrent writers', () => {
     writeFileSync(hot, '');
     const outDir = join(dir, 'archive');
     const relayDir = join(dir, 'relay');
-    const root = join(import.meta.dir, '..');
+    const root = join(dirname(fileURLToPath(import.meta.url)), '..');
     const devices = Array.from({ length: WORKERS }, (_, w) => deviceOf(w));
 
     const procs = devices.map((device, widx) =>

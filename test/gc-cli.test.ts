@@ -89,4 +89,19 @@ describe('gc cli', () => {
     const text = runFail('gc');
     assert.match(text, /usage: moltarc gc <outDir> \[relayDir\] \[--apply\]/);
   });
+
+  it('forget notes bytes remain until gc + coldg', { timeout: 30_000 }, async () => {
+    const dir = scratch('gc-cli-forget-note');
+    const { hotDb } = writeHotLog(dir, { rows: 200 });
+    const outDir = join(dir, 'archive');
+    const relayDir = join(dir, 'relay');
+    await seal({ hotDb, outDir });
+    await ship({ outDir, relayDir, baseDelayMs: 1 });
+    const { manifest } = loadManifest(outDir);
+    assert.ok(manifest.chunks.length >= 1);
+    const victim = manifest.chunks[0].file;
+    const out = run('forget', outDir, relayDir, victim);
+    assert.ok(out.includes(`forgot ${victim}`), `missing forgot line:\n${out}`);
+    assert.ok(out.includes('note: bytes remain until gc --apply + coldg --apply'), `missing note line:\n${out}`);
+  });
 });

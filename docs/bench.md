@@ -36,3 +36,20 @@ Method: seal once, ship full to an empty relay, append 600 rows (10%,
 new seqs/ids), reseal, ship again to the same relay — the second ship
 sends only the new chunk. Find times `findTrx` (read + crc verify +
 decode + id scan) with `performance.now()`.
+
+## flakes
+
+Full-suite flakes are load contention, not regressions: kill-timing
+(a kill landing before/after a write flushes) and port reuse under
+load (p2p sockets rebinding while soak/concurrent/worker-safety
+saturate the box) in one giant `bun test test/` run.
+
+- `bun run test:stable` — everything except the timing-sensitive files.
+- `bun run test:heavy` — only the timing-sensitive files
+  (`test/soak.test.ts`, `test/concurrent.test.ts`,
+  `test/worker-safety.test.ts`, `test/p2p.test.ts`), run on their own
+  so they get the machine to themselves.
+
+Rule: a failure that never reproduces in its scoped file
+(`bun test test/<file>.test.ts`) is contention until proven otherwise —
+re-run the single file before opening an issue.

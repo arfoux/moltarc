@@ -338,7 +338,7 @@ export function startNode(opts: P2PNodeOpts): { port: number; url: string; stop:
   const failState: { armed: number | undefined } = { armed: opts.failAtBytes };
   const server = Bun.serve({
     port: opts.port,
-    fetch(req, server) {
+    fetch(req: Request, server: { upgrade(req: Request): boolean }) {
       if (server.upgrade(req)) return;
       return new Response('molt p2p', { status: 426 });
     },
@@ -346,10 +346,10 @@ export function startNode(opts: P2PNodeOpts): { port: number; url: string; stop:
       open() {
         /* hello drives */
       },
-      close(ws) {
+      close(ws: object) {
         pendingByConn.delete(ws);
       },
-      async message(ws, raw) {
+      async message(ws: { send(data: string): void; close(): void }, raw: unknown) {
         const send = (msg: WireMsg) => {
           try {
             ws.send(JSON.stringify(msg));

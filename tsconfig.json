@@ -6,7 +6,8 @@
     "types": ["node"],
     "outDir": "dist",
     "declaration": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "strict": true
   },
   "include": ["src", "test", "bench", "examples", "bin", "ext/moltarc.ts"]
 }

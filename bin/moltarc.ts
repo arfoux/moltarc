@@ -189,6 +189,7 @@ async function main(): Promise<void> {
     const r = forgetChunks(outDir, files, relayDir);
     console.log(`forgot ${r.removed.length} chunk(s)`);
     for (const f of r.removed) console.log(`forgot ${f}`);
+    console.log('note: bytes remain until gc --apply + coldg --apply');
   } else if (cmd === 'coldg') {
     const [outDir, flag] = rest;
     if (!outDir) fail('usage: moltarc coldg <outDir> [--apply]');

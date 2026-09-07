@@ -88,4 +88,23 @@ describe('waste-fix codec+dict', () => {
       assert.equal(trainTableDict(bodies, t), null, `blob table ${t} skips`);
     }
   });
+  it('rejects unknown header ver 99', { timeout: 30_000 }, () => {
+    const buf = Buffer.from(encodeChunk('sales', rows(5)));
+    const h = decodeHeader(buf);
+    const bad = Buffer.concat([
+      encodeHeader({ ...h, ver: 99 }),
+      Buffer.from(buf.subarray(HEADER_SIZE, HEADER_SIZE + h.bodyLen)),
+    ]);
+    assert.throws(() => decodeHeader(bad), /99/);
+    assert.throws(() => decodeChunk(bad), /99/);
+  });
+  it('rejects header tableId scribble with valid body crc', { timeout: 30_000 }, () => {
+    const buf = Buffer.from(encodeChunk('sales', rows(20)));
+    const h = decodeHeader(buf);
+    const bad = Buffer.concat([
+      encodeHeader({ ...h, tableId: (h.tableId ^ 0xffffffff) >>> 0 }),
+      Buffer.from(buf.subarray(HEADER_SIZE, HEADER_SIZE + h.bodyLen)),
+    ]);
+    assert.throws(() => decodeChunk(bad), /header tableId differs from frame table/);
+  });
 });

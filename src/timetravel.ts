@@ -69,5 +69,6 @@ export function queryAsOf(opts: TimeTravelOpts): TimeTravelResult {
     }
   }
   const rows = [...state.values()].sort((a, b) => a.seq - b.seq || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  if (skippedMissing > 0) console.warn(`timetravel: ${skippedMissing} chunk(s) missing, result incomplete`);
   return { rows, proof: { chunksConsulted: consulted, chunksPruned: pruned, skippedMissing, manifestSource: source } };
 }

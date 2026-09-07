@@ -17,6 +17,7 @@ export interface PerfMeasure {
   inputBytes: number;
   warmBytes: number;
   chunks: number;
+  mixedRatio: number;
   sealMs: number;
   sealMBs: number;
   fullShipBytes: number;
@@ -129,6 +130,7 @@ export async function measurePerf(dir: string, rows: number, seed: number, findI
   return {
     rows, seed, inputBytes,
     warmBytes: warm.bytes, chunks: warm.chunks,
+    mixedRatio: warm.bytes > 0 ? inputBytes / warm.bytes : 0,
     sealMs, sealMBs: inputBytes / 1048576 / (sealMs / 1000),
     fullShipBytes, fullShipChunks: full.sent.length,
     deltaRows, deltaShipBytes: delta.bytes, deltaShipChunks: delta.sent.length,
@@ -149,7 +151,7 @@ async function main(): Promise<void> {
   const here = dirname(fileURLToPath(import.meta.url));
   const out = a.out ?? join(here, 'perf-out');
   const p = await measurePerf(out, rows, seed, findIters);
-  console.log(`seal: input=${p.inputBytes}B warm=${p.warmBytes}B chunks=${p.chunks} time=${p.sealMs.toFixed(0)}ms rate=${p.sealMBs.toFixed(1)}MB/s`);
+  console.log(`seal: input=${p.inputBytes}B warm=${p.warmBytes}B ratio=${p.mixedRatio.toFixed(1)}x chunks=${p.chunks} time=${p.sealMs.toFixed(0)}ms rate=${p.sealMBs.toFixed(1)}MB/s`);
   console.log(`ship: full=${p.fullShipBytes}B in ${p.fullShipChunks} chunk(s), delta(${p.deltaRows} rows)=${p.deltaShipBytes}B in ${p.deltaShipChunks} chunk(s), delta/full=${p.deltaVsFull.toFixed(3)}`);
   console.log(`find: ${p.findIds.length} ids x${p.findIters} iters cold-median=${p.findColdMs.toFixed(2)}ms warm p50=${p.findP50Ms.toFixed(2)}ms p99=${p.findP99Ms.toFixed(2)}ms (fetched=${p.findFetched} pruned=${p.findPruned})`);
   console.log('find note: first lookup per id is cold (manifest/dict cache miss); p50/p99 pool warm lookups only');
@@ -157,6 +159,7 @@ async function main(): Promise<void> {
   recordMeasured(here, 'perf', {
     rows: p.rows, seed: p.seed,
     inputBytes: p.inputBytes, warmBytes: p.warmBytes, chunks: p.chunks,
+    mixedRatio: p.mixedRatio.toFixed(1),
     sealMs: Math.round(p.sealMs), sealMBs: p.sealMBs.toFixed(1),
     fullShipBytes: p.fullShipBytes, fullShipChunks: p.fullShipChunks,
     deltaRows: p.deltaRows, deltaShipBytes: p.deltaShipBytes,

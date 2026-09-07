@@ -93,8 +93,10 @@ export function decodeHeader(buf: Uint8Array): ChunkHeader {
   if (buf.length < HEADER_SIZE) throw new Error(`chunk too small: ${buf.length}B`);
   const b = Buffer.from(buf.subarray(0, HEADER_SIZE));
   if (b.toString('ascii', 0, 4) !== MAGIC) throw new Error('bad magic: not a UMK1 chunk');
+  const ver = b.readUInt16LE(4);
+  if (ver !== 0 && ver !== 1) throw new Error(`unsupported header ver ${ver} (N-2 compat: supports ver 0-1)`);
   return {
-    ver: b.readUInt16LE(4),
+    ver,
     codec: b.readUInt8(6),
     flags: b.readUInt8(7),
     tableId: b.readUInt32LE(8),
@@ -144,9 +146,10 @@ function checkFrameCap(out: Buffer): Buffer {
 // for call compat and otherwise unused.
 export function decompressFrame(codec: number, body: Buffer, dict?: Buffer, dictId = 0): Buffer {
   void dictId;
+  // zstd has no maxOutputLength option, so its output is capped by checkFrameCap after inflate.
   if (codec === CODEC_ZSTD && dict) return checkFrameCap(Buffer.from(zstdDecompressSync(body, { dictionary: dict })));
   if (codec === CODEC_ZSTD && !dict) return checkFrameCap(Buffer.from(zstdDecompressSync(body)));
-  if (codec === CODEC_DEFLATE) return checkFrameCap(Buffer.from(inflateSync(body)));
+  if (codec === CODEC_DEFLATE) return checkFrameCap(Buffer.from(inflateSync(body, { maxOutputLength: DECOMPRESS_MAX_BYTES })));
   if (codec === CODEC_NONE) return checkFrameCap(body);
   throw new Error(`unsupported codec ${codec} (N-2 compat: upgrade moltarc)`);
 }
@@ -288,6 +291,7 @@ export function decodeChunk(buf: Buffer, dict?: Buffer): { header: ChunkHeader; 
   }
   const rows = decodeRows(raw);
   if (rows.length !== header.rows) throw new Error(`header rows ${header.rows} vs decoded ${rows.length}`);
+  if (rows.length > 0 && (header.tableId >>> 0) !== fnv1a32(rows[0].table)) throw new Error('header tableId differs from frame table');
   if (rows.length > 0) {
     let smin = rows[0].seq;
     let smax = rows[0].seq;
