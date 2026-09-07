@@ -21,7 +21,7 @@ import { readRelayIndex } from './ship.js';
 import { checkReserve } from './gc.js';
 import { HEADER_SIZE, decodeHeader, DICT_FLAG } from './chunk.js';
 import { dictFile, dictHex } from './dict.js';
-import { assertMigrated } from './migrate.js';
+import { requireMigrated } from './migrate.js';
 import { atomicWrite } from './guard.js';
 
 export interface TarMember {
@@ -121,9 +121,7 @@ export interface MergeResult {
 export function mergeCold(outDir: string, opts: MergeOpts = {}): MergeResult {
   // Downgrade guard: refuse old manifests, but a manifest-less outDir merges
   // normally (nothing to migrate; loadManifest rebuilds from warm files).
-  if (existsSync(join(outDir, 'manifest.json')) || existsSync(join(outDir, 'manifest.bak.json'))) {
-    assertMigrated(outDir);
-  }
+  requireMigrated(outDir);
   const warm = join(outDir, 'warm');
   const cold = join(outDir, 'cold');
   mkdirSync(cold, { recursive: true });
@@ -308,9 +306,7 @@ function readHeaderPrefix(full: string): { ok: boolean; flags: number; dictId: n
 // silently. The check is atomic: all-or-nothing, no partial forget.
 export function forgetChunks(outDir: string, files: string[], relayDir: string): { removed: string[] } {
   if (!relayDir) throw new Error('forget needs the relayDir ship wrote to (refusing silent unacked delete)');
-  if (existsSync(join(outDir, 'manifest.json')) || existsSync(join(outDir, 'manifest.bak.json'))) {
-    assertMigrated(outDir);
-  }
+  requireMigrated(outDir);
   const { manifest } = loadManifest(outDir);
   const drop = new Set(files);
   const targets = manifest.chunks.filter((e) => drop.has(e.file));
@@ -357,9 +353,7 @@ export function sweepCold(outDir: string, opts: ColdSweepOpts = {}): ColdSweepRe
   if (!dryRun) checkReserve(outDir, opts.freeSpaceBytes, 'cold sweep');
   // Downgrade guard on mutating runs only: dry-run is read-only and must
   // keep reporting on old archives; apply refuses to rewrite them.
-  if (!dryRun && (existsSync(join(outDir, 'manifest.json')) || existsSync(join(outDir, 'manifest.bak.json')))) {
-    assertMigrated(outDir);
-  }
+  if (!dryRun) requireMigrated(outDir);
   const { manifest } = loadManifest(outDir);
   manifest.cold ??= [];
   const refs = new Set(manifest.chunks.map((e) => e.file));

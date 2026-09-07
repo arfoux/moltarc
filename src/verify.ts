@@ -247,27 +247,10 @@ function checkOne(outDir: string, entry: ChunkEntry): FullVerifyItem {
 // runs backwards. A forward skip (seqMin > prev.seqMax + 1) is a gap warning:
 // bounded multi-seal corpora legitimately skip filtered seq, so gaps never
 // fail the walk — they report with a missing-seq count for the CLI to print.
-function checkChain(entries: ChunkEntry[]): ChainBreak[] {
+// Single group/sort pass: overlap/regression vs forward gap are mutually
+// exclusive per adjacent pair, so one loop produces both.
+function checkChainBoth(entries: ChunkEntry[]): { breaks: ChainBreak[]; gaps: ChainGap[] } {
   const breaks: ChainBreak[] = [];
-  const byTable = new Map<string, ChunkEntry[]>();
-  for (const e of entries) {
-    if (e.quarantined || e.rows === 0 || e.seqMax === 0) continue;
-    const arr = byTable.get(e.table);
-    if (arr) arr.push(e);
-    else byTable.set(e.table, [e]);
-  }
-  for (const [table, list] of byTable) {
-    list.sort((a, b) => a.seqMin - b.seqMin || (a.file < b.file ? -1 : 1));
-    for (let i = 1; i < list.length; i++) {
-      if (list[i].seqMin <= list[i - 1].seqMax) {
-        breaks.push({ table, prev: list[i - 1].file, next: list[i].file });
-      }
-    }
-  }
-  return breaks;
-}
-
-function checkChainGaps(entries: ChunkEntry[]): ChainGap[] {
   const gaps: ChainGap[] = [];
   const byTable = new Map<string, ChunkEntry[]>();
   for (const e of entries) {
@@ -279,12 +262,17 @@ function checkChainGaps(entries: ChunkEntry[]): ChainGap[] {
   for (const [table, list] of byTable) {
     list.sort((a, b) => a.seqMin - b.seqMin || (a.file < b.file ? -1 : 1));
     for (let i = 1; i < list.length; i++) {
-      if (list[i].seqMin > list[i - 1].seqMax + 1) {
-        gaps.push({ table, prev: list[i - 1].file, next: list[i].file, missing: list[i].seqMin - list[i - 1].seqMax - 1 });
-      }
+      if (list[i].seqMin <= list[i - 1].seqMax) breaks.push({ table, prev: list[i - 1].file, next: list[i].file });
+      else if (list[i].seqMin > list[i - 1].seqMax + 1) gaps.push({ table, prev: list[i - 1].file, next: list[i].file, missing: list[i].seqMin - list[i - 1].seqMax - 1 });
     }
   }
-  return gaps;
+  return { breaks, gaps };
+}
+function checkChain(entries: ChunkEntry[]): ChainBreak[] {
+  return checkChainBoth(entries).breaks;
+}
+function checkChainGaps(entries: ChunkEntry[]): ChainGap[] {
+  return checkChainBoth(entries).gaps;
 }
 
 export function printChainGaps(v: VerifyFullResult): void {

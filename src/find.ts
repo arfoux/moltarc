@@ -10,7 +10,6 @@ import { loadDictFor } from './dict.js';
 import { bloomCheck, loadManifest, loadShard, loadSparseIndex, BLOOM_BITS } from './manifest.js';
 import type { ChunkEntry, ColdSegment, Manifest, ManifestShard, SparseDisk } from './manifest.js';
 import { readTar } from './cold.js';
-import { cacheKey } from './guard.js';
 
 export interface FindOpts {
   outDir: string;
@@ -47,17 +46,15 @@ export function buildSparseIndex(entries: ChunkEntry[]): SparseEntry[] {
     .map((e) => ({ minKey: e.minKey, maxKey: e.maxKey, file: e.file, seqMin: e.seqMin }))
     .sort((a, b) => (a.minKey < b.minKey ? -1 : a.minKey > b.minKey ? 1 : 0));
 }
-const manifestCache = new Map<string, { mtimeMs: number; size: number; seq: number; key: string; manifest: Manifest; source: 'primary' | 'backup' | 'rebuilt' }>();
+const manifestCache = new Map<string, { mtimeMs: number; size: number; seq: number; manifest: Manifest; source: 'primary' | 'backup' | 'rebuilt' }>();
 // Dict files are content-hash addressed and immutable; cache hits only
 // (misses stay uncached so a later-sealed dict is still discovered).
 const dictCache = new Map<string, Buffer>();
 // Persisted sparse + shard sidecars keyed by file stat plus content seq,
 // same stability deal as the manifest cache: reseal rewrites invalidate,
-// repeat finds hit memory. The stored key strings use the shared cacheKey
-// helper so every cache validates the identical (mtimeMs, size, seq) triple.
-const sparseCache = new Map<string, { mtimeMs: number; size: number; seq: number; key: string; sparse: SparseDisk | null; cold: ColdSegment[]; total: number; quarantined: number }>();
-const shardCache = new Map<string, { mtimeMs: number; size: number; seq: number; key: string; shard: ManifestShard | null }>();
-
+// repeat finds hit memory.
+const sparseCache = new Map<string, { mtimeMs: number; size: number; seq: number; sparse: SparseDisk | null; cold: ColdSegment[]; total: number; quarantined: number }>();
+const shardCache = new Map<string, { mtimeMs: number; size: number; seq: number; shard: ManifestShard | null }>();
 export function clearFindCaches(): void {
   manifestCache.clear();
   dictCache.clear();
@@ -84,9 +81,8 @@ function loadSparseCached(outDir: string): { sparse: SparseDisk | null; cold: Co
   const loaded = loadSparseIndex(outDir);
   const seq = loaded ? loaded.sparse.seq : 0;
   const entry = loaded
-    ? { mtimeMs, size, seq, key: cacheKey(mtimeMs, size, seq), sparse: loaded.sparse, cold: loaded.sparse.cold ?? [], total: loaded.sparse.total, quarantined: loaded.sparse.quarantined }
-    : { mtimeMs, size, seq, key: cacheKey(mtimeMs, size, seq), sparse: null, cold: [], total: 0, quarantined: 0 };
-  sparseCache.set(outDir, entry);
+    ? { mtimeMs, size, seq, sparse: loaded.sparse, cold: loaded.sparse.cold ?? [], total: loaded.sparse.total, quarantined: loaded.sparse.quarantined }
+    : { mtimeMs, size, seq, sparse: null, cold: [], total: 0, quarantined: 0 };
   return entry;
 }
 
@@ -98,7 +94,7 @@ function loadShardCached(outDir: string, month: string): ManifestShard | null {
   if (hit && hit.mtimeMs === mtimeMs && hit.size === size) return hit.shard;
   const shard = loadShard(outDir, month);
   const seq = shard?.seq ?? 0;
-  shardCache.set(cacheId, { mtimeMs, size, seq, key: cacheKey(mtimeMs, size, seq), shard });
+  shardCache.set(cacheId, { mtimeMs, size, seq, shard });
   return shard;
 }
 // Sparse-level prune over persisted rows (no bloom here): binary-search the
@@ -139,7 +135,7 @@ function loadManifestCached(outDir: string): { manifest: Manifest; source: 'prim
   // Re-stat: the rebuilt path may have rewritten the primary underneath us.
   const cur = statKey(primary);
   const seq = typeof loaded.manifest.seq === 'number' && Number.isFinite(loaded.manifest.seq) ? loaded.manifest.seq : 0;
-  const entry = { mtimeMs: cur.mtimeMs, size: cur.size, seq, key: cacheKey(cur.mtimeMs, cur.size, seq), manifest: loaded.manifest, source: loaded.source };
+  const entry = { mtimeMs: cur.mtimeMs, size: cur.size, seq, manifest: loaded.manifest, source: loaded.source };
   manifestCache.set(outDir, entry);
   return entry;
 }

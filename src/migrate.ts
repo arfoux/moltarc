@@ -108,6 +108,9 @@ export function assertMigrated(outDir: string): void {
   const plan = planMigration(outDir);
   if (plan.needs) throw new Error(`archive at ${outDir} needs migration to v${CURRENT_MANIFEST_VERSION} (${plan.reason}); run migrate before writing`);
 }
+export function requireMigrated(outDir: string): void {
+  if (existsSync(join(outDir, 'manifest.json')) || existsSync(join(outDir, 'manifest.bak.json'))) assertMigrated(outDir);
+}
 
 // Forward migrate: dryRun reports only; apply backups the primary manifest
 // bytes first, then rescans warm chunks (history-preserving: chunk files

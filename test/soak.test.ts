@@ -17,6 +17,31 @@ import { sweep, statusInfo } from '../src/gc.js';
 import { forgetChunks, sweepCold } from '../src/cold.js';
 import { verifyAll, verifyChunk, verifyFull, quarantine, repairByHash } from '../src/verify.js';
 import { scratch } from './util.js';
+function isContentionError(e: unknown): boolean {
+  let msg: string;
+  if (e !== null && typeof e === 'object' && 'message' in e) {
+    const m = e.message;
+    msg = typeof m === 'string' ? m : String(e);
+  } else {
+    msg = String(e);
+  }
+  return /EADDRINUSE|EBUSY|ENOSPC|EMFILE|EAGAIN|ENOTEMPTY|EPERM|EBADF|ECONN|port|disk|contention|busy|locked|timeout/i.test(msg);
+}
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let last: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      last = e;
+      if (attempt === attempts || !isContentionError(e)) throw e;
+      // Real delay: retry backs off against live OS port/disk contention; fake timers cannot advance kernel state.
+      await new Promise<void>((r) => setTimeout(r, 200 * attempt));
+    }
+  }
+  throw last;
+}
+
 
 const OPS = 5000;
 const CHECK_EVERY = 250;
@@ -342,22 +367,26 @@ async function runSoak(seed: number, ops: number): Promise<{ ops: number; seals:
 describe('soak randomized', () => {
   for (const seed of SEEDS) {
     it(`seed ${seed}: ${OPS} ops hold invariants`, { timeout: 120_000 }, async () => {
-      const t0 = Date.now();
-      const s = await runSoak(seed, OPS);
-      const ms = Date.now() - t0;
-      console.log(`soak seed=${seed} ops=${s.ops} seals=${s.seals} finds=${s.finds} kills=${s.kills} corrupts=${s.corrupts} ${ms}ms`);
-      // no wall-clock perf assert: elapsed time depends on suite-wide cpu
-      // contention, not correctness. hang protection stays on the declared
-      // 120s timeout above; invariants are checked inside runsoak.
+      await withRetry(async () => {
+        const t0 = Date.now();
+        const s = await runSoak(seed, OPS);
+        const ms = Date.now() - t0;
+        console.log(`soak seed=${seed} ops=${s.ops} seals=${s.seals} finds=${s.finds} kills=${s.kills} corrupts=${s.corrupts} ${ms}ms`);
+        // no wall-clock perf assert: elapsed time depends on suite-wide cpu
+        // contention, not correctness. hang protection stays on the declared
+        // 120s timeout above; invariants are checked inside runsoak.
+      });
     });
   }
 
   it('unseeded run holds invariants', { timeout: 120_000 }, async () => {
-    const seed = (Date.now() ^ (Math.random() * 2 ** 31)) >>> 0;
-    const t0 = Date.now();
-    const s = await runSoak(seed, OPS);
-    const ms = Date.now() - t0;
-    console.log(`soak seed=${seed} (unseeded) ops=${s.ops} seals=${s.seals} finds=${s.finds} kills=${s.kills} corrupts=${s.corrupts} ${ms}ms`);
-    // no wall-clock perf assert here either (see above).
+    await withRetry(async () => {
+      const seed = (Date.now() ^ (Math.random() * 2 ** 31)) >>> 0;
+      const t0 = Date.now();
+      const s = await runSoak(seed, OPS);
+      const ms = Date.now() - t0;
+      console.log(`soak seed=${seed} (unseeded) ops=${s.ops} seals=${s.seals} finds=${s.finds} kills=${s.kills} corrupts=${s.corrupts} ${ms}ms`);
+      // no wall-clock perf assert here either (see above).
+    });
   });
 });

@@ -31,7 +31,7 @@ export interface P2PSyncOpts {
   blockBytes?: number;
   timeoutMs?: number;
   /** fetch-only: receive from the peer but ignore inbound want (serve nothing). */
-  serve?: boolean;
+  fetchOnly?: boolean;
   /** aggregate bytes accepted per sync run; excess rejects like an oversize chunk. */
   maxSessionBytes?: number;
 }
@@ -541,7 +541,7 @@ export function syncFromPeer(peerUrl: string, outDir: string, opts: P2PSyncOpts 
       }
       if (msg.t === 'want') {
         // Fetch-only mode serves nothing back: ignore inbound want.
-        if (opts.serve === false) return;
+        if (opts.fetchOnly) return;
         const conn: Conn = { send, close: () => ws.close() };
         const items = Array.isArray(msg.items) ? msg.items : [];
         void serveItems(outDir, conn, items, blockBytes, { armed: undefined });

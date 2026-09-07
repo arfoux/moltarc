@@ -1,6 +1,9 @@
 // bench/perf — seal MB/s, ship delta-vs-full ratio, find single-chunk latency.
 // All numbers are measured on this machine; this script prints them and
 // records them into bench/measured.json under the "perf" key.
+// Timing (sealMs, findMs, sealMBs, etc.) is machine-specific and informational
+// only; only the compression ratio (6-12x, see mixed-corpus gate) is gated
+// deterministically. This bench must not assert timing.
 // Usage: bun bench/perf.ts [--rows 6000] [--seed 7] [--out bench/perf-out] [--find-iters 20]
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'fs';
 import { arch, cpus, platform, release } from 'os';

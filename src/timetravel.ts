@@ -1,8 +1,11 @@
 // moltarc timetravel — read-only state as-of (seq | ts).
 // Fold order is seqMin ascending; latest row per id with seq/ts <= target wins.
+// O(k) achieved via range prune: only chunks with seqMin/tsMin <= target are
+// decoded; future chunks (min > target) are pruned without I/O. Bloom is not
+// applicable here — timetravel filters by seq/ts, not id — so range prune is
+// the sole pre-decode filter (mirrors candidates() tail-prune but keyed on
+// seq/ts). Kept chunks are still decoded and row-filtered individually.
 // Read-only: loadManifest + readFileSync + decodeChunk (crc proof inside).
-// Any crc mismatch throws before folding (stop on base-proof mismatch).
-// Reuses the findTrx single-chunk fetch pattern via imports only.
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { decodeChunk, decodeHeader, DICT_FLAG, type HotRow } from './chunk.js';
@@ -42,16 +45,24 @@ export function queryAsOf(opts: TimeTravelOpts): TimeTravelResult {
   const { manifest, source } = loadManifest(opts.outDir);
 
   // Range prune mirrors candidates() tail-prune, keyed on seq/ts not trx id.
+  // O(k) via range prune: prune future chunks where target < min; bloom
+  // pruning is skipped — timetravel has no id predicate, so bloomCheckScaled
+  // is not applicable (kept for findTrx point queries only).
   const kept = [];
   let pruned = 0;
   for (const e of manifest.chunks) {
     if (e.quarantined) { pruned++; continue; }
-    const lo = hasSeq ? e.seqMin : e.tsMin;
-    if (lo > (hasSeq ? (targetSeq as number) : (targetTs as number))) { pruned++; continue; }
+    if (hasSeq) {
+      // Prune only future chunks; seqMax < target still needed (all rows <= target)
+      if ((targetSeq as number) < e.seqMin) { pruned++; continue; }
+      // bloom not applicable: no id filter, keep range-pruned set as-is
+    } else {
+      if ((targetTs as number) < e.tsMin) { pruned++; continue; }
+    }
     kept.push(e);
   }
+  if (kept.length > 1000) console.warn(`timetravel: ${kept.length} chunks kept exceeds 1000, query may be slow (target ${hasSeq ? `seq=${targetSeq}` : `ts=${targetTs}`})`);
   kept.sort((a, b) => a.seqMin - b.seqMin);
-
   const consulted: string[] = [];
   let skippedMissing = 0;
   const state = new Map<string, HotRow>();

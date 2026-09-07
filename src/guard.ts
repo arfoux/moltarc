@@ -36,6 +36,3 @@ export function atomicWrite(dest: string, data: Buffer | string): void {
   fsyncDir(dirname(dest));
 }
 
-export function cacheKey(mtimeMs: number, size: number, seq: number): string {
-  return `${mtimeMs}:${size}:${seq}`;
-}

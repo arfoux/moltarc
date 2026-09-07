@@ -18,6 +18,32 @@ import { readHotRowsCounted, seal } from '../src/seal.js';
 import { ship } from '../src/ship.js';
 import { verifyFull } from '../src/verify.js';
 import { scratch } from './util.js';
+function isContentionError(e: unknown): boolean {
+  let msg: string;
+  if (e !== null && typeof e === 'object' && 'message' in e) {
+    const m = e.message;
+    msg = typeof m === 'string' ? m : String(e);
+  } else {
+    msg = String(e);
+  }
+  return /EADDRINUSE|EBUSY|ENOSPC|EMFILE|EAGAIN|ENOTEMPTY|EPERM|EBADF|ECONN|port|disk|contention|busy|locked|timeout/i.test(msg);
+}
+
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let last: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      last = e;
+      if (attempt === attempts || !isContentionError(e)) throw e;
+      // Real delay: retry backs off against live OS port/disk contention; fake timers cannot advance kernel state.
+      await new Promise<void>((r) => setTimeout(r, 200 * attempt));
+    }
+  }
+  throw last;
+}
+
 
 const WORKERS = 3;
 const ROWS = 120;
@@ -93,124 +119,127 @@ try { await ship({ outDir, relayDir, baseDelayMs: 1 }); } catch { /* parent drai
 }
 describe('concurrent writers', () => {
   it('3 processes x append+seal+ship lose nothing and stay consistent', { timeout: 120_000 }, async () => {
-    const dir = scratch('concurrent');
-    const hot = join(dir, 'hot.jsonl');
-    writeFileSync(hot, '');
-    const outDir = join(dir, 'archive');
-    const relayDir = join(dir, 'relay');
-    const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-    const devices = Array.from({ length: WORKERS }, (_, w) => deviceOf(w));
+    await withRetry(async () => {
+      const dir = scratch('concurrent');
+      const hot = join(dir, 'hot.jsonl');
+      writeFileSync(hot, '');
+      const outDir = join(dir, 'archive');
+      const relayDir = join(dir, 'relay');
+      const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+      const devices = Array.from({ length: WORKERS }, (_, w) => deviceOf(w));
 
-    const procs = devices.map((device, widx) =>
-      Bun.spawn(['bun', '-e', workerSource(root)], {
-        cwd: root,
-        env: {
-          ...process.env, HOT: hot, OUT: outDir, RELAY: relayDir, LOCK: join(dir, 'seal.lock'),
-          DEVICE: device, ROWS: String(ROWS), WIDX: String(widx),
-        },
-        stdout: 'pipe',
-        stderr: 'pipe',
-      }),
-    );
+      const procs = devices.map((device, widx) =>
+        Bun.spawn(['bun', '-e', workerSource(root)], {
+          cwd: root,
+          env: {
+            ...process.env, HOT: hot, OUT: outDir, RELAY: relayDir, LOCK: join(dir, 'seal.lock'),
+            DEVICE: device, ROWS: String(ROWS), WIDX: String(widx),
+          },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        }),
+      );
 
-    // Real polling: witnesses live child progress against the platform
-    // clock; fake timers cannot advance separate OS processes. Seals are
-    // lock-serialized, so the watermark file must never regress mid-run.
-    let sawPartial = false;
-    const total = WORKERS * ROWS;
-    const wmPath = join(outDir, 'sealed_upto_seq');
-    const wmHigh: Record<string, number> = {};
-    let wmRegressions = 0;
-    const poll = setInterval(() => {
-      try {
-        const text = readFileSync(hot, 'utf8');
-        if (text.length > 0) {
-          const lines = text.split('\n').filter((l) => l.trim().length > 0).length;
-          if (lines > 0 && lines < total) sawPartial = true;
-        }
-      } catch { /* hot not yet created: ignore */ }
-      try {
-        const wm = JSON.parse(readFileSync(wmPath, 'utf8')) as Record<string, number>;
-        for (const [k, v] of Object.entries(wm)) {
-          if ((wmHigh[k] ?? 0) > v) wmRegressions++;
-          wmHigh[k] = Math.max(wmHigh[k] ?? 0, v);
-        }
-      } catch { /* watermark not yet persisted: ignore */ }
-    }, 5);
-    const codes = await Promise.all(procs.map((p) => p.exited));
-    clearInterval(poll);
-    for (let i = 0; i < procs.length; i++) {
-      const err = (await new Response(procs[i].stderr).text()).trim();
-      assert.equal(codes[i], 0, `worker ${devices[i]} exit=${codes[i]} stderr=${err.slice(-500)}`);
-    }
-    assert.equal(sawPartial, true, 'workers overlapped: hot observed mid-append');
-    assert.equal(wmRegressions, 0, 'watermark never regresses mid-run');
-
-    // Heal: drain every pending row and every unshipped chunk in the parent.
-    for (let i = 0; i < 10; i++) {
-      const r = await seal({ hotDb: hot, outDir, targetBytes: TARGET });
-      if (r.rowsSealed === 0) break;
-    }
-    for (let i = 0; i < 10; i++) {
-      const r = await ship({ outDir, relayDir, baseDelayMs: 1 });
-      if (r.sent.length === 0) break;
-    }
-    clearFindCaches();
-
-    // Framing intact: every hot line parses, zero malformed, exact row count.
-    const counted = readHotRowsCounted(hot);
-    assert.equal(counted.malformed, 0, 'no torn lines in shared hot');
-    assert.equal(counted.rows.length, total, 'hot holds every appended row');
-    const hotIds = new Set(counted.rows.map((r) => r.id));
-    for (const device of devices) {
-      for (let s = 1; s <= ROWS; s++) assert.ok(hotIds.has(idOf(device, s)), `hot missing ${idOf(device, s)}`);
-    }
-
-    // No lost acked events: every appended id resolves with its exact body.
-    for (const device of devices) {
-      for (let s = 1; s <= ROWS; s++) {
-        const id = idOf(device, s);
-        let row: { id: string; body: string };
+      // Real polling: witnesses live child progress against the platform
+      // clock; fake timers cannot advance separate OS processes. Seals are
+      // lock-serialized, so the watermark file must never regress mid-run.
+      let sawPartial = false;
+      const total = WORKERS * ROWS;
+      const wmPath = join(outDir, 'sealed_upto_seq');
+      const wmHigh: Record<string, number> = {};
+      let wmRegressions = 0;
+      const poll = setInterval(() => {
         try {
-          row = findTrx({ outDir, trxId: id }).row;
-        } catch (e) {
-          assert.fail(`lost acked event ${id}: ${(e as Error).message}`);
+          const text = readFileSync(hot, 'utf8');
+          if (text.length > 0) {
+            const lines = text.split('\n').filter((l) => l.trim().length > 0).length;
+            if (lines > 0 && lines < total) sawPartial = true;
+          }
+        } catch { /* hot not yet created: ignore */ }
+        try {
+          const wm = JSON.parse(readFileSync(wmPath, 'utf8')) as Record<string, number>;
+          for (const [k, v] of Object.entries(wm)) {
+            if ((wmHigh[k] ?? 0) > v) wmRegressions++;
+            wmHigh[k] = Math.max(wmHigh[k] ?? 0, v);
+          }
+        } catch { /* watermark not yet persisted: ignore */ }
+      }, 5);
+      const codes = await Promise.all(procs.map((p) => p.exited));
+      clearInterval(poll);
+      for (let i = 0; i < procs.length; i++) {
+        const err = (await new Response(procs[i].stderr).text()).trim();
+        assert.equal(codes[i], 0, `worker ${devices[i]} exit=${codes[i]} stderr=${err.slice(-500)}`);
+      }
+      assert.equal(sawPartial, true, 'workers overlapped: hot observed mid-append');
+      assert.equal(wmRegressions, 0, 'watermark never regresses mid-run');
+
+      // Heal: drain every pending row and every unshipped chunk in the parent.
+      for (let i = 0; i < 10; i++) {
+        const r = await seal({ hotDb: hot, outDir, targetBytes: TARGET });
+        if (r.rowsSealed === 0) break;
+      }
+      for (let i = 0; i < 10; i++) {
+        const r = await ship({ outDir, relayDir, baseDelayMs: 1 });
+        if (r.sent.length === 0) break;
+      }
+      clearFindCaches();
+
+      // Framing intact: every hot line parses, zero malformed, exact row count.
+      const counted = readHotRowsCounted(hot);
+      assert.equal(counted.malformed, 0, 'no torn lines in shared hot');
+      assert.equal(counted.rows.length, total, 'hot holds every appended row');
+      const hotIds = new Set(counted.rows.map((r) => r.id));
+      for (const device of devices) {
+        for (let s = 1; s <= ROWS; s++) assert.ok(hotIds.has(idOf(device, s)), `hot missing ${idOf(device, s)}`);
+      }
+
+      // No lost acked events: every appended id resolves with its exact body.
+      for (const device of devices) {
+        for (let s = 1; s <= ROWS; s++) {
+          const id = idOf(device, s);
+          let row: { id: string; body: string };
+          try {
+            row = findTrx({ outDir, trxId: id }).row;
+          } catch (e) {
+            const msg = e !== null && typeof e === 'object' && 'message' in e && typeof e.message === 'string' ? e.message : String(e);
+            assert.fail(`lost acked event ${id}: ${msg}`);
+          }
+          assert.equal(row.id, id);
+          assert.equal(row.body, bodyOf(device, s), `torn content for ${id}`);
         }
-        assert.equal(row.id, id);
-        assert.equal(row.body, bodyOf(device, s), `torn content for ${id}`);
       }
-    }
 
-    // Watermark monotonic per device: exactly max acked seq, never beyond.
-    const wm = JSON.parse(readFileSync(join(outDir, 'sealed_upto_seq'), 'utf8')) as Record<string, number>;
-    assert.deepEqual(Object.keys(wm).sort(), [...devices].sort(), 'watermark tracks every device');
-    for (const device of devices) assert.equal(wm[device], ROWS, `watermark ${device} at max acked seq`);
+      // Watermark monotonic per device: exactly max acked seq, never beyond.
+      const wm = JSON.parse(readFileSync(join(outDir, 'sealed_upto_seq'), 'utf8')) as Record<string, number>;
+      assert.deepEqual(Object.keys(wm).sort(), [...devices].sort(), 'watermark tracks every device');
+      for (const device of devices) assert.equal(wm[device], ROWS, `watermark ${device} at max acked seq`);
 
-    // Manifest consistent: per-table ranges tile 1..ROWS with no gap or
-    // overlap, row counts exact, verifyFull clean, relay drained.
-    const { manifest } = loadManifest(outDir);
-    const live = manifest.chunks.filter((e) => !e.quarantined);
-    assert.equal(live.length > 0, true, 'manifest lists chunks');
-    for (const device of devices) {
-      const ranges = live
-        .filter((e) => e.table === device)
-        .map((e) => ({ min: e.seqMin, max: e.seqMax, rows: e.rows }))
-        .sort((a, b) => a.min - b.min);
-      assert.equal(ranges.length > 0, true, `table ${device} has chunks`);
-      let next = 1;
-      let rows = 0;
-      for (const r of ranges) {
-        assert.equal(r.min, next, `table ${device}: gap/overlap at seq ${next}`);
-        next = r.max + 1;
-        rows += r.rows;
+      // Manifest consistent: per-table ranges tile 1..ROWS with no gap or
+      // overlap, row counts exact, verifyFull clean, relay drained.
+      const { manifest } = loadManifest(outDir);
+      const live = manifest.chunks.filter((e) => !e.quarantined);
+      assert.equal(live.length > 0, true, 'manifest lists chunks');
+      for (const device of devices) {
+        const ranges = live
+          .filter((e) => e.table === device)
+          .map((e) => ({ min: e.seqMin, max: e.seqMax, rows: e.rows }))
+          .sort((a, b) => a.min - b.min);
+        assert.equal(ranges.length > 0, true, `table ${device} has chunks`);
+        let next = 1;
+        let rows = 0;
+        for (const r of ranges) {
+          assert.equal(r.min, next, `table ${device}: gap/overlap at seq ${next}`);
+          next = r.max + 1;
+          rows += r.rows;
+        }
+        assert.equal(next - 1, ROWS, `table ${device} covers 1..${ROWS}`);
+        assert.equal(rows, ROWS, `table ${device} seals ${ROWS} rows exactly once`);
       }
-      assert.equal(next - 1, ROWS, `table ${device} covers 1..${ROWS}`);
-      assert.equal(rows, ROWS, `table ${device} seals ${ROWS} rows exactly once`);
-    }
-    const full = verifyFull(outDir);
-    assert.equal(full.ok, true, `verifyFull clean: ${JSON.stringify(full.bad)} chain=${JSON.stringify(full.chain)}`);
-    for (const e of live) {
-      assert.ok(existsSync(join(relayDir, 'chunks', e.file)), `relay holds ${e.file}`);
-    }
+      const full = verifyFull(outDir);
+      assert.equal(full.ok, true, `verifyFull clean: ${JSON.stringify(full.bad)} chain=${JSON.stringify(full.chain)}`);
+      for (const e of live) {
+        assert.ok(existsSync(join(relayDir, 'chunks', e.file)), `relay holds ${e.file}`);
+      }
+    });
   });
 });

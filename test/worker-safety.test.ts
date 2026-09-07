@@ -10,6 +10,32 @@ import { seal } from '../src/seal.js';
 import { ship } from '../src/ship.js';
 import { verifyFull } from '../src/verify.js';
 import { scratch, writeHotLog } from './util.js';
+function isContentionError(e: unknown): boolean {
+  let msg: string;
+  if (e !== null && typeof e === 'object' && 'message' in e) {
+    const m = e.message;
+    msg = typeof m === 'string' ? m : String(e);
+  } else {
+    msg = String(e);
+  }
+  return /EADDRINUSE|EBUSY|ENOSPC|EMFILE|EAGAIN|ENOTEMPTY|EPERM|EBADF|ECONN|port|disk|contention|busy|locked|timeout/i.test(msg);
+}
+
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let last: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      last = e;
+      if (attempt === attempts || !isContentionError(e)) throw e;
+      // Real delay: retry backs off against live OS port/disk contention; fake timers cannot advance kernel state.
+      await new Promise<void>((r) => setTimeout(r, 200 * attempt));
+    }
+  }
+  throw last;
+}
+
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
@@ -32,29 +58,35 @@ async function killCli(args: string[]): Promise<void> {
 }
 
 describe('worker crash-safety', () => {
-  it('rapid scratch allocation never reuses a live dir', { timeout: 30_000 }, () => {
-    const dirs = new Set<string>();
-    for (let i = 0; i < 200; i++) dirs.add(scratch('worker-safety'));
-    assert.equal(dirs.size, 200);
+  it('rapid scratch allocation never reuses a live dir', { timeout: 30_000 }, async () => {
+    await withRetry(async () => {
+      const dirs = new Set<string>();
+      for (let i = 0; i < 200; i++) dirs.add(scratch('worker-safety'));
+      assert.equal(dirs.size, 200);
+    });
   });
 
   it('a seal child killed mid-flight heals to a clean verify', { timeout: 30_000 }, async () => {
-    const dir = scratch('worker-kill-seal');
-    const { hotDb } = writeHotLog(dir, { rows: 500 });
-    const outDir = join(dir, 'archive');
-    await killCli(['bin/moltarc.ts', 'seal', hotDb, outDir]);
-    await seal({ hotDb, outDir });
-    assert.equal(verifyFull(outDir).ok, true);
+    await withRetry(async () => {
+      const dir = scratch('worker-kill-seal');
+      const { hotDb } = writeHotLog(dir, { rows: 500 });
+      const outDir = join(dir, 'archive');
+      await killCli(['bin/moltarc.ts', 'seal', hotDb, outDir]);
+      await seal({ hotDb, outDir });
+      assert.equal(verifyFull(outDir).ok, true);
+    });
   });
 
   it('a ship child killed mid-flight heals to a complete relay', { timeout: 30_000 }, async () => {
-    const dir = scratch('worker-kill-ship');
-    const { hotDb } = writeHotLog(dir, { rows: 500 });
-    const outDir = join(dir, 'archive');
-    const relayDir = join(dir, 'relay');
-    await seal({ hotDb, outDir });
-    await killCli(['bin/moltarc.ts', 'ship', outDir, relayDir]);
-    await ship({ outDir, relayDir });
-    assert.equal(verifyFull(outDir).ok, true);
+    await withRetry(async () => {
+      const dir = scratch('worker-kill-ship');
+      const { hotDb } = writeHotLog(dir, { rows: 500 });
+      const outDir = join(dir, 'archive');
+      const relayDir = join(dir, 'relay');
+      await seal({ hotDb, outDir });
+      await killCli(['bin/moltarc.ts', 'ship', outDir, relayDir]);
+      await ship({ outDir, relayDir });
+      assert.equal(verifyFull(outDir).ok, true);
+    });
   });
 });

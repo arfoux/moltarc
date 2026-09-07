@@ -74,3 +74,59 @@ describe('moltarc timetravel', () => {
     assert.equal(r.proof.chunksPruned, 0);
   });
 });
+
+describe('moltarc timetravel O(k) prune + cap', () => {
+  it('as-of seq prunes future chunks by seqMin (O(k) range prune)', { timeout: 30_000 }, () => {
+    const { outDir, names } = fixedArchive();
+    // seq 2 should see only chunks with seqMin <=2 ; chunk2 seqMin=4 and chunk3 seqMin=6 pruned
+    const r = queryAsOf({ outDir, seq: 2 });
+    assert.deepEqual(byId(r.rows), { a: '1:1000:a-v1', b: '2:2000:b-v1' });
+    assert.equal(r.proof.chunksPruned, 2);
+    assert.deepEqual(r.proof.chunksConsulted, [names[0]]);
+    // seq 4 should include chunk2 but prune chunk3
+    const r2 = queryAsOf({ outDir, seq: 4 });
+    assert.equal(r2.proof.chunksConsulted.length, 2);
+    assert.equal(r2.proof.chunksPruned, 1);
+  });
+
+  it('warns when kept chunks exceed 1000', { timeout: 30_000 }, () => {
+    const dir = scratch('timetravel-cap');
+    const outDir = join(dir, 'archive');
+    const warm = join(outDir, 'warm');
+    mkdirSync(warm, { recursive: true });
+    // Create 1001 tiny chunks with sequential seq, all with seqMin <= target
+    const names: string[] = [];
+    for (let i = 0; i < 1001; i++) {
+      const seq = i + 1;
+      const rows: HotRow[] = [row(`id-${i}`, seq, seq * 1000, `v${seq}`)];
+      const bytes = encodeChunk('sales', rows);
+      const name = chunkName('sales', seq, seq, bytes);
+      names.push(name);
+      writeFileSync(join(warm, name), bytes);
+    }
+    saveManifestAtomic(outDir, buildManifest(outDir));
+    const warns: string[] = [];
+    const origWarn = console.warn;
+    console.warn = (...a: unknown[]) => warns.push(String(a[0]));
+    try {
+      const r = queryAsOf({ outDir, seq: 2000 });
+      assert.equal(r.proof.chunksConsulted.length, 1001);
+      assert.ok(warns.some((m) => m.includes('exceeds 1000')), `expected cap warning, got ${warns.join('; ')}`);
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+
+  it('does not warn when kept <=1000', { timeout: 30_000 }, () => {
+    const { outDir } = fixedArchive();
+    const warns: string[] = [];
+    const origWarn = console.warn;
+    console.warn = (...a: unknown[]) => warns.push(String(a[0]));
+    try {
+      queryAsOf({ outDir, ts: 6500 });
+      assert.equal(warns.filter((m) => m.includes('exceeds 1000')).length, 0);
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+});

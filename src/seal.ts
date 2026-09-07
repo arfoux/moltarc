@@ -8,7 +8,7 @@ import { encodeChunk, sha256hex } from './chunk.js';
 import type { HotRow } from './chunk.js';
 import { trainTableDict, saveDictAtomic } from './dict.js';
 import { checkReserve } from './gc.js';
-import { assertMigrated } from './migrate.js';
+import { requireMigrated } from './migrate.js';
 import { appendEntries, buildManifest, saveManifestAtomic, scanChunk } from './manifest.js';
 import type { ChunkEntry, ColdSegment } from './manifest.js';
 import { saveThumb } from './thumb.js';
@@ -231,9 +231,7 @@ function readWatermark(wmPath: string): Record<string, number> {
 export async function seal(opts: SealOpts): Promise<SealResult> {
   // Downgrade guard first: refuse old manifests, but a fresh outDir with no
   // manifest yet seals normally (nothing to migrate).
-  if (existsSync(join(opts.outDir, 'manifest.json')) || existsSync(join(opts.outDir, 'manifest.bak.json'))) {
-    assertMigrated(opts.outDir);
-  }
+  requireMigrated(opts.outDir);
   const target = opts.targetBytes ?? TARGET_BYTES;
   const warm = join(opts.outDir, 'warm');
   mkdirSync(warm, { recursive: true });

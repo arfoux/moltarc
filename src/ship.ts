@@ -6,7 +6,7 @@ import { createHash, type Hash } from 'crypto';
 import { join } from 'path';
 import { atomicWrite } from './guard.js';
 import { loadManifest } from './manifest.js';
-import { assertMigrated } from './migrate.js';
+import { requireMigrated } from './migrate.js';
 import { checkReserve } from './gc.js';
 import type { ChunkEntry } from './manifest.js';
 
@@ -203,9 +203,7 @@ export async function sendChunked(src: string, dst: string, statePath: string, o
 export async function ship(opts: ShipOpts): Promise<ShipResult> {
   // Downgrade guard first: refuse old manifests, but an outDir with no
   // manifest yet ships normally (nothing to migrate; loadManifest rebuilds).
-  if (existsSync(join(opts.outDir, 'manifest.json')) || existsSync(join(opts.outDir, 'manifest.bak.json'))) {
-    assertMigrated(opts.outDir);
-  }
+  requireMigrated(opts.outDir);
   const { manifest } = loadManifest(opts.outDir);
   const relayChunks = join(opts.relayDir, 'chunks');
   mkdirSync(relayChunks, { recursive: true });
