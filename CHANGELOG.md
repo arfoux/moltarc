@@ -3,7 +3,7 @@
 User-visible changes per tag, from `git log`. Test-only hardening with no
 behavior change is marked as such.
 
-## unreleased
+## v0.19.0
 
 - Traversal gates: chunk/sha/owner/bundle names reject `/`, `\`, `..`
   so relay and archive paths can never escape their directories.

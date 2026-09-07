@@ -68,6 +68,9 @@ is retired: too repetitive to plan from.
 - `ext/moltarc.ts` — SQLite extension reference (TS): read-only `moltarc_find` + trivially-safe `moltarc_seal`, zero format code (native `ext/moltarc.dll` built + green via MinGW, subprocess-backed; local-only, see `docs/compat.md`)
 - `docs/decisions.md` — why each load-bearing choice: chunks, zstd-only, dict gate, bloom, reserve, lanes, warm-find, dual manifest, no-rewrite
 - `src/seal.ts` — seal scans only new chunks and merges via `appendEntries` when a manifest copy exists, full rebuild kept for first seal (`test/seal-append.test.ts`)
+- `examples/universal-demo.ts` — EN shop demo: seal 500 orders, ship, find one back, no warung words (`test/kasir.test.ts` pattern)
+- `examples/dashboard.ts` — timetravel polling demo: windowed recent-state fold polled N times
+- `src/gc.ts --deep-foto` — sweeps unreferenced foto sidecars and reports referenced shas with no `.bin` as `fotoMissing`
 
 ## Measured SLA
 
