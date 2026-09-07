@@ -1,7 +1,7 @@
 # moltarc — shrink + ship + find
 
-[![ci](https://github.com/arfoux/moltarc/actions/workflows/ci.yml/badge.svg)](https://github.com/arfoux/moltarc/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/moltarc.svg)](https://www.npmjs.com/package/moltarc) [![license](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
-## Pipeline
+Tiered SQLite archive for small-business data: hot DB stays small and fast,
+warm chunks compress schema-aware, cold archive ships once, query stays partial.
 
 ```
 [hot.db r/w SQLite] --seal--> [warm/*.zst 1-4MB immutable] --merge--> [cold/*.tar.zst] + manifest.json
