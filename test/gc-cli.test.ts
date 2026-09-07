@@ -85,6 +85,16 @@ describe('gc cli', () => {
     assert.ok(existsSync(join(outDir, 'warm', orphan)), 'fail-closed: orphan retained');
   });
 
+  it('reports tmp litter without deleting live chunks', { timeout: 30_000 }, async () => {
+    const dir = scratch('gc-cli-litter');
+    const { hotDb } = writeHotLog(dir, { rows: 200 });
+    const outDir = join(dir, 'archive');
+    await seal({ hotDb, outDir });
+    writeFileSync(join(outDir, 'warm', 'x.chk.tmp.123'), Buffer.from('crashed-writer-fragment'));
+    const out = run('gc', outDir);
+    assert.ok(out.includes('litter 1 tmp file(s) collected'), `missing litter line:\n${out}`);
+  });
+
   it('usage failure without outDir', { timeout: 30_000 }, () => {
     const text = runFail('gc');
     assert.match(text, /usage: moltarc gc <outDir> \[relayDir\] \[--apply\]/);

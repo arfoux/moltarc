@@ -28,13 +28,12 @@ function fsyncDir(p: string): void {
   } catch { /* Windows: dir fsync unsupported, rename is enough */ }
 }
 
-export function atomicWrite(dest: string | Buffer, data: Buffer | string): void {
-  const destPath = typeof dest === 'string' ? dest : String(dest);
-  const tmp = `${destPath}.tmp.${process.pid}`;
+export function atomicWrite(dest: string, data: Buffer | string): void {
+  const tmp = `${dest}.tmp.${process.pid}`;
   writeFileSync(tmp, data);
   fsyncFile(tmp);
-  renameSync(tmp, destPath);
-  fsyncDir(dirname(destPath));
+  renameSync(tmp, dest);
+  fsyncDir(dirname(dest));
 }
 
 export function cacheKey(mtimeMs: number, size: number, seq: number): string {

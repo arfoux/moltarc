@@ -2,7 +2,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'child_process';
-import { readFileSync, readdirSync, statSync } from 'fs';
+import { readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { seal } from '../src/seal.js';
@@ -64,5 +64,17 @@ describe('cli e2e', () => {
       const name = c.split(/[\\/]/).pop() as string;
       assert.ok(readFileSync(join(relayDir, 'chunks', name)).equals(readFileSync(c)));
     }
+  });
+
+  it('seal reports replaced rows on same-key overwrite', { timeout: 30_000 }, () => {
+    const dir = scratch('cli-replaced');
+    const hotDb = join(dir, 'hot.jsonl');
+    writeFileSync(hotDb, [
+      JSON.stringify({ device_id: 'd1', seq: 1, ts: 1, id: 'a', table: 't', body: 'FIRST' }),
+      JSON.stringify({ device_id: 'd1', seq: 1, ts: 2, id: 'a', table: 't', body: 'SECOND' }),
+    ].join('\n') + '\n');
+    const out = run('seal', hotDb, join(dir, 'archive'));
+    assert.match(out, /sealed 1 rows/);
+    assert.ok(out.includes('replaced 1 row(s)'), `missing replaced line:\n${out}`);
   });
 });

@@ -189,4 +189,19 @@ describe('p2p hardening', () => {
       a.stop();
     }
   });
+
+  it('rejects syncs that exceed the aggregate session cap', { timeout: 60_000 }, async () => {
+    const dir = scratch('p2p-sesscap');
+    const { hotDb } = writeHotLog(dir, { rows: 500, uniqueBodies: true });
+    const aDir = join(dir, 'node-a');
+    const bDir = join(dir, 'node-b');
+    const r = await seal({ hotDb, outDir: aDir, targetBytes: 16 * 1024 });
+    assert.ok(r.chunks.length >= 1);
+    const a = startNode({ outDir: aDir, port: 0, blockBytes: 1024 });
+    try {
+      await assert.rejects(syncFromPeer(a.url, bDir, { blockBytes: 1024, maxSessionBytes: 1 }), /session cap/);
+    } finally {
+      a.stop();
+    }
+  });
 });
