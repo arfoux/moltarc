@@ -17,6 +17,12 @@ export interface TimeTravelOpts {
   seq?: number;
   ts?: number;
   chunkDir?: string;
+  /** windowed fold: only rows with ts >= target-windowMs (ts mode) take part.
+   * Unwindowed (default) folds all history. windowed results carry only ids
+   * seen inside the window — recent state, not full history. */
+  windowMs?: number;
+  /** windowed fold for seq mode: only rows with seq > target-windowSeq. */
+  windowSeq?: number;
 }
 
 export interface TimeTravelProof {
@@ -24,6 +30,7 @@ export interface TimeTravelProof {
   chunksPruned: number;
   skippedMissing: number;
   manifestSource: string;
+  windowed: boolean;
 }
 
 export interface TimeTravelResult {
@@ -38,7 +45,13 @@ export function queryAsOf(opts: TimeTravelOpts): TimeTravelResult {
   const targetSeq = hasSeq ? Math.floor(opts.seq as number) : null;
   const targetTs = hasTs ? (opts.ts as number) : null;
   if (targetSeq !== null && !(targetSeq >= 0)) throw new Error('queryAsOf: seq must be >= 0');
-  if (targetTs !== null && !Number.isFinite(targetTs)) throw new Error('queryAsOf: ts must be finite');
+  if (opts.windowMs !== undefined && !(opts.windowMs >= 0)) throw new Error('queryAsOf: windowMs must be >= 0');
+  if (opts.windowSeq !== undefined && !(opts.windowSeq >= 0)) throw new Error('queryAsOf: windowSeq must be >= 0');
+  if (opts.windowMs !== undefined && !hasTs) throw new Error('queryAsOf: windowMs needs ts mode');
+  if (opts.windowSeq !== undefined && !hasSeq) throw new Error('queryAsOf: windowSeq needs seq mode');
+  const windowed = opts.windowMs !== undefined || opts.windowSeq !== undefined;
+  const floorTs = hasTs && opts.windowMs !== undefined ? (targetTs as number) - (opts.windowMs as number) : null;
+  const floorSeq = hasSeq && opts.windowSeq !== undefined ? (targetSeq as number) - (opts.windowSeq as number) : null;
 
   const dir = opts.chunkDir ?? join(opts.outDir, 'warm');
   const dictDir = join(dir, '..', 'dicts');
@@ -55,9 +68,12 @@ export function queryAsOf(opts: TimeTravelOpts): TimeTravelResult {
     if (hasSeq) {
       // Prune only future chunks; seqMax < target still needed (all rows <= target)
       if ((targetSeq as number) < e.seqMin) { pruned++; continue; }
+      // Window: chunks fully below the floor carry no in-window rows.
+      if (floorSeq !== null && e.seqMax <= floorSeq) { pruned++; continue; }
       // bloom not applicable: no id filter, keep range-pruned set as-is
     } else {
       if ((targetTs as number) < e.tsMin) { pruned++; continue; }
+      if (floorTs !== null && e.tsMax <= floorTs) { pruned++; continue; }
     }
     kept.push(e);
   }
@@ -75,11 +91,13 @@ export function queryAsOf(opts: TimeTravelOpts): TimeTravelResult {
     consulted.push(e.file);
     for (const r of rows) {
       if (hasSeq ? r.seq > (targetSeq as number) : r.ts > (targetTs as number)) continue;
+      if (floorSeq !== null && r.seq <= floorSeq) continue;
+      if (floorTs !== null && r.ts <= floorTs) continue;
       const cur = state.get(r.id);
       if (!cur || r.seq > cur.seq || (r.seq === cur.seq && r.ts > cur.ts)) state.set(r.id, r);
     }
   }
   const rows = [...state.values()].sort((a, b) => a.seq - b.seq || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   if (skippedMissing > 0) console.warn(`timetravel: ${skippedMissing} chunk(s) missing, result incomplete`);
-  return { rows, proof: { chunksConsulted: consulted, chunksPruned: pruned, skippedMissing, manifestSource: source } };
+  return { rows, proof: { chunksConsulted: consulted, chunksPruned: pruned, skippedMissing, manifestSource: source, windowed } };
 }
