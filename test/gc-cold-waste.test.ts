@@ -247,8 +247,17 @@ describe('gc deep foto', () => {
     assert.ok(!existsSync(join(outDir, 'foto', `${deadSha}.bin`)), 'dead sidecar gone');
     assert.ok(existsSync(join(outDir, 'foto', `${refSha}.bin`)), 'referenced sidecar kept');
   });
-});
 
+  it('reports referenced shas with no sidecar file as fotoMissing', { timeout: 30_000 }, async () => {
+    const dir = scratch('gcw-foto-missing');
+    const { outDir, refSha } = await sealWithFoto(dir);
+    unlinkSync(join(outDir, 'foto', `${refSha}.bin`));
+    const r = sweep(outDir, { dryRun: true, deepFoto: true });
+    assert.equal(r.fotoMissing.length, 1);
+    assert.ok(r.fotoMissing[0].ref.includes(refSha));
+    assert.ok(r.fotoMissing[0].chunk.endsWith('.chk'));
+  });
+});
 describe('guard atomic tmp', () => {
   it('atomicWrite never reuses a pid-only tmp name', { timeout: 30_000 }, () => {
     const dir = scratch('guard-tmp-nonce');

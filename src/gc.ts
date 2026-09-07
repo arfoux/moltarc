@@ -53,6 +53,7 @@ export interface SweepResult {
   dictBytesReclaimed: number;
   fotoOrphans: string[]; // foto/<sha>.bin + thumb companions unreferenced by any warm chunk (deepFoto only)
   fotoRemoved: string[]; // orphan foto files deleted (dryRun:false + relay ack, or no relayDir)
+  fotoMissing: { ref: string; chunk: string }[]; // referenced shas with no sidecar file (deepFoto only)
   litter: string[]; // tmp/state litter found (relative sub/file), reported even on dry-run
   litterRemoved: string[]; // litter deleted (dryRun:false only)
   bytesReclaimed: number;
@@ -203,8 +204,10 @@ export function sweep(outDir: string, opts: SweepOpts = {}): SweepResult {
   // undecodable chunks (torn/orphan garbage) without failing the sweep.
   const fotoOrphans: string[] = [];
   const fotoRemoved: string[] = [];
+  const fotoMissing: { ref: string; chunk: string }[] = [];
   if (opts.deepFoto) {
     const referenced = new Set<string>();
+    const refChunk = new Map<string, string>();
     let warmNames: string[] = [];
     try {
       warmNames = readdirSync(warm).filter((f: string) => f.endsWith('.chk')).sort();
@@ -219,7 +222,7 @@ export function sweep(outDir: string, opts: SweepOpts = {}): SweepResult {
         const { rows } = decodeChunk(buf, dict);
         for (const r of rows) {
           const m = FOTO_SHA_RE.exec(r.body);
-          if (m) referenced.add(m[1]);
+          if (m) { referenced.add(m[1]); if (!refChunk.has(m[1])) refChunk.set(m[1], f); }
         }
       } catch { /* undecodable chunk: contributes no refs, never fails the sweep */ }
     }
@@ -261,8 +264,10 @@ export function sweep(outDir: string, opts: SweepOpts = {}): SweepResult {
         }
       }
     }
+    for (const sha of referenced) {
+      if (!fotoSet.has(`${sha}.bin`)) fotoMissing.push({ ref: `foto:sha256:${sha}`, chunk: refChunk.get(sha) ?? '' });
+    }
   }
-
   // Tmp/state litter: crashed writers leave <name>.tmp.<pid> / <name>.tmp
   // fragments behind (chunk, manifest, tar, dict, thumb, ship-index writes
   // all stage through a .tmp name). They are never referenced by the
@@ -288,7 +293,7 @@ export function sweep(outDir: string, opts: SweepOpts = {}): SweepResult {
       }
     }
   }
-  return { orphans, removed, skippedUnacked, dictOrphans, dictsRemoved, dictBytesReclaimed, fotoOrphans, fotoRemoved, litter, litterRemoved, bytesReclaimed, dryRun, chunks, bytes };
+  return { orphans, removed, skippedUnacked, dictOrphans, dictsRemoved, dictBytesReclaimed, fotoOrphans, fotoRemoved, fotoMissing, litter, litterRemoved, bytesReclaimed, dryRun, chunks, bytes };
 }
 
 export interface StatusInfo {
