@@ -15,7 +15,9 @@ const rows = [
 ];
 
 describe('moltarc native dll (subprocess-backed)', () => {
-  test('seal then find via loaded extension', { timeout: 120_000 }, () => {
+  const dllExists = (() => { try { return Bun.file(DLL).size > 0; } catch { return false; } })() || (() => { try { return require('fs').existsSync(DLL); } catch { return false; } })();
+  const maybeTest = dllExists ? test : test.skip;
+  maybeTest('seal then find via loaded extension', { timeout: 120_000 }, () => {
     const dir = scratch('dll');
     const hot = join(dir, 'hot.jsonl');
     writeFileSync(hot, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');

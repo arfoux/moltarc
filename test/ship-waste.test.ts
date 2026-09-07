@@ -128,4 +128,28 @@ describe('ship waste fixes', () => {
     assert.deepEqual(r.sent, ['sales-000001-000001-aa01.chk'], 'survivors still ship');
     assert.equal(r.sent.length + r.skipped.length, 2, 'every chunk accounted for');
   });
+
+  it('resumes a 30MB file after a mid-copy kill with identical bytes', { timeout: 120_000 }, async () => {
+    const dir = scratch('ship-30mb-resume');
+    const size = 30 * 1024 * 1024;
+    const src = join(dir, 'big.chk');
+    const buf = Buffer.alloc(size);
+    for (let i = 0; i < size; i++) buf[i] = (3 + i * 31) & 0xff;
+    writeFileSync(src, buf);
+    const hex = sha256hex(buf);
+    const dst = join(dir, 'relay', 'big.chk');
+    const state = join(dir, 'relay', '.ship-state-big.json');
+    const attempt = { blockBytes: 64 * 1024, maxRetries: 0, baseDelayMs: 1, failAtBytes: 15 * 1024 * 1024, sleep: async () => {} };
+    await assert.rejects(sendChunked(src, dst, state, attempt), /injected transport failure/);
+    const journal = JSON.parse(readFileSync(state, 'utf8')) as { offset: number; sha256: string };
+    assert.ok(journal.offset > 0 && journal.offset <= size, `kill leaves partial progress, got ${journal.offset}`);
+    assert.equal(journal.sha256, hex, 'journal carries the source hash');
+    const done = await sendChunked(src, dst, state, { ...attempt, failAtBytes: undefined });
+    assert.equal(done.resumed, true, 'second run resumes the killed copy');
+    assert.equal(done.bytes, size);
+    const relayed = readFileSync(dst);
+    assert.deepEqual(relayed, readFileSync(src), 'relay bytes equal src after resume');
+    assert.equal(sha256hex(relayed), hex);
+    assert.ok(!existsSync(state), 'journal cleaned after verified copy');
+  });
 });
