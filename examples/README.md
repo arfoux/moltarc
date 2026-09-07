@@ -2,16 +2,17 @@
 
 Runnable end-to-end demos for moltarc: write a hot JSONL feed, `seal` it into
 warm chunks, `ship` the chunks to a relay dir, then `find` one transaction back.
+The core accepts any append-only feed (`device_id,seq,ts,id,table,body`) —
+demos below are just usages, not the definition.
 
 ## Demos
 
+- `universal-demo.ts` — generic shop orders (50 rows, English).
+  `bun examples/universal-demo.ts [--out <dir>]` / `bun run demo`
 - `e2e.ts` — field-log feed (paddy sensors + farmer activity, 1200 rows).
   `bun examples/e2e.ts [--out <dir>]` / `bun run e2e`
 - `kasir-demo.ts` — Indonesian shop receipts / struk kasir (50 rows).
   `bun examples/kasir-demo.ts [--out <dir>]` / `bun run kasir`
-- `universal-demo.ts` — universal shop orders in English (50 rows).
-  `bun examples/universal-demo.ts [--out <dir>]` / `bun run demo`
-
 ## Universal demo
 
 `writeOrders(dir, rows)` writes `orders.jsonl` — one JSON object per line with
