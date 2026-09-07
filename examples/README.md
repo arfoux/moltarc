@@ -2,8 +2,8 @@
 
 Runnable end-to-end demos for moltarc: write a hot JSONL feed, `seal` it into
 warm chunks, `ship` the chunks to a relay dir, then `find` one transaction back.
-The core accepts any append-only feed (`device_id,seq,ts,id,table,body`) —
-demos below are just usages, not the definition.
+The core accepts any append-only feed (`device_id,seq,ts,id,table,body`).
+Below are sample usages.
 
 ## Demos
 
