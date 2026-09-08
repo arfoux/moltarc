@@ -27,13 +27,16 @@ export interface P2PNodeOpts {
   maxSessionBytes?: number;
   /**
    * 32-byte pre-shared key (64 hex chars or 32 raw bytes; MOLTARC_PSK env when
-   * omitted): frames every wire message as HMAC-SHA256(json)+'.'+json, verified
-   * on the raw bytes BEFORE parse; mismatches drop and close. Per-block auth
-   * fields add a second layer. When neither psk nor token is set the node runs
-   * in trusted-LAN-only fallback: anyone on the network can sync AND push
-   * chunks. Never expose such a node beyond a LAN you trust.
+   * omitted). Rotation: a comma-separated list is accepted (primary first);
+   * outbound traffic is signed/framed with the primary while inbound verifies
+   * against every listed key, so an old-key peer stays accepted during the
+   * transition. Frames every wire message as HMAC-SHA256(json)+'.'+json,
+   * verified on the raw bytes BEFORE parse; mismatches drop and close.
+   * Per-block auth fields add a second layer. When neither psk nor token is
+   * set the node runs in trusted-LAN-only fallback: anyone on the network
+   * can sync AND push chunks. Never expose such a node beyond a LAN you trust.
    */
-  psk?: string | Buffer;
+  psk?: string | Buffer | Buffer[];
   /** stable identity announced in hello/welcome so logs tell empty nodes apart. default: molt-<random>. */
   nodeId?: string;
   /** legacy shared secret (PSK preferred): guards hello only. empty = lan only with a warning. */
@@ -50,10 +53,12 @@ export interface P2PSyncOpts {
   maxSessionBytes?: number;
   /**
    * 32-byte pre-shared key (64 hex chars or 32 raw bytes; MOLTARC_PSK env when
-   * omitted). Signs every outbound message; frames are verified BEFORE parse.
-   * Unset = trusted-LAN-only fallback, see P2PNodeOpts.psk.
+   * omitted). Rotation: comma-separated list, primary first — signs every
+   * outbound message with the primary; frames are verified BEFORE parse
+   * against each listed key. Unset = trusted-LAN-only fallback, see
+   * P2PNodeOpts.psk.
    */
-  psk?: string | Buffer;
+  psk?: string | Buffer | Buffer[];
   /** stable identity announced in hello so the peer's logs tell nodes apart. default: molt-<random>. */
   nodeId?: string;
   /** legacy shared secret: signs every outbound message when talking to a guarded peer. */
@@ -272,6 +277,23 @@ export function peerAllowed(allowPeers: string[] | undefined, token: string | un
 /** Env var holding the 32-byte pre-shared key (64 hex chars or 32 raw bytes). */
 export const PSK_ENV = 'MOLTARC_PSK';
 /**
+ * Informational env var naming the active primary key during rotation (e.g. a
+ * key id, date, or `new`/`old` label). It is never read as key material and
+ * never sent on the wire — it exists so operators and logs can tell which
+ * rotation step a node is on.
+ *
+ * MOLTARC_PSK transition contract:
+ * 1. Generate the new key; set every node to `MOLTARC_PSK=<new>,<old>`
+ *    (primary first) and note the step in MOLTARC_PSK_ID (e.g. `rot-2026-09`).
+ *    Outbound traffic is framed/signed with the primary (`<new>`) while
+ *    inbound accepts `<new>` OR `<old>`, so mixed-version peers keep syncing.
+ * 2. Once every node has the list, promote: `MOLTARC_PSK=<new>` alone and
+ *    update MOLTARC_PSK_ID. Old-key-only peers are rejected from that point.
+ * Never ship a raw 32-byte key containing a comma — `,` separates list
+ * entries, so rotating keys must be 64 hex chars or 32 bytes of base64.
+ */
+export const PSK_ID_ENV = 'MOLTARC_PSK_ID';
+/**
  * Security model: with a PSK every wire message is framed as
  * HMAC-SHA256(json)+'.'+json and the frame is verified on the raw bytes BEFORE
  * JSON.parse; mismatches drop and close. Per-message auth fields add a second
@@ -295,18 +317,70 @@ export function parsePsk(s: string | undefined): Buffer | undefined {
   }
   throw new Error('p2p PSK (MOLTARC_PSK) must be a 32-byte pre-shared key: 64 hex chars or 32 raw bytes');
 }
+/**
+ * Parse a PSK list: comma-separated entries, primary first. Each entry uses
+ * the parsePsk format (64 hex chars, 32 raw bytes, or 32 bytes of base64).
+ * Empty => undefined. A single entry behaves exactly like parsePsk.
+ */
+export function parsePskList(s: string | undefined): Buffer[] | undefined {
+  if (s === undefined) return undefined;
+  if (s.trim() === '') return undefined;
+  const parts = s.split(',').map((p) => p.trim()).filter((p) => p !== '');
+  if (parts.length === 0) return undefined;
+  return parts.map((p) => parsePsk(p) as Buffer);
+}
 /** Read the PSK from the environment. Throws on a malformed non-empty value. */
 export function pskFromEnv(env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env): Buffer | undefined {
   return parsePsk(env[PSK_ENV]);
 }
+/**
+ * Read the PSK list from the environment: MOLTARC_PSK accepts a
+ * comma-separated key list (primary first). Single-key values return a
+ * one-element array, exactly as before. Throws on a malformed non-empty value.
+ */
+export function psksFromEnv(env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env): Buffer[] | undefined {
+  return parsePskList(env[PSK_ENV]);
+}
 /** Explicit psk opt wins; otherwise the MOLTARC_PSK env. Throws unless exactly 32 bytes. */
-export function resolvePsk(explicit?: string | Buffer, env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env): Buffer | undefined {
+export function resolvePsk(explicit?: string | Buffer | Buffer[], env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env): Buffer | undefined {
   if (Buffer.isBuffer(explicit)) {
     if (explicit.length !== 32) throw new Error('p2p psk must be exactly 32 bytes');
     return explicit;
   }
-  if (typeof explicit === 'string' && explicit.trim() !== '') return parsePsk(explicit);
+  if (Array.isArray(explicit)) {
+    if (explicit.length === 0) return pskFromEnv(env);
+    for (const k of explicit) {
+      if (!Buffer.isBuffer(k) || k.length !== 32) throw new Error('p2p psk must be exactly 32 bytes');
+    }
+    return explicit[0];
+  }
+  if (typeof explicit === 'string' && explicit.trim() !== '') {
+    const list = parsePskList(explicit);
+    return list?.[0];
+  }
   return pskFromEnv(env);
+}
+/**
+ * Explicit psk opt wins; otherwise the MOLTARC_PSK env. Accepts a
+ * comma-separated key list (primary first) and returns every key in order;
+ * the primary (index 0) signs/frames outbound traffic while inbound verifies
+ * against each key. Single-key input returns a one-element array identical to
+ * the old single-key path. Buffer[] input is validated and returned as-is.
+ */
+export function resolvePsks(explicit?: string | Buffer | Buffer[], env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env): Buffer[] | undefined {
+  if (Buffer.isBuffer(explicit)) {
+    if (explicit.length !== 32) throw new Error('p2p psk must be exactly 32 bytes');
+    return [explicit];
+  }
+  if (Array.isArray(explicit)) {
+    if (explicit.length === 0) return psksFromEnv(env);
+    for (const k of explicit) {
+      if (!Buffer.isBuffer(k) || k.length !== 32) throw new Error('p2p psk must be exactly 32 bytes');
+    }
+    return [...explicit];
+  }
+  if (typeof explicit === 'string' && explicit.trim() !== '') return parsePskList(explicit);
+  return psksFromEnv(env);
 }
 /** Stable node identity announced in hello/welcome (genesis) so logs tell empty nodes apart. */
 export function resolveNodeId(explicit?: string): string {
@@ -325,19 +399,29 @@ function authPartsFor(msg: WireMsg): Array<string | number> | null {
     default: return null;
   }
 }
-/** Constant-time check of a message auth field; true when unguarded or a control message. */
-export function authOk(key: string | Buffer | undefined, msg: WireMsg): boolean {
-  if (key === undefined || key === '' || (Buffer.isBuffer(key) && key.length === 0)) return true;
+/**
+ * Constant-time check of a message auth field; true when unguarded or a control
+ * message. Accepts a key list (primary first): every key is tried in order with
+ * a timing-safe compare, so an old-key peer stays accepted during rotation.
+ * Senders always sign with the primary.
+ */
+export function authOk(key: string | Buffer | Buffer[] | undefined, msg: WireMsg): boolean {
+  if (key === undefined || key === '' || (Buffer.isBuffer(key) && key.length === 0) || (Array.isArray(key) && key.length === 0)) return true;
   const parts = authPartsFor(msg);
   if (!parts) return true;
   const m = msg as { auth?: unknown };
   if (typeof m.auth !== 'string' || m.auth === '') return false;
-  const want = wireAuth(key, parts);
-  const a = Buffer.from(m.auth, 'utf8');
-  const b = Buffer.from(want, 'utf8');
-  return a.length === b.length && timingSafeEqual(a, b);
+  const keys = Array.isArray(key) ? key : [key];
+  let ok = false;
+  for (const k of keys) {
+    const want = wireAuth(k, parts);
+    const a = Buffer.from(m.auth, 'utf8');
+    const b = Buffer.from(want, 'utf8');
+    if (a.length === b.length && timingSafeEqual(a, b)) ok = true;
+  }
+  return ok;
 }
-/** Frame a message: plain JSON when unguarded, else HMAC-SHA256(json)+'.'+json. */
+/** Frame a message: plain JSON when unguarded, else HMAC-SHA256(json)+'.'+json. Rotation: callers pass the primary key; receivers try every listed key. */
 export function frameWire(psk: Buffer | undefined, msg: WireMsg): string {
   const json = JSON.stringify(msg);
   if (!psk) return json;
@@ -345,20 +429,27 @@ export function frameWire(psk: Buffer | undefined, msg: WireMsg): string {
 }
 /**
  * Verify a frame on the raw bytes BEFORE parsing. Returns the JSON payload, or
- * null on mismatch/malformed (caller must drop and close). Unguarded mode
+ * null on mismatch/malformed (caller must drop and close). Accepts a key list
+ * (primary first): every key is tried with a timing-safe compare, so frames
+ * from an old-key peer verify during rotation. Unguarded mode (no keys)
  * passes the raw text through (trusted-LAN-only fallback).
  */
-export function unframeWire(psk: Buffer | undefined, raw: string): string | null {
-  if (!psk) return raw;
+export function unframeWire(psk: Buffer | Buffer[] | undefined, raw: string): string | null {
+  const keys = Array.isArray(psk) ? psk : psk ? [psk] : [];
+  if (keys.length === 0) return raw;
   const dot = raw.indexOf('.');
   if (dot !== 64) return null;
   const mac = raw.slice(0, dot);
   const json = raw.slice(dot + 1);
   if (!/^[0-9a-f]{64}$/.test(mac)) return null;
-  const expect = createHmac('sha256', psk).update(json, 'utf8').digest('hex');
   const a = Buffer.from(mac, 'utf8');
-  const b = Buffer.from(expect, 'utf8');
-  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  let ok = false;
+  for (const k of keys) {
+    const expect = createHmac('sha256', k).update(json, 'utf8').digest('hex');
+    const b = Buffer.from(expect, 'utf8');
+    if (a.length === b.length && timingSafeEqual(a, b)) ok = true;
+  }
+  if (!ok) return null;
   return json;
 }
 /** Wire entries must name a real chunk file, carry a valid sha, and fit the cap. */
@@ -466,8 +557,10 @@ export function startNode(opts: P2PNodeOpts): { port: number; url: string; stop:
   // Node identity presented via hello/welcome genesis; 'anonymous' until hello.
   const peerIdByConn = new WeakMap<object, string>();
   const peerLabel = (ws: object): string => peerIdByConn.get(ws) ?? 'anonymous';
-  const psk = resolvePsk(opts.psk);
+  const psks = resolvePsks(opts.psk);
+  const psk = psks?.[0];
   const key: string | Buffer | undefined = psk ?? opts.token;
+  const verifyKeys: string | Buffer | Buffer[] | undefined = psks ?? key;
   const guarded = key !== undefined && key !== '' && !(Buffer.isBuffer(key) && key.length === 0);
   const nodeId = resolveNodeId(opts.nodeId);
   if (!guarded) console.warn(`[p2p] ${nodeId}: no PSK (MOLTARC_PSK empty) — trusted-LAN-only mode: anyone on the network can sync and push chunks`);
@@ -500,7 +593,7 @@ export function startNode(opts: P2PNodeOpts): { port: number; url: string; stop:
           }
         };
         // PSK mode: verify the frame HMAC on the raw bytes BEFORE parsing.
-        const framed = unframeWire(psk, String(raw));
+        const framed = unframeWire(psks, String(raw));
         if (framed === null) { try { ws.close(); } catch { /* gone */ } return; }
         let msg: WireMsg;
         try {
@@ -512,7 +605,7 @@ export function startNode(opts: P2PNodeOpts): { port: number; url: string; stop:
         const peer = peerLabel(ws);
         const pendingAcks = pendingFor(ws);
         if (msg.t === 'hello') {
-          if (guarded && !authOk(key, msg)) { conn.close(); return; }
+          if (guarded && !authOk(verifyKeys, msg)) { conn.close(); return; }
           tokenByConn.set(ws, typeof msg.token === 'string' ? msg.token : '');
           peerIdByConn.set(ws, typeof msg.nodeId === 'string' && msg.nodeId !== '' ? msg.nodeId.slice(0, 64) : 'anonymous');
           const local = summaryOf(outDir);
@@ -530,7 +623,7 @@ export function startNode(opts: P2PNodeOpts): { port: number; url: string; stop:
           return;
         }
         if (msg.t === 'want') {
-          if (guarded && !authOk(key, msg)) { send({ t: 'error', message: `bad want auth from ${peer}` }); conn.close(); return; }
+          if (guarded && !authOk(verifyKeys, msg)) { send({ t: 'error', message: `bad want auth from ${peer}` }); conn.close(); return; }
           if (!peerAllowed(opts.allowPeers, peerTokenOf(ws))) { send({ t: 'error', message: 'not allowed' }); conn.close(); return; }
           const items = Array.isArray(msg.items) ? msg.items : [];
           await serveItems(outDir, conn, items, blockBytes, failState, key);
@@ -541,7 +634,7 @@ export function startNode(opts: P2PNodeOpts): { port: number; url: string; stop:
             send({ t: 'error', message: `bad entry ${String(msg.entry?.file ?? '?')}` });
             return;
           }
-          if (guarded && !authOk(key, msg)) {
+          if (guarded && !authOk(verifyKeys, msg)) {
             send({ t: 'error', message: `bad meta auth for ${String(msg.entry?.file ?? '?')} from ${peer}` });
             return;
           }
@@ -557,7 +650,7 @@ export function startNode(opts: P2PNodeOpts): { port: number; url: string; stop:
           }
           const rec = pendingAcks.get(msg.sha256);
           if (!rec) return;
-          if (guarded && !authOk(key, msg)) {
+          if (guarded && !authOk(verifyKeys, msg)) {
             send({ t: 'error', message: `bad block auth for ${msg.sha256.slice(0, 12)} from ${peer}` });
             pendingAcks.delete(msg.sha256);
             return;
@@ -597,7 +690,7 @@ export function startNode(opts: P2PNodeOpts): { port: number; url: string; stop:
         if (msg.t === 'end') {
           const rec = pendingAcks.get(msg.sha256);
           if (!rec) return;
-          if (guarded && !authOk(key, msg)) {
+          if (guarded && !authOk(verifyKeys, msg)) {
             send({ t: 'error', message: `bad end auth for ${msg.sha256.slice(0, 12)} from ${peer}` });
             return;
           }
@@ -636,8 +729,10 @@ export function syncFromPeer(peerUrl: string, outDir: string, opts: P2PSyncOpts 
   ensureArchive(outDir);
   const timeoutMs = opts.timeoutMs ?? 30_000;
   const blockBytes = opts.blockBytes ?? 16 * 1024;
-  const psk = resolvePsk(opts.psk);
+  const psks = resolvePsks(opts.psk);
+  const psk = psks?.[0];
   const key: string | Buffer | undefined = psk ?? opts.token;
+  const verifyKeys: string | Buffer | Buffer[] | undefined = psks ?? key;
   const guarded = key !== undefined && key !== '' && !(Buffer.isBuffer(key) && key.length === 0);
   const nodeId = resolveNodeId(opts.nodeId);
   let remoteNodeId = 'anonymous';
@@ -697,7 +792,7 @@ export function syncFromPeer(peerUrl: string, outDir: string, opts: P2PSyncOpts 
     };
     ws.onmessage = (ev) => {
       // PSK mode: verify the frame HMAC on the raw bytes BEFORE parsing.
-      const framed = unframeWire(psk, String(ev.data));
+      const framed = unframeWire(psks, String(ev.data));
       if (framed === null) {
         done(() => reject(new Error('p2p auth mismatch: bad frame HMAC')));
         try {
@@ -716,7 +811,7 @@ export function syncFromPeer(peerUrl: string, outDir: string, opts: P2PSyncOpts 
       poke();
       if (msg.t === 'welcome') {
         remoteNodeId = typeof msg.nodeId === 'string' && msg.nodeId !== '' ? msg.nodeId.slice(0, 64) : 'anonymous';
-        if (guarded && !authOk(key, msg)) {
+        if (guarded && !authOk(verifyKeys, msg)) {
           done(() => reject(new Error(`p2p auth mismatch in welcome from ${remoteNodeId}`)));
           try {
             ws.close();
@@ -746,7 +841,7 @@ export function syncFromPeer(peerUrl: string, outDir: string, opts: P2PSyncOpts 
       if (msg.t === 'want') {
         // Fetch-only mode serves nothing back: ignore inbound want.
         if (opts.fetchOnly) return;
-        if (guarded && !authOk(key, msg)) {
+        if (guarded && !authOk(verifyKeys, msg)) {
           failed.push(`bad want auth from ${remoteNodeId}`);
           return;
         }
@@ -765,7 +860,7 @@ export function syncFromPeer(peerUrl: string, outDir: string, opts: P2PSyncOpts 
           }
           return;
         }
-        if (guarded && !authOk(key, msg)) {
+        if (guarded && !authOk(verifyKeys, msg)) {
           failed.push(`bad meta auth for ${String(msg.entry?.file ?? '?')} from ${remoteNodeId}`);
           try {
             send({ t: 'error', message: `bad meta auth for ${String(msg.entry?.file ?? '?')}` });
@@ -780,7 +875,7 @@ export function syncFromPeer(peerUrl: string, outDir: string, opts: P2PSyncOpts 
       if (msg.t === 'block') {
         const rec = pendingIn.get(msg.sha256);
         if (!rec) return;
-        if (guarded && !authOk(key, msg)) { pendingIn.delete(msg.sha256); failed.push(`bad block auth for ${msg.sha256} from ${remoteNodeId}`); return; }
+        if (guarded && !authOk(verifyKeys, msg)) { pendingIn.delete(msg.sha256); failed.push(`bad block auth for ${msg.sha256} from ${remoteNodeId}`); return; }
         if (typeof msg.data !== 'string' || msg.data.length > blockBytes * 4 * 4 / 3 + 8) { pendingIn.delete(msg.sha256); failed.push(msg.sha256); done(() => reject(new Error(`oversize block for ${rec.entry.file} rejected`))); try { ws.close(); } catch { /* closing anyway */ } return; }
         let buf: Buffer;
         try {
@@ -843,7 +938,7 @@ export function syncFromPeer(peerUrl: string, outDir: string, opts: P2PSyncOpts 
       if (msg.t === 'end') {
         const rec = pendingIn.get(msg.sha256);
         if (!rec) return;
-        if (guarded && !authOk(key, msg)) { pendingIn.delete(msg.sha256); failed.push(`bad end auth for ${msg.sha256} from ${remoteNodeId}`); return; }
+        if (guarded && !authOk(verifyKeys, msg)) { pendingIn.delete(msg.sha256); failed.push(`bad end auth for ${msg.sha256} from ${remoteNodeId}`); return; }
         pendingIn.delete(msg.sha256);
         try {
           const how = applyComplete(outDir, rec.entry);
