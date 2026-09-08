@@ -1,7 +1,7 @@
 {
   "name": "moltarc",
   "type": "module",
-  "version": "0.21.0",
+  "version": "0.21.1",
   "description": "Moltarc — tiered SQLite database system: hot DB, warm chunks, cold archive.",
   "keywords": ["sqlite", "database", "archive", "zstd", "offline-first", "embedded", "edge", "iot", "tiered-storage", "typescript", "data-sync", "backup"],
   "homepage": "https://github.com/arfoux/moltarc#readme",
