@@ -19,6 +19,9 @@ import { printChainGaps, repairAll, verifyFull } from '../src/verify.js';
 import type { VerifyFullResult } from '../src/verify.js';
 import { checkUnacked } from '../src/alerts.js';
 import { assertChunkName } from '../src/guard.js';
+import { syncFromPeer } from '../src/p2p.js';
+import { queryAsOf } from '../src/timetravel.js';
+import { CURRENT_MANIFEST_VERSION, migrate, planMigration } from '../src/migrate.js';
 function fail(err: unknown): never {
   if (err instanceof Error) {
     console.error(err.message);
@@ -31,7 +34,7 @@ function fail(err: unknown): never {
 
 function usageLines(): string[] {
   return [
-    'usage: moltarc <seal|ship|find|verify|repair|status|gc|merge|forget|coldg|restore-from-cold|check> [--verbose] ...',
+    'usage: moltarc <seal|ship|find|verify|repair|status|gc|merge|forget|coldg|restore-from-cold|check|p2p-sync|asof|migrate> [--verbose] ...',
     '  moltarc seal <hot.jsonl|hot.db> <outDir> [--table <name>]',
     '  moltarc ship <outDir> <relayDir> [--blobs]',
     '  moltarc find <outDir> <trxId>',
@@ -44,6 +47,9 @@ function usageLines(): string[] {
     '  moltarc coldg <outDir> [--apply]',
     '  moltarc restore-from-cold <outDir> [--apply]',
     '  moltarc check <outDir> <relayDir>',
+    '  moltarc p2p-sync <peerUrl> <outDir> [--token <t>]',
+    '  moltarc asof <outDir> <ts> [--seq <n>]',
+    '  moltarc migrate <outDir> [--dry-run]',
   ];
 }
 
@@ -247,6 +253,49 @@ async function main(): Promise<void> {
     for (const r of a.reasons) console.log(`reason ${r}`);
     for (const u of a.unknown) console.log(`unknown ${u}`);
     process.exitCode = a.level === 'ok' ? 0 : a.level === 'warn' ? 1 : 2;
+  } else if (cmd === 'p2p-sync') {
+    const tokIdx = rest.indexOf('--token');
+    let token: string | undefined;
+    let args = rest;
+    if (tokIdx >= 0) {
+      token = rest[tokIdx + 1];
+      if (!token) fail('usage: moltarc p2p-sync <peerUrl> <outDir> [--token <t>]');
+      args = [...rest.slice(0, tokIdx), ...rest.slice(tokIdx + 2)];
+    }
+    const [peerUrl, outDir] = args;
+    if (!peerUrl || !outDir || args.length > 2) fail('usage: moltarc p2p-sync <peerUrl> <outDir> [--token <t>]');
+    const r = await syncFromPeer(peerUrl as string, outDir as string, { ...(token !== undefined ? { token } : {}) });
+    console.log(`synced ${r.received.length} chunk(s), skipped ${r.skipped.length}, failed ${r.failed.length}, ${r.bytes}B`);
+    for (const f of r.received) console.log(`received ${f}`);
+    for (const f of r.failed) console.log(`failed ${f}`);
+  } else if (cmd === 'asof') {
+    const seqIdx = rest.indexOf('--seq');
+    let seq: number | undefined;
+    if (seqIdx >= 0) {
+      seq = Number(rest[seqIdx + 1]);
+      if (!Number.isFinite(seq)) fail('usage: moltarc asof <outDir> <ts> [--seq <n>]');
+    }
+    const positional = seqIdx >= 0 ? rest.filter((a, i) => !a.startsWith('--') && i !== seqIdx + 1) : rest.filter((a) => !a.startsWith('--'));
+    const [outDir, tsArg] = positional;
+    if (!outDir || (seq === undefined && tsArg === undefined)) fail('usage: moltarc asof <outDir> <ts> [--seq <n>]');
+    const ts = seq === undefined ? Number(tsArg) : undefined;
+    if (ts !== undefined && !Number.isFinite(ts)) fail('usage: moltarc asof <outDir> <ts> [--seq <n>]');
+    const r = seq === undefined ? queryAsOf({ outDir: outDir as string, ts }) : queryAsOf({ outDir: outDir as string, seq });
+    console.log(JSON.stringify(r.rows));
+    const target = seq === undefined ? `ts=${ts}` : `seq=${seq}`;
+    console.log(`asof ${r.rows.length} row(s) (${target}) from ${r.proof.chunksConsulted.length} chunk(s), pruned ${r.proof.chunksPruned}`);
+  } else if (cmd === 'migrate') {
+    const flags = rest.filter((a) => a.startsWith('--'));
+    const positional = rest.filter((a) => !a.startsWith('--'));
+    const [outDir] = positional;
+    if (!outDir || positional.length > 1 || flags.some((f) => f !== '--dry-run')) fail('usage: moltarc migrate <outDir> [--dry-run]');
+    const dryRun = flags.includes('--dry-run');
+    const before = planMigration(outDir);
+    const r = migrate(outDir, { dryRun });
+    console.log(`migrate: ${before.reason} (${before.entries} entries, ${before.stale.length} stale)`);
+    if (!before.needs) console.log('already current — nothing to do');
+    else if (dryRun) console.log(`dry-run: would rebuild ${before.entries} entries -> v${CURRENT_MANIFEST_VERSION}`);
+    else console.log(`rebuilt ${r.entries} entries -> v${CURRENT_MANIFEST_VERSION}, backup ${r.backup}`);
   } else if (cmd === 'help' || cmd === '-h' || cmd === '--help') {
     for (const line of usageLines()) console.log(line);
   } else {
