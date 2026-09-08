@@ -15,3 +15,13 @@ export { sweep, statusInfo, checkReserve, freeSpaceBytes, RESERVE_BYTES } from '
 export type { SweepOpts, SweepResult, StatusInfo } from './gc.js';
 export { mergeCold, forgetChunks, sweepCold, coldDiskBytes, writeTar, readTar } from './cold.js';
 export type { MergeResult, ColdSweepOpts, ColdSweepResult, RepackedSeg, TarMember } from './cold.js';
+export * from './p2p.js';
+export * from './timetravel.js';
+export * from './migrate.js';
+export * from './readonly.js';
+export * from './alerts.js';
+export * from './sensor.js';
+export * from './ticket.js';
+export * from './bundle.js';
+export * from './thumb.js';
+export * from './cas.js';
