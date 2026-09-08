@@ -17,13 +17,83 @@ warm chunks compress schema-aware, cold archive ships once, query stays partial.
 | ![delta ships once](docs/gifs/part3-ship.gif)<br>**3. Ship** — relay compares hashes, only missing bytes fly, resume survives drops. (`moltarc ship`) | ![find fetches one chunk](docs/gifs/part4-find.gif)<br>**4. Find** — bloom prunes 150 chunks to 1, single fetch returns the trx. (`moltarc find`) |
 | ![big photos quarantine](docs/gifs/part5-foto.gif)<br>**5. Foto gate** — bodies ≥256KB skip the chunk path into `foto/` + thumb sidecars. (rule 4) | ![verify proves chain](docs/gifs/part6-verify.gif)<br>**6. Verify** — every chunk re-hashed, manifest chain checked, quarantine on mismatch. (`moltarc verify`) |
 
-CLI:
+## Install
+
+```bash
+git clone https://github.com/arfoux/moltarc.git
+cd moltarc
+bun install
+bun bin/moltarc.ts help
+```
+
+Needs `bun` on `PATH` only. Details in [docs/install.md](docs/install.md).
+
+## Quickstart (runnable)
+
+```bash
+bun examples/e2e.ts /tmp/moltarc-e2e   # 1200 rows: seal -> ship -> find, prints e2e ok
+bun bin/moltarc.ts seal /tmp/hot.jsonl /tmp/moltarc/archive
+bun bin/moltarc.ts ship /tmp/moltarc/archive /tmp/moltarc/relay
+bun bin/moltarc.ts find /tmp/moltarc/archive trx-00000001
+bun bin/moltarc.ts verify /tmp/moltarc/archive
+```
+
+Five minutes, step by step, in [docs/getting-started.md](docs/getting-started.md).
+
+## Concepts
+
+| Stage | One line | Deep dive |
+|---|---|---|
+| seal | Hot WAL/SQLite → immutable warm chunks (~2MB), per-device watermark, idempotent re-seal | [architecture](docs/architecture.md) · `seal` in [cli](docs/cli.md) |
+| ship | Delta by hash to a relay dir, resumable, text lane first | [architecture](docs/architecture.md) · `ship` in [cli](docs/cli.md) |
+| find | Manifest min/max + bloom prunes to a single warm-chunk fetch | [architecture](docs/architecture.md) · `find` in [cli](docs/cli.md) |
+| verify | Full hash walk + chain check; corrupt chunks quarantine, repair refetches by hash | [architecture](docs/architecture.md) · `verify`/`repair` in [cli](docs/cli.md) |
+| cold | Warm → `cold/*.tar` merge, prune/repack sweep, acked-only forget, restore-from-cold drill | [architecture](docs/architecture.md) · `merge`/`coldg`/`forget`/`gc` in [cli](docs/cli.md) |
+| p2p | WebSocket delta sync with journal resume; HMAC-SHA256 PSK frames, trusted-LAN fallback | [architecture](docs/architecture.md) · `p2p-sync` in [cli](docs/cli.md) |
+| timetravel | Read-only as-of query (seq or ts) with chunk proof | [architecture](docs/architecture.md) · `asof` in [cli](docs/cli.md) |
+| migrate | Forward-only manifest upgrade to v1, backup first, write guard | [architecture](docs/architecture.md) · `migrate` in [cli](docs/cli.md) |
+
+## Modules
+
+| Area | Files |
+|---|---|
+| Pipeline | [src/seal.ts](src/seal.ts) · [src/chunk.ts](src/chunk.ts) · [src/manifest.ts](src/manifest.ts) · [src/dict.ts](src/dict.ts) · [src/ship.ts](src/ship.ts) · [src/find.ts](src/find.ts) · [src/verify.ts](src/verify.ts) · [src/cold.ts](src/cold.ts) · [src/gc.ts](src/gc.ts) |
+| Sync/history/upgrade | [src/p2p.ts](src/p2p.ts) · [src/timetravel.ts](src/timetravel.ts) · [src/migrate.ts](src/migrate.ts) · [src/readonly.ts](src/readonly.ts) · [src/alerts.ts](src/alerts.ts) |
+| Rails/media | [src/guard.ts](src/guard.ts) · [src/thumb.ts](src/thumb.ts) · [src/cas.ts](src/cas.ts) · [src/bundle.ts](src/bundle.ts) · [src/ticket.ts](src/ticket.ts) · [src/sensor.ts](src/sensor.ts) |
+| Edges | [bin/moltarc.ts](bin/moltarc.ts) · [ext/moltarc.ts](ext/moltarc.ts) · [bench/](bench/mixed-corpus.ts) · [examples/](examples/e2e.ts) |
+
+Ownership table with one-liners: [docs/modules.md](docs/modules.md).
+
+## Contracts and limits
+
+- Foto gate: bodies decoding past **256KB** become `foto/<sha>.bin` sidecars + hash refs, never inline chunks.
+- Bomb caps: 16MB decompressed frame, 32MB / 50 000-member tar, 1MB bloom probe, 32MB / 8192px thumb input.
+- Quarantine: a corrupt chunk parks 1/150 of history, never the archive; repair refetches by hash.
+- Reserve: seal/merge/sweep-apply refuse below **50MB** free; `forget`/`gc` delete relay-acked chunks only.
+
+Numbers with enforcing constants: [docs/contracts.md](docs/contracts.md).
+
+## CLI reference
 
 ```
-moltarc seal   # hot WAL -> warm chunks (columnar + dict + zstd)
-moltarc ship   # send only missing chunk hashes, resumable
-moltarc find <trx-id>  # fetch 1 chunk via manifest, not 100MB
+moltarc seal <hot.jsonl|hot.db> <outDir> [--table <name>]
+moltarc ship <outDir> <relayDir> [--blobs]
+moltarc find <outDir> <trxId>
+moltarc verify <outDir>          moltarc repair <outDir> <relayDir>
+moltarc status <outDir> [relayDir]   moltarc check <outDir> <relayDir>
+moltarc gc <outDir> [relayDir] [--apply] [--deep-foto]
+moltarc merge <outDir>           moltarc forget <outDir> <relayDir> <chunk> [chunk...]
+moltarc coldg <outDir> [--apply] moltarc restore-from-cold <outDir> [--apply]
+moltarc p2p-sync <peerUrl> <outDir> [--token <t>]
+moltarc asof <outDir> <ts> [--seq <n>]
+moltarc migrate <outDir> [--dry-run]
 ```
+
+Every flag verified against [bin/moltarc.ts](bin/moltarc.ts); full reference in [docs/cli.md](docs/cli.md).
+
+## Interop (fielog)
+
+Raw `kasir.log` cashier events (`bayar`/`undo` + `nominal`) seal with no manual conversion — Indonesian/English field aliases in `normRow`. Note and alias table in [docs/interop.md](docs/interop.md) (proof: `test/interop.test.ts`).
 
 ## Honest SLA (measured, not planned)
 
@@ -48,50 +118,7 @@ is retired: too repetitive to plan from.
 | corrupt chunk quarantines 1/150, not total-loss | ✅ | ~ | ✅ | ~ |
 | schema-aware dict per table | ✅ | ❌ | ❌ | ❌ |
 
-## Notes
-
-- Codec: zstd (Node 22 built-in) with deflate fallback; `codec` byte in the 64B header keeps chunks
-  self-describing, dict inline in the frame (`dict_id = fnv1a32(devices + body pool)`).
-- Hot input auto-detects: `hot.db` SQLite (magic `SQLite format 3`, tables `tx`/`log` with
-  `device_id,seq,ts,id,table,body` via `bun:sqlite`) or JSONL WAL export (one object per line).
-  Per-device `sealed_upto_seq` watermark (device_id -> max seq) + `device_id:seq` dedupe make re-seal idempotent.
-- Text-first ship lanes: `*blob* | *photo* | *image* | *thumb*` tables ship last and are skipped
-  unless `includeBlobs: true`.
-
-## Rules (non-negotiable)
-
-1. Hot stays SQLite boring: no custom header. Warm chunk header 64B: `magic UMK1 | ver | codec | table | seq_min/max | ts_min/max | rows | crc32c | dict_id`.
-2. Chunk 1-4MB compressed (default ~2MB): retry-cheap, OPFS-friendly, one ArrayBuffer.
-3. Manifest atomic (`tmp + fsync + rename`), dual copy + rebuild from deterministic filenames.
-4. Text vs blob split: archive ships text+hash+thumb; full photos lazy/on-demand.
-5. Per-chunk `crc32c + sha256`; corrupt chunk quarantines 1/150 of history, never total-loss.
-6. Codec self-describing (`codec_id + dict_id`, N-2 backward compat); dictionary inside archive.
-7. Never delete unsealed/unacked data. Per-device `sealed_upto_seq` watermark + idempotent replay `(device_id, seq)`; forget/gc only drop relay-acked chunks.
-
-## Layout
-
-- `src/seal.ts` — hot WAL -> warm columnar chunks (delta/RLE/dict + zstd)
-- `src/manifest.ts` — atomic manifest, min/max + bloom, rebuild scan
-- `src/cold.ts` — warm to cold tar merge plus prune sweep (repack without dead members, manifest rewrite)
-- `src/ship.ts` — delta by hash, chunked resume, text-first lanes
-- `src/find.ts` — prune + bloom + single-chunk fetch + sparse index
-- `src/dict.ts` — per-table 32KB zstd dicts, trained when the sample compresses 4x+
-- `bin/moltarc.ts` — CLI: `seal|ship|find|status|gc|merge|forget|coldg` over archive dirs (`bun bin/moltarc.ts …`)
-- `bench/photo-bench.ts` — 50 real noise JPEGs sealed beside text, writes Photo SLA
-- `bench/dict-bench.ts` — same corpus dict off vs on, writes Dict SLA
-- interop: fielog `kasir.log` (`type` bayar / `event` undo + `nominal`) seals with no manual conversion (`test/interop.test.ts`)
-- `src/p2p.ts` — websocket delta sync: hello/welcome summaries, want-by-sha, base64 blocks, journal resume, idempotent atomic apply (`test/p2p.test.ts`)
-- `src/timetravel.ts` — as-of query: fold chunk versions per id at timestamp ts with chunk proof + crc-stop on mismatch (`test/timetravel.test.ts`)
-- `src/migrate.ts` — forward-migrate old archives: dry-run plan + atomic apply (manifest backup first), downgrade guard refuses (`test/migrate.test.ts`)
-- `src/readonly.ts` — read-only auditor handle: find/verify/status work, every mutating op throws (`test/readonly.test.ts`)
-- `src/alerts.ts` — unacked escalation: ok/warn/critical over unacked growth + disk pressure + quarantine count, pure report (`test/alerts.test.ts`)
-- `src/sensor.ts`, `src/ticket.ts`, `src/bundle.ts` — sensor/ticket/bundle kit: hash-chained tickets + bundle packing over chunk/manifest primitives (`test/sensor.test.ts`, `test/ticket.test.ts`)
-- `ext/moltarc.ts` — SQLite extension reference (TS): read-only `moltarc_find` + trivially-safe `moltarc_seal`, zero format code (native `ext/moltarc.dll` built + green via MinGW, subprocess-backed; local-only, see `docs/compat.md`)
-- `docs/decisions.md` — why each load-bearing choice: chunks, zstd-only, dict gate, bloom, reserve, lanes, warm-find, dual manifest, no-rewrite
-- `src/seal.ts` — seal scans only new chunks and merges via `appendEntries` when a manifest copy exists, full rebuild kept for first seal (`test/seal-append.test.ts`)
-- `examples/universal-demo.ts` — EN shop demo: seal 500 orders, ship, find one back, no warung words (`test/kasir.test.ts` pattern)
-- `examples/dashboard.ts` — timetravel polling demo: windowed recent-state fold polled N times
-- `src/gc.ts --deep-foto` — sweeps unreferenced foto sidecars and reports referenced shas with no `.bin` as `fotoMissing`
+Full 13-system × 10-dimension matrix with footnotes: [docs/comparison.md](docs/comparison.md).
 
 ## Measured SLA
 
@@ -129,3 +156,29 @@ _Measured by `bun bench/photo-bench.ts --write-readme`; deterministic (seeded). 
 
 _Measured by `bun bench/dict-bench.ts --write-readme`; same corpus both sides, only the dictionary differs. Columnar delta/RLE/inline-dict already captures most repetition — the trained dict takes what is left. Small variant sealed with targetBytes=16384 (7 chunks); production variant with targetBytes=2097152 (1 chunks), where one chunk amortizes the cold start._
 <!-- DICT-MEASURED-END -->
+
+## Docs index
+
+- [docs/install.md](docs/install.md) — prerequisites, setup, verify-the-install
+- [docs/getting-started.md](docs/getting-started.md) — 5-minute runnable quickstart
+- [docs/architecture.md](docs/architecture.md) — hot/warm/cold + sync/history/upgrade
+- [docs/cli.md](docs/cli.md) — every subcommand, flags verified against `bin/moltarc.ts`
+- [docs/modules.md](docs/modules.md) — module ownership table
+- [docs/contracts.md](docs/contracts.md) — numeric contracts and gates
+- [docs/interop.md](docs/interop.md) — fielog `kasir.log` interop + field aliases
+- [docs/troubleshooting.md](docs/troubleshooting.md) — symptoms, exact errors, fixes
+- [docs/bench.md](docs/bench.md) — how SLA numbers are measured + flake policy
+- [docs/compat.md](docs/compat.md) — N-2 codec rule, manifest tolerance, native binary note
+- [docs/decisions.md](docs/decisions.md) — why each load-bearing choice
+- [docs/comparison.md](docs/comparison.md) — 13-system comparison matrix
+- [CHANGELOG.md](CHANGELOG.md) — user-visible changes per tag, from `git log`
+
+## Contributing, conduct, security
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — setup, scoped tests, bench/regen rule, PR flow (CI: typecheck + `test:stable` + `ext/`; heavy nightly)
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — Contributor Covenant, short version
+- [SECURITY.md](SECURITY.md) — what is in scope, private advisory reporting, best-effort response
+
+## License
+
+MIT — see [LICENSE](LICENSE).

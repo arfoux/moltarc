@@ -31,7 +31,7 @@ bun bin/moltarc.ts seal /tmp/hot.jsonl /tmp/moltarc/archive
 
 What happens: per-table batches pack to ~2MB compressed chunks (`warm/*.zst`),
 and the per-device `sealed_upto_seq` watermark advances so re-seal is idempotent
-(`README.md:34-36`, CLI shape `bin/moltarc.ts:36`).
+(`docs/architecture.md` Hot, CLI shape `bin/moltarc.ts:38`).
 
 ## 3. Ship warm -> relay (1 minute)
 
@@ -42,7 +42,7 @@ bun bin/moltarc.ts ship /tmp/moltarc/archive /tmp/moltarc/relay
 ```
 
 Only chunk hashes missing on the relay are sent, resumable, text lane first
-(`README.md:37-38`, CLI shape `bin/moltarc.ts:37`).
+(`docs/architecture.md` Ship, CLI shape `bin/moltarc.ts:39`).
 
 ## 4. Find one record (30 seconds)
 
@@ -51,7 +51,7 @@ bun bin/moltarc.ts find /tmp/moltarc/archive trx-00000001
 ```
 
 The manifest (min/max + bloom per chunk) prunes to 1 chunk fetch instead of
-scanning the archive (`README.md:56`, CLI shape `bin/moltarc.ts:38`).
+scanning the archive (`docs/architecture.md` Find, CLI shape `bin/moltarc.ts:40`).
 
 ## 5. Trust but verify (1 minute)
 
@@ -63,15 +63,15 @@ bun bin/moltarc.ts merge /tmp/moltarc/archive
 ```
 
 `verify` checks per-chunk `crc32c + sha256` and quarantines at most one chunk
-(`README.md:45`); `merge` packs warm chunks into `cold/*.tar.zst`
-(`README.md:54`); full command list in `bin/moltarc.ts:35-48`.
+(`docs/contracts.md` Quarantine); `merge` packs warm chunks into `cold/*.tar`
+(`docs/architecture.md` Cold); full command list in `docs/cli.md`.
 
 ## What good looks like
 
 - `seal` prints rows sealed + chunk count (see `examples/e2e.ts:53`).
 - `ship` prints chunks sent; a second `ship` with no new data sends nothing.
 - `find` prints the chunk name and `fetched 1`-style single-chunk hit.
-- Measured ratios for planning (seeded benches, `README.md:75-81`):
+- Measured ratios for planning (seeded benches, `README.md` Honest SLA):
   repetitive text **34.5x**, mixed text **10.2x**, raw jpeg **~1.05x**
   (incompressible — ships as hash ref, lazy fetch).
 

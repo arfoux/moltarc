@@ -3,6 +3,14 @@
 User-visible changes per tag, from `git log`. Test-only hardening with no
 behavior change is marked as such.
 
+## v0.21.2
+
+- No behavior change: npm publish bookkeeping only (`publish npm latest`).
+
+## v0.21.1
+
+- No behavior change: publish pipeline (OIDC unshadow) plus branch merges.
+
 ## v0.21.0
 
 - CLI +3: `p2p-sync`, `asof`, `migrate`; `src/index.ts` re-exports all ten
@@ -48,6 +56,56 @@ behavior change is marked as such.
 - Shard pointers: root `chunks[]` stays complete; additive per-month
   `shards`/`pointers` plus best-effort `manifest-YYYY-MM.json` sidecars
   speed finds, readers fall back to root on skew.
+- Library modules (no CLI yet; `p2p-sync`/`asof`/`migrate` commands arrive
+  in v0.21.0): P2P delta sync over websocket with resume + idempotent apply
+  (`src/p2p.ts`); as-of query with chunk proof (`src/timetravel.ts`);
+  forward migrator with dry-run + write guard (`src/migrate.ts`); read-only
+  auditor handle (`src/readonly.ts`); unacked escalation alerts
+  (`src/alerts.ts`); sensor/ticket/bundle kit (`src/sensor.ts`,
+  `src/ticket.ts`, `src/bundle.ts`); SQLite extension reference in `ext/`
+  only; seal via `appendEntries` with rebuild fallback.
+
+## v0.18.1
+
+- No behavior change: concurrent-writer proof (three parallel seal
+  processes) plus a cold-only restore drill, both test-only.
+
+## v0.18.0
+
+- Sharded manifest: additive per-month `manifest-YYYY-MM.json` sidecars plus
+  a persisted sparse index make `find` shard-aware; readers fall back to
+  root `chunks[]` on any skew.
+- Foto previews: quarantined foto sidecars gain `thumb-<sha>.jpg` +
+  hash-link `.json` companions (`src/thumb.ts`, `src/cas.ts` fork store).
+
+## v0.17.0
+
+- No user-visible change (version bookkeeping; no commits in range).
+
+## v0.16.1
+
+- CLI gains `gc`: orphan sweep, dry-run by default with relay passthrough
+  (`moltarc gc <outDir> [relayDir] [--apply] [--deep-foto]`).
+
+## v0.16.0
+
+- `mergeCold` streams tar writes through a 1MB window: same bytes, far less
+  peak memory on large merges.
+
+## v0.15.0
+
+- Seal: bounded watermark (kill loses only the unflushed tail), malformed
+  abort past 1% of input, foto gate (large base64 bodies become
+  `foto/<sha>.bin` sidecars + hash refs), size-probe encodes.
+- Manifest: seq+crc envelope with best-valid-copy load, BOM strip, cold
+  kept across rebuilds, `appendEntries` fast path.
+- Find: manifest cache, sparse-index jump, cold opt-in, scaled bloom, plus
+  a missing-row counter.
+- Verify/repair: atomic strict manifest checks with link enforcement;
+  chunk decode cross-checks the header with decompress caps and refuses
+  blob-table dict training.
+- Cold/GC: unacked-safe sweep, orphan dict GC, dict-carrying segments,
+  reserve fail-closed; `ship` relay waste fixes.
 
 ## v0.14.0
 
@@ -56,6 +114,30 @@ behavior change is marked as such.
   explicit timeout instead of relying on the 5s default, scratch dirs are
   collision-safe under parallel workers, and spawned CLI children in the
   soak test can no longer crash the worker on spawn/kill races.
+
+## v0.13.1
+
+- No behavior change: removes a stray committed package lockfile.
+
+## v0.13.0
+
+- No behavior change: aligns `package.json` version with git tags.
+
+## v0.12.0
+
+- No behavior change: drops a wall-clock perf assert that flaked under
+  suite contention (soak test).
+
+## v0.11.1
+
+- Fixes seal wiping the cold listing (`cold` kept across seal rebuilds);
+  ship reports warm chunks missing from disk instead of silently skipping.
+
+## v0.11.0
+
+- Adds the perf bench (`bun bench/perf.ts`): seal MB/s, full vs delta ship
+  bytes, and single-chunk find latency recorded in `docs/bench.md` and
+  `bench/measured.json`.
 
 ## v0.10.0
 
