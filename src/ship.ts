@@ -34,7 +34,7 @@ export interface RelayIndex {
 }
 
 function isBlobTable(table: string): boolean {
-  return /blob|photo|image|thumb/i.test(table);
+  return /blob|photo|foto|image|thumb/i.test(table);
 }
 
 // Text-first lanes: small text tables before blob tables; blobs deferred unless asked.

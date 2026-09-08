@@ -19,11 +19,10 @@ import { printChainGaps, repairAll, verifyFull } from '../src/verify.js';
 import type { VerifyFullResult } from '../src/verify.js';
 import { checkUnacked } from '../src/alerts.js';
 import { assertChunkName } from '../src/guard.js';
-const VERBOSE = process.argv.includes('--verbose');
 function fail(err: unknown): never {
   if (err instanceof Error) {
     console.error(err.message);
-    if (VERBOSE && err.stack) console.error(err.stack);
+    if (err.stack) console.error(err.stack);
   } else {
     console.error(String(err));
   }
@@ -151,9 +150,11 @@ async function main(): Promise<void> {
     if (r.rowsSkipped > 0) console.log(`skipped ${r.rowsSkipped} row(s) (already sealed)`);
     if (r.rowsMalformed > 0) console.log(`malformed ${r.rowsMalformed} row(s) (see SealResult)`);
   } else if (cmd === 'ship') {
-    const [outDir, relayDir, flag] = rest;
-    if (!outDir || !relayDir) fail('usage: moltarc ship <outDir> <relayDir> [--blobs]');
-    const r = await ship({ outDir, relayDir, includeBlobs: flag === '--blobs' });
+    const flags = rest.filter((a) => a.startsWith('--'));
+    const positional = rest.filter((a) => !a.startsWith('--'));
+    const [outDir, relayDir] = positional;
+    if (!outDir || !relayDir || positional.length > 2 || flags.some((f) => f !== '--blobs')) fail('usage: moltarc ship <outDir> <relayDir> [--blobs]');
+    const r = await ship({ outDir, relayDir, includeBlobs: flags.includes('--blobs') });
     console.log(`shipped ${r.sent.length} chunk(s), skipped ${r.skipped.length}, ${r.bytes}B`);
   } else if (cmd === 'find') {
     const [outDir, trxId] = rest;

@@ -6,8 +6,9 @@
 //
 // Reuse rule: everything chunk-format goes through src/seal.ts + src/find.ts
 // via import. Zero chunk bytes are parsed here, so this file can never fork
-// the format. The C extension must do the same (link the canonical reader,
-// never reimplement the codec).
+// the format. The C extension keeps the same guarantee via the permanent
+// subprocess path (ext/moltarc_hook.c execs `bun ext/moltarc.ts find|seal`:
+// one spawn per call, stdout capped at 8MB OUT_CAP), never a native codec.
 //
 // Status: BUILT + GREEN. ext/moltarc.c + ext/moltarc_hook.c compile to a
 // local-only ext/moltarc.dll via the subprocess path above (never committed;

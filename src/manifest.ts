@@ -116,6 +116,7 @@ export function buildBloom(ids: string[]): string {
 export function bloomCheck(bloomB64: string, id: string): boolean {
   if (!bloomB64) return true; // header-only rebuild: no bloom, must fetch
   const bits = Buffer.from(bloomB64, 'base64');
+  if (bits.length < BLOOM_BYTES) return true; // short/truncated legacy bitset: fail open, must fetch
   for (let k = 0; k < 3; k++) {
     const bit = hashN(k, id) % BLOOM_BITS;
     if ((bits[bit >> 3] & (1 << (bit & 7))) === 0) return false;

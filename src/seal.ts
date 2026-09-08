@@ -2,13 +2,13 @@
 // Never deletes input. Watermark advances per flushed chunk (after fsync), so a
 // kill mid-batch loses only the unflushed tail; maxRows bounds one call.
 import { createHash } from 'crypto';
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, renameSync, unlinkSync, writeFileSync, writeSync } from 'fs';
 import { basename, join } from 'path';
 import { encodeChunk, sha256hex } from './chunk.js';
 import type { HotRow } from './chunk.js';
 import { trainTableDict, saveDictAtomic } from './dict.js';
 import { checkReserve } from './gc.js';
-import { requireMigrated } from './migrate.js';
+import { assertMigrated, requireMigrated } from './migrate.js';
 import { appendEntries, buildManifest, saveManifestAtomic, scanChunk } from './manifest.js';
 import type { ChunkEntry, ColdSegment } from './manifest.js';
 import { saveThumb } from './thumb.js';
@@ -41,15 +41,31 @@ export interface SealResult {
   rowsMalformed: number; // input lines that failed to parse/normalize
   rowsReplaced: number; // same-key different-body overwrites (keep-last dedupe)
   probeEncodes: number; // full chunk encodes spent on size probing
+  fotoQuarantined: string[]; // hash refs quarantined this call, for verify/ship/sweep audit
 }
+
+// Seq/ts coercion: empty-string input must not silently become 0 via
+// Number(''), and floats are never valid row identities.
+function toInt(n: unknown): number | null {
+  if (typeof n === 'string' && n.trim() === '') return null;
+  const v = Number(n);
+  if (!Number.isFinite(v) || !Number.isInteger(v)) return null;
+  return v;
+}
+
+// Chunk filenames carry seq as exactly 8 digits (verify NAME_LINK); seq
+// outside 1..99999999 can never link back, so it is malformed at seal time.
+export const SEQ_MAX = 99_999_999;
 
 // Fielog interop: raw cashier events (`type`/`event` bayar/undo, `nominal`
 // payload) normalize with no manual conversion step.
 export function normRow(o: Record<string, unknown>, fallbackTable: string): HotRow | null {
-  const seq = Number(o.seq ?? o.no ?? o.nomor);
-  if (!Number.isFinite(seq)) return null;
-  const ts = Number(o.ts ?? o.timestamp ?? o.waktu ?? Date.now());
-  if (!Number.isFinite(ts)) return null;
+  const seqRaw = o.seq ?? o.no ?? o.nomor;
+  if (seqRaw === undefined || seqRaw === null) return null;
+  const seq = toInt(seqRaw);
+  if (seq === null || seq <= 0 || seq > SEQ_MAX) return null;
+  const ts = toInt(o.ts ?? o.timestamp ?? o.waktu ?? Date.now());
+  if (ts === null || ts < 0) return null;
   const kind = o.type ?? o.event ?? o.jenis;
   const nominal = o.nominal ?? o.amount ?? o.total;
   const bodyRaw = o.body ?? o.payload ?? o.msg ?? o.data ?? o.catatan ?? o.note ?? o.keterangan ?? '';
@@ -63,12 +79,15 @@ export function normRow(o: Record<string, unknown>, fallbackTable: string): HotR
       o.ref !== undefined ? `ref=${String(o.ref)}` : '',
       o.alasan !== undefined ? `alasan=${String(o.alasan)}` : '',
     ].filter((s) => s !== '').join(' ');
+  // Fallback id is namespaced with the table: bare device:seq collides across
+  // tables sharing one hot log, so find() can mistake one table's row for another's.
+  const table = String(o.table ?? kind ?? fallbackTable);
   return {
     device_id: device,
     seq,
     ts,
-    id: String(o.id ?? o.trxId ?? o.trx_id ?? o.trx ?? o.key ?? `${device}:${seq}`),
-    table: String(o.table ?? kind ?? fallbackTable),
+    id: String(o.id ?? o.trxId ?? o.trx_id ?? o.trx ?? o.key ?? `${table}:${device}:${seq}`),
+    table,
     body,
   };
 }
@@ -119,10 +138,17 @@ export async function readSqliteRowsCounted(hotDb: string, fallbackTable = 'log'
     const names = db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
     const picked = [fallbackTable !== 'log' ? fallbackTable : '', 'tx', 'log'].find((n) => n && names.includes(n))
       ?? names[0];
-    if (!picked) throw new Error(`no tables in ${hotDb}`);
-    const raw = db.query<Record<string, unknown>>(
-      `SELECT device_id, seq, ts, id, "table", body FROM "${picked.replace(/"/g, '')}" ORDER BY seq`,
-    ).all();
+    let raw: Record<string, unknown>[];
+    try {
+      raw = db.query<Record<string, unknown>>(
+        `SELECT device_id, seq, ts, id, "table", body FROM "${picked.replace(/"/g, '')}" ORDER BY seq`,
+      ).all();
+    } catch {
+      // Schema mismatch (e.g. missing columns): read wide and let normRow
+      // classify each row; unusable rows count as malformed, never a
+      // whole-seal throw. No ORDER BY here: seq itself may be the missing column.
+      raw = db.query<Record<string, unknown>>(`SELECT * FROM "${picked.replace(/"/g, '')}"`).all();
+    }
     const rows: HotRow[] = [];
     let malformed = 0;
     for (const o of raw) {
@@ -151,10 +177,18 @@ export function isFotoRef(body: string): boolean {
 // to a sidecar file under <outDir>/foto/<sha>.bin; returns the hash ref to seal
 // instead of the inline bytes. Small bodies and non-base64 text return null and
 // keep sealing inline as before.
+// Minimum raw chars that can decode past FOTO_INLINE_LIMIT_BYTES (256KB ->
+// ~341K base64 chars): the gate's cheap pre-filter. Any shorter body —
+// stripped or not — decodes within the inline limit, so it stays inline.
+export const FOTO_GATE_MIN_CHARS = Math.ceil((FOTO_INLINE_LIMIT_BYTES * 4) / 3);
 export function quarantineFotoBody(outDir: string, body: string): string | null {
+  // Cheap pre-filter first: raw length lower-bounds stripped length, so a
+  // short body can never decode past the gate — skip the strip+regex+
+  // decode+re-encode per row. Only bodies >= ~341K chars take the full gate.
+  if (body.length < FOTO_GATE_MIN_CHARS) return null;
   const chars = body.replace(/\s/g, '');
   // Fast path: shorter strings cannot decode past the limit; no base64 work.
-  if (chars.length < (FOTO_INLINE_LIMIT_BYTES * 4) / 3) return null;
+  if (chars.length < FOTO_GATE_MIN_CHARS) return null;
   if (chars.length % 4 !== 0 || !B64_CHARS_RE.test(chars)) return null;
   let raw: Buffer;
   try {
@@ -179,10 +213,15 @@ export function quarantineFotoBody(outDir: string, body: string): string | null 
 }
 
 // Read back quarantined foto bytes for a hash ref produced by quarantineFotoBody.
+// The size suffix is enforced: a truncated or padded sidecar fails loud
+// instead of decoding as a silently wrong foto.
 export function readFotoSidecar(outDir: string, ref: string): Buffer {
   const m = /^foto:sha256:([0-9a-f]{64}):size=(\d+)$/.exec(ref);
   if (!m) throw new Error(`not a foto ref: ${ref.slice(0, 32)}`);
-  return readFileSync(join(outDir, 'foto', `${m[1]}.bin`));
+  const expect = Number(m[2]);
+  const buf = readFileSync(join(outDir, 'foto', `${m[1]}.bin`));
+  if (buf.length !== expect) throw new Error(`foto sidecar size mismatch: ${m[1].slice(0, 12)} expects ${expect} bytes, has ${buf.length}`);
+  return buf;
 }
 
 function fsyncFile(p: string): void {
@@ -228,10 +267,80 @@ function readWatermark(wmPath: string): Record<string, number> {
   return Number.isFinite(n) && n > 0 ? { '': n } : {};
 }
 
+// Seal lockfile: fail-loud mutual exclusion for the watermark/manifest write
+// path. The file holds the holder pid; a second seal while it exists errors
+// clearly instead of watermark-racing. A lock whose pid is dead (ESRCH) is
+// stale (crashed holder) and is removed once before retrying; any other case
+// (live pid, EPERM, unparsable content, same-process re-entry) stays locked.
+function acquireSealLock(outDir: string): () => void {
+  const lockPath = join(outDir, 'seal.lock');
+  const removeIfStale = (): boolean => {
+    let text: string;
+    try {
+      text = readFileSync(lockPath, 'utf8');
+    } catch {
+      return true; // raced away: retry the exclusive create
+    }
+    const pid = Number(text.trim().split(/\s+/)[0]);
+    if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return false;
+    try {
+      process.kill(pid, 0);
+      return false; // alive: locked
+    } catch (e) {
+      const code = e !== null && typeof e === 'object' && 'code' in e ? e.code : undefined;
+      if (code !== 'ESRCH') return false; // EPERM etc: holder alive, locked
+    }
+    try {
+      unlinkSync(lockPath);
+    } catch {
+      return false;
+    }
+    return true;
+  };
+  const lockedError = (): Error => {
+    let holder = 'unknown';
+    try {
+      holder = readFileSync(lockPath, 'utf8').trim().split(/\s+/)[0] || holder;
+    } catch { /* keep unknown */ }
+    return new Error(`seal locked: ${lockPath} held by pid ${holder}; refusing concurrent seal (remove seal.lock only if the holder is dead)`);
+  };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let fd: number;
+    try {
+      // O_CREAT|O_EXCL ('wx'): losers fail here, before any watermark read.
+      fd = openSync(lockPath, 'wx', 0o644);
+    } catch {
+      if (attempt === 0 && removeIfStale()) continue;
+      throw lockedError();
+    }
+    try {
+      writeSync(fd, `${process.pid}\n`);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      try {
+        unlinkSync(lockPath);
+      } catch { /* raced release: ignore */ }
+    };
+  }
+  throw lockedError();
+}
+
 export async function seal(opts: SealOpts): Promise<SealResult> {
   // Downgrade guard first: refuse old manifests, but a fresh outDir with no
   // manifest yet seals normally (nothing to migrate).
   requireMigrated(opts.outDir);
+  // Lock home first (no chunks yet), then fail-loud lock: a second seal
+  // while locked errors here, before any watermark/chunk/manifest write.
+  // Released in the trailing finally on every path (returns and throws alike).
+  mkdirSync(opts.outDir, { recursive: true });
+  const releaseSealLock = acquireSealLock(opts.outDir);
+  try {
   const target = opts.targetBytes ?? TARGET_BYTES;
   const warm = join(opts.outDir, 'warm');
   mkdirSync(warm, { recursive: true });
@@ -241,12 +350,12 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   const wmPath = join(opts.outDir, 'sealed_upto_seq');
   const wm = readWatermark(wmPath);
 
-  // Idempotent replay: dedupe by device_id+seq+table, keep last; skip sealed.
+  // Idempotent replay: dedupe by table+device_id+seq, keep last; skip sealed.
   // Input auto-detect: SQLite magic -> hot.db via bun:sqlite, else JSONL WAL.
   const counted = isSqliteFile(opts.hotDb)
     ? await readSqliteRowsCounted(opts.hotDb, opts.table ?? 'log')
     : readHotRowsCounted(opts.hotDb, opts.table ?? 'log');
-  const malformed = counted.malformed;
+  let malformed = counted.malformed;
   const total = counted.rows.length + malformed;
   if (total > 0 && malformed / total > MALFORMED_ABORT_PCT) {
     throw new Error(`seal aborted: ${malformed}/${total} malformed rows (>${MALFORMED_ABORT_PCT * 100}%)`);
@@ -256,8 +365,12 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   let skipped = 0;
   let replaced = 0;
   for (const r of source) {
+    // Seal-time seq gate: out-of-range seq never reaches chunkName/NAME_LINK.
+    // normRow already filters these; this reroutes any residual (e.g. a
+    // negative that would otherwise count as watermark-skipped) to malformed.
+    if (!Number.isInteger(r.seq) || r.seq <= 0 || r.seq > SEQ_MAX) { malformed++; continue; }
     if (r.seq <= Math.max(wm[r.device_id] ?? 0, wm[''] ?? 0)) { skipped++; continue; }
-    const key = `${r.device_id}:${r.seq}:${r.table}`;
+    const key = `${r.table}:${r.device_id}:${r.seq}`;
     const prev = seen.get(key);
     if (prev !== undefined && prev.body !== r.body) replaced++;
     seen.set(key, r);
@@ -271,14 +384,21 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   if (pending.length === 0) {
     const byDevice: Record<string, number> = {};
     for (const [k, v] of Object.entries(wm)) if (k !== '') byDevice[k] = v;
-    return { chunks: [], sealedUptoSeq: wmMax, sealedByDevice: byDevice, rowsSealed: 0, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes: 0 };
+    return { chunks: [], sealedUptoSeq: wmMax, sealedByDevice: byDevice, rowsSealed: 0, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes: 0, fotoQuarantined: [] };
   }
+  // Write-path entry: refuse an old manifest in place even if one appeared
+  // after the entry guard above. Fresh dirs with no manifest still seal
+  // normally (nothing to migrate); only a present old copy throws.
+  if (existsSync(join(opts.outDir, 'manifest.json')) || existsSync(join(opts.outDir, 'manifest.bak.json'))) assertMigrated(opts.outDir);
 
-  // Foto gate first: oversize base64 never reaches a chunk inline.
+  // Foto gate first: oversize base64 never reaches a chunk inline. Refs are
+  // recorded on the result so verify/ship/sweep can audit quarantined blobs.
+  const fotoSet = new Set<string>();
   for (const r of pending) {
     const ref = quarantineFotoBody(opts.outDir, r.body);
-    if (ref !== null) r.body = ref;
+    if (ref !== null) { r.body = ref; fotoSet.add(ref); }
   }
+  const fotoQuarantined = [...fotoSet];
 
   // Per-chunk watermark: every flush fsyncs its chunk, then persists the
   // per-device advance. A kill between flushes loses only the unflushed tail,
@@ -402,7 +522,7 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
       }
     }
     appendEntries(opts.outDir, entries);
-    return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes };
+    return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes, fotoQuarantined };
   }
 
   // First seal (no prior manifest): full rebuild owns the listing.
@@ -419,5 +539,6 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   const manifest = buildManifest(opts.outDir);
   if (cold !== undefined) manifest.cold = cold;
   saveManifestAtomic(opts.outDir, manifest);
-  return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes };
+  return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes, fotoQuarantined };
+  } finally { releaseSealLock(); }
 }

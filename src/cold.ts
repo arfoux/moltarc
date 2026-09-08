@@ -299,12 +299,13 @@ function readHeaderPrefix(full: string): { ok: boolean; flags: number; dictId: n
 }
 
 // Retention prune: drop manifest entries by chunk file name, atomic dual copy.
-// Tar bytes stay on disk until sweepCold repacks without them.
+// Tar bytes stay on disk until gc --apply collects the warm orphan and
+// sweepCold repacks without them (cold bytes only shrink on coldg --apply).
 // Relay-ack guard: every target must be acked in the relay index (written
 // by ship). Forgetting the only unshipped chunk would make its warm bytes
 // an orphan that gc deletes, so unacked targets throw instead of pruning
 // silently. The check is atomic: all-or-nothing, no partial forget.
-export function forgetChunks(outDir: string, files: string[], relayDir: string): { removed: string[] } {
+export function forgetChunks(outDir: string, files: string[], relayDir: string): { removed: string[]; note: string } {
   if (!relayDir) throw new Error('forget needs the relayDir ship wrote to (refusing silent unacked delete)');
   requireMigrated(outDir);
   const { manifest } = loadManifest(outDir);
@@ -319,7 +320,7 @@ export function forgetChunks(outDir: string, files: string[], relayDir: string):
   const removed = targets.map((e) => e.file);
   manifest.chunks = manifest.chunks.filter((e) => !drop.has(e.file));
   saveManifestAtomic(outDir, manifest);
-  return { removed };
+  return { removed, note: 'bytes remain until gc --apply + coldg --apply' };
 }
 
 export interface ColdSweepOpts {
@@ -341,8 +342,28 @@ export interface ColdSweepResult {
   bytesBefore: number;
   bytesAfter: number;
   bytesReclaimed: number;
+  bytesCorrupt: number; // corrupt-segment bytes left on disk, excluded from bytesReclaimed
+  fotoFiles: number; // report-only census of foto/ sidecars: never deleted here (gc deepFoto owns deletes)
+  fotoBytes: number; // sum of foto/ file sizes, folded into no reclaim math
   dryRun: boolean;
 }
+// Foto census: report-only byte/file count of the foto/ sidecar dir. Deletion
+// stays with gc deepFoto (relay-ack semantics); cold sweep/report never
+// removes foto bytes, it just makes them visible beside segment accounting.
+function fotoDiskBytes(outDir: string): { files: number; bytes: number } {
+  let files = 0;
+  let bytes = 0;
+  try {
+    for (const f of readdirSync(join(outDir, 'foto'))) {
+      try {
+        const st = statSync(join(outDir, 'foto', f));
+        if (st.isFile()) { files++; bytes += st.size; }
+      } catch { /* raced delete: ignore */ }
+    }
+  } catch { /* no foto dir yet: nothing to report */ }
+  return { files, bytes };
+}
+
 
 export function sweepCold(outDir: string, opts: ColdSweepOpts = {}): ColdSweepResult {
   const dryRun = opts.dryRun ?? true;
@@ -368,6 +389,7 @@ export function sweepCold(outDir: string, opts: ColdSweepOpts = {}): ColdSweepRe
   const corrupt: string[] = [];
   let bytesBefore = 0;
   let bytesAfter = 0;
+  let bytesCorrupt = 0;
   for (const file of segments) {
     let raw: Buffer;
     try {
@@ -383,9 +405,11 @@ export function sweepCold(outDir: string, opts: ColdSweepOpts = {}): ColdSweepRe
       members = readTar(raw);
     } catch {
       // Corrupt segment: report it and leave it on disk, never delete blind.
-      // Its bytes stay in bytesAfter so they are NOT counted as reclaimed.
+      // Its bytes stay in bytesAfter so they are NOT counted as reclaimed;
+      // bytesCorrupt tracks them separately for honest reporting.
       corrupt.push(file);
       bytesAfter += raw.length;
+      bytesCorrupt += raw.length;
       continue;
     }
     const live = members.filter((m) => (m.name.startsWith('dicts/') ? liveDicts.has(m.name) : refs.has(m.name) && (known === null || known.has(m.name))));
@@ -424,12 +448,14 @@ export function sweepCold(outDir: string, opts: ColdSweepOpts = {}): ColdSweepRe
   if (!dryRun && (pruned.length > 0 || repacked.length > 0)) {
     saveManifestAtomic(outDir, manifest);
   }
-  return { segments, pruned, repacked, corrupt, bytesBefore, bytesAfter, bytesReclaimed, dryRun };
+  const foto = fotoDiskBytes(outDir);
+  return { segments, pruned, repacked, corrupt, bytesBefore, bytesAfter, bytesReclaimed, bytesCorrupt, fotoFiles: foto.files, fotoBytes: foto.bytes, dryRun };
 }
 
-export function coldDiskBytes(outDir: string): { segments: number; chunks: number; bytes: number } {
+export function coldDiskBytes(outDir: string): { segments: number; chunks: number; bytes: number; fotoFiles: number; fotoBytes: number } {
+  const foto = fotoDiskBytes(outDir);
   const cold = join(outDir, 'cold');
-  if (!existsSync(cold)) return { segments: 0, chunks: 0, bytes: 0 };
+  if (!existsSync(cold)) return { segments: 0, chunks: 0, bytes: 0, fotoFiles: foto.files, fotoBytes: foto.bytes };
   let segments = 0;
   let chunks = 0;
   let bytes = 0;
@@ -441,5 +467,5 @@ export function coldDiskBytes(outDir: string): { segments: number; chunks: numbe
       try { chunks += readTar(raw).length; } catch { /* corrupt: count bytes only */ }
     } catch { /* raced delete */ }
   }
-  return { segments, chunks, bytes };
+  return { segments, chunks, bytes, fotoFiles: foto.files, fotoBytes: foto.bytes };
 }

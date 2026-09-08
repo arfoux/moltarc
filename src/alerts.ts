@@ -1,4 +1,6 @@
 // moltarc alerts — unacked-escalation report. read-only: no seal/ship/sweep writes.
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { loadManifest } from './manifest.js';
 import { freeSpaceBytes, RESERVE_BYTES, statusInfo } from './gc.js';
 
@@ -32,6 +34,20 @@ const D_CRIT_QUAR = 3;
 function num(v: number | undefined, d: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : d;
 }
+// Missing/corrupt-archive gate: loadManifest() rebuilds from filenames when
+// both copies are unreadable, so a fresh or torn dir would otherwise report
+// ok with zero counts — unmeasured, not healthy. A copy counts as readable
+// when it parses with a version and a chunks array (the structural half of
+// the manifest copy check); anything less throws instead of reporting.
+function hasReadableManifest(outDir: string): boolean {
+  for (const f of ['manifest.json', 'manifest.bak.json']) {
+    try {
+      const m = JSON.parse(readFileSync(join(outDir, f), 'utf8')) as { version?: unknown; chunks?: unknown };
+      if (m && typeof m === 'object' && typeof m.version === 'number' && Array.isArray(m.chunks)) return true;
+    } catch { /* try next copy */ }
+  }
+  return false;
+}
 
 export function checkUnacked(outDir: string, relayDir: string, thresholds: AlertThresholds = {}): UnackedAlert {
   const warnUnacked = num(thresholds.warnUnacked, D_WARN_UNACKED);
@@ -40,7 +56,9 @@ export function checkUnacked(outDir: string, relayDir: string, thresholds: Alert
   const critQuar = num(thresholds.critQuarantined, D_CRIT_QUAR);
   const warnFree = num(thresholds.warnFreeBytes, RESERVE_BYTES * 2);
   const critFree = num(thresholds.critFreeBytes, RESERVE_BYTES);
-
+  if (!hasReadableManifest(outDir)) {
+    throw new Error(`alerts: no readable manifest copy in ${outDir} (missing or corrupt archive)`);
+  }
   let unacked = 0;
   let quarantined = 0;
   const unknown: string[] = [];

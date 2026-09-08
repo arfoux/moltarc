@@ -6,6 +6,19 @@
 // the sole pre-decode filter (mirrors candidates() tail-prune but keyed on
 // seq/ts). Kept chunks are still decoded and row-filtered individually.
 // Read-only: loadManifest + readFileSync + decodeChunk (crc proof inside).
+//
+// Damage contract (callers read this before touching proof):
+//   FAIL-CLOSED-ON-CORRUPT — a kept chunk whose bytes fail decode (crc
+//   mismatch, truncated body, bad frame) THROWS with the chunk filename in
+//   the message. queryAsOf never skips a corrupt chunk and never returns a
+//   partial fold over one: refusing beats guessing.
+//   INCOMPLETE-ON-MISSING — a kept chunk whose file is absent from the warm
+//   dir is skipped and counted in proof.skippedMissing; the returned rows
+//   are a PARTIAL fold (ids from the missing chunk are stale or absent).
+//   The skip is loud (console.warn naming the count) AND machine-visible
+//   (proof.skippedMissing), but nothing throws — so every caller MUST check
+//   proof.skippedMissing, or call assertTimeTravelComplete, before treating
+//   rows as authoritative.
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { decodeChunk, decodeHeader, DICT_FLAG, type HotRow } from './chunk.js';
@@ -28,6 +41,11 @@ export interface TimeTravelOpts {
 export interface TimeTravelProof {
   chunksConsulted: string[];
   chunksPruned: number;
+  /** Kept-but-absent warm files skipped by this fold. >0 means rows are a
+   * PARTIAL fold (incomplete-on-missing): warn-level loud plus this counter,
+   * but no throw — the caller MUST branch on it (or run the result through
+   * assertTimeTravelComplete) before treating rows as complete. Corrupt
+   * bytes are the opposite case: they throw (fail-closed), never land here. */
   skippedMissing: number;
   manifestSource: string;
   windowed: boolean;
@@ -37,7 +55,14 @@ export interface TimeTravelResult {
   rows: HotRow[];
   proof: TimeTravelProof;
 }
-
+/**
+ * Damage contract: FAIL-CLOSED-ON-CORRUPT (damaged chunk bytes throw, with
+ * the filename in the message) plus INCOMPLETE-ON-MISSING (absent chunk
+ * files are skipped, counted in proof.skippedMissing, rows are partial).
+ * A skippedMissing > 0 result warns AND exposes the count, but does not
+ * throw — check proof.skippedMissing (or assertTimeTravelComplete) before
+ * treating rows as authoritative.
+ */
 export function queryAsOf(opts: TimeTravelOpts): TimeTravelResult {
   const hasSeq = typeof opts.seq === 'number';
   const hasTs = typeof opts.ts === 'number';
@@ -87,7 +112,15 @@ export function queryAsOf(opts: TimeTravelOpts): TimeTravelResult {
     if (!existsSync(full)) { skippedMissing++; continue; }
     const buf = readFileSync(full);
     const dict = (decodeHeader(buf).flags & DICT_FLAG) !== 0 ? loadDictFor(dictDir, e.dictId) ?? undefined : undefined;
-    const { rows } = decodeChunk(Buffer.from(buf), dict); // crc proof; throws on mismatch
+    // Fail-closed-on-corrupt: damaged bytes throw with the filename attached,
+    // never silently skipped and never folded over. Missing files (above) are
+    // the only skip path, and they stay counted + loud below.
+    let rows: HotRow[];
+    try {
+      rows = decodeChunk(Buffer.from(buf), dict).rows; // crc proof; throws on mismatch
+    } catch (err) {
+      throw new Error(`timetravel: corrupt chunk ${e.file}: ${err instanceof Error ? err.message : String(err)} (fail-closed: refusing to return partial state)`);
+    }
     consulted.push(e.file);
     for (const r of rows) {
       if (hasSeq ? r.seq > (targetSeq as number) : r.ts > (targetTs as number)) continue;
@@ -98,6 +131,18 @@ export function queryAsOf(opts: TimeTravelOpts): TimeTravelResult {
     }
   }
   const rows = [...state.values()].sort((a, b) => a.seq - b.seq || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  if (skippedMissing > 0) console.warn(`timetravel: ${skippedMissing} chunk(s) missing, result incomplete`);
+  if (skippedMissing > 0) console.warn(`timetravel: ${skippedMissing} chunk(s) missing, result incomplete — caller must check proof.skippedMissing`);
   return { rows, proof: { chunksConsulted: consulted, chunksPruned: pruned, skippedMissing, manifestSource: source, windowed } };
+}
+
+/**
+ * Forcing function for the incomplete-on-missing half of the contract:
+ * throws when res.proof.skippedMissing > 0, no-op otherwise. Call it before
+ * treating queryAsOf rows as authoritative if your path cannot tolerate a
+ * partial fold. (Corrupt chunks need no check here — they already threw
+ * inside queryAsOf, fail-closed.)
+ */
+export function assertTimeTravelComplete(res: TimeTravelResult): void {
+  if (res.proof.skippedMissing > 0)
+    throw new Error(`timetravel: ${res.proof.skippedMissing} chunk(s) missing, result incomplete — caller must check proof.skippedMissing`);
 }

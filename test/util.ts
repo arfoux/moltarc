@@ -26,7 +26,7 @@ function reapOneOrphan(): void {
   try { entries = readdirSync(tmpdir()); } catch { return; }
   const here = tmpdir();
   for (const e of entries) {
-    const m = /^moltarc-[a-z]+-(\d+)-/.exec(e);
+    const m = /^moltarc-[A-Za-z0-9_-]+-(\d+)-/.exec(e);
     if (!m) continue;
     const full = join(here, e);
     let alive = true;

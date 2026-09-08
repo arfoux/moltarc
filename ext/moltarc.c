@@ -20,11 +20,10 @@
  * No-format-fork rule: the chunk codec (64B UMK1 header + columnar frame +
  * zstd/deflate, crc32c + sha256 per chunk) lives in exactly one place.
  * This file MUST NOT reimplement it. The canonical reader is wired via
- * ext/moltarc_hook.c (sanctioned subprocess path: exec
+ * ext/moltarc_hook.c (permanent subprocess path: exec
  * `bun ext/moltarc.ts find <outDir> <trxId>` and return its stdout,
- * exit 1 == SQL NULL). Slower than native, zero native deps. A future
- * libmoltarcchunk exposing moltarc_chunk_find() would drop into the same
- * hook signature below; until then the subprocess path IS the
+ * exit 1 == SQL NULL). Cost is one bun spawn per call, stdout capped at
+ * 8MB OUT_CAP, zero native deps. The subprocess path IS the
  * implementation, not a placeholder.
  *
  * Stock sqlite3 CLI proof transcript (the acceptance run):

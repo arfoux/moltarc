@@ -5,6 +5,7 @@
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, statfsSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { loadManifest } from './manifest.js';
+import { requireMigrated } from './migrate.js';
 import { readRelayIndex } from './ship.js';
 import { HEADER_SIZE, decodeChunk, decodeHeader, sha256hex, DICT_FLAG } from './chunk.js';
 import { dictHex, loadDictFor } from './dict.js';
@@ -39,7 +40,7 @@ export function checkReserve(dir: string, free?: number, op = 'seal'): void {
 
 export interface SweepOpts {
   dryRun?: boolean; // default true
-  relayDir?: string; // when set, only acked orphans delete; when omitted, ALL orphans retain
+  relayDir?: string; // REQUIRED when dryRun:false (gc --apply): gc only deletes relay-acked chunks (rule 7); dry-run without it retains all orphans, apply without it throws
   deepFoto?: boolean; // default false: scan warm chunks for foto refs, sweep unreferenced foto/*.bin
   freeSpaceBytes?: number; // reserved for future write paths; sweep deletes only, never checks
 }
@@ -52,7 +53,7 @@ export interface SweepResult {
   dictsRemoved: string[]; // orphan dicts deleted (dryRun:false only)
   dictBytesReclaimed: number;
   fotoOrphans: string[]; // foto/<sha>.bin + thumb companions unreferenced by any warm chunk (deepFoto only)
-  fotoRemoved: string[]; // orphan foto files deleted (dryRun:false + relay ack, or no relayDir)
+  fotoRemoved: string[]; // orphan foto files deleted (dryRun:false + relay ack; apply without relayDir throws)
   fotoMissing: { ref: string; chunk: string }[]; // referenced shas with no sidecar file (deepFoto only)
   litter: string[]; // tmp/state litter found (relative sub/file), reported even on dry-run
   litterRemoved: string[]; // litter deleted (dryRun:false only)
@@ -81,6 +82,10 @@ function readRelayFotoMap(relayDir: string): Record<string, string> | null {
 
 export function sweep(outDir: string, opts: SweepOpts = {}): SweepResult {
   const dryRun = opts.dryRun ?? true;
+  if (!dryRun && !opts.relayDir) throw new Error('gc --apply requires relayDir: gc only deletes relay-acked chunks (rule 7)');
+  // Downgrade guard on mutating runs only: dry-run is read-only and must
+  // keep reporting on old archives; apply refuses to touch them.
+  if (!dryRun) requireMigrated(outDir);
   const warm = join(outDir, 'warm');
   mkdirSync(warm, { recursive: true });
   const { manifest } = loadManifest(outDir);
@@ -89,9 +94,9 @@ export function sweep(outDir: string, opts: SweepOpts = {}): SweepResult {
   for (const e of manifest.chunks) refs.set(e.file, (refs.get(e.file) ?? 0) + 1);
   // Relay-ack backstop for forget-before-ship states (older prunes, raced
   // deletes): an orphan whose content sha is not in the relay index is
-  // unshipped working data, so it stays even under dryRun:false. Without
-  // relayDir the ack state is unknowable, so every orphan is unacked by
-  // default: fail-closed, never delete working data blind.
+  // unshipped working data, so it stays even under dryRun:false. Apply
+  // without relayDir throws above (ack state unknowable: never delete
+  // working data blind); with relayDir, unknown-ack orphans still retain.
   const acked = opts.relayDir ? new Set(Object.keys(readRelayIndex(opts.relayDir).chunks)) : null;
   let chunks = 0;
   let bytes = 0;
@@ -198,9 +203,9 @@ export function sweep(outDir: string, opts: SweepOpts = {}): SweepResult {
   // deleted on apply iff the relay acks the sha. Ack state comes from the
   // relay index `foto` map (Wave2 relay/foto/<sha>.bin layout); a relay
   // index with no `foto` key proves nothing, so apply retains everything
-  // (fail-closed, never throws). With no relayDir there is no cold side to
-  // keep in sync, so local-only apply collects. Foto bytes reclaimed fold
-  // into bytesReclaimed; the ref scan decodes via decodeChunk and skips
+  // (fail-closed, never throws). Apply without relayDir throws above, so
+  // the no-relayDir path below only serves dry-run reclaimable estimates.
+  // Foto bytes reclaimed fold into bytesReclaimed; the ref scan decodes via decodeChunk and skips
   // undecodable chunks (torn/orphan garbage) without failing the sweep.
   const fotoOrphans: string[] = [];
   const fotoRemoved: string[] = [];
@@ -231,9 +236,9 @@ export function sweep(outDir: string, opts: SweepOpts = {}): SweepResult {
       fotoNames = readdirSync(join(outDir, 'foto')).sort();
     } catch { fotoNames = []; } // no foto dir yet: nothing orphaned
     const fotoSet = new Set(fotoNames);
-    // Relay ack per sha: no relayDir (local-only) counts as acked; a present
-    // relayDir needs the sha in its `foto` map, and an absent/unreadable map
-    // retains everything.
+    // Relay ack per sha: without relayDir (dry-run only: apply throws above)
+    // counts as acked for the reclaimable estimate; a present relayDir needs
+    // the sha in its `foto` map, and an absent/unreadable map retains everything.
     const relayFoto = opts.relayDir ? readRelayFotoMap(opts.relayDir) : null;
     const acked = (sha: string): boolean => {
       if (!opts.relayDir) return true;

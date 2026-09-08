@@ -310,6 +310,14 @@ function loadPointersForPrune(outDir: string, sparseSeq: number): ShardPointer[]
   return manifest.pointers;
 }
 
+// Table-namespaced fallback id: seal assigns `${table}:${device}:${seq}` when a
+// hot row carries no explicit id, and older rows may carry an explicit bare id.
+// Exact ids win; the qualified form resolves either shape so a caller can
+// always address one table's row without cross-table ambiguity.
+export function matchRowId(r: HotRow, trxId: string): boolean {
+  return r.id === trxId || `${r.table}:${r.device_id}:${r.seq}` === trxId;
+}
+
 export function findTrx(opts: FindOpts): FindResult {
   const dir = opts.chunkDir ?? join(opts.outDir, 'warm');
   const dictDir = join(dir, '..', 'dicts');
@@ -325,7 +333,7 @@ export function findTrx(opts: FindOpts): FindResult {
       const dict = (decodeHeader(buf).flags & DICT_FLAG) !== 0 ? loadDictCached(dictDir, e.dictId) : undefined;
       const { rows } = decodeChunk(buf, dict);
       fetched++;
-      const row = rows.find((r) => r.id === opts.trxId);
+      const row = rows.find((r) => matchRowId(r, opts.trxId));
       if (row) {
         return {
           row, chunk: e.file, chunksFetched: fetched, chunksPruned: fast.pruned, skippedMissing,
@@ -347,7 +355,7 @@ export function findTrx(opts: FindOpts): FindResult {
     const dict = (decodeHeader(buf).flags & DICT_FLAG) !== 0 ? loadDictCached(dictDir, e.dictId) : undefined;
     const { rows } = decodeChunk(buf, dict);
     fetched++;
-    const row = rows.find((r) => r.id === opts.trxId);
+    const row = rows.find((r) => matchRowId(r, opts.trxId));
     if (row) return { row, chunk: e.file, chunksFetched: fetched, chunksPruned: pruned, skippedMissing };
   }
   throw new Error(`trx ${opts.trxId} not found (${fetched} chunk(s) fetched, ${pruned} pruned, ${skippedMissing} missing)`);
@@ -411,7 +419,7 @@ function scanCold(
       const dict = (header.flags & DICT_FLAG) !== 0 ? loadDictCached(dictDir, header.dictId) : undefined;
       const { rows } = decodeChunk(Buffer.from(m.data), dict);
       fetched++;
-      const row = rows.find((r) => r.id === opts.trxId);
+      const row = rows.find((r) => matchRowId(r, opts.trxId));
       if (row) return { row, chunk: m.name, chunksFetched: fetched, chunksPruned: pruned, skippedMissing, shardsLoaded, shardsPruned };
     }
   }

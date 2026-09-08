@@ -170,6 +170,13 @@ interface Frame {
 }
 
 export function encodeRows(rows: HotRow[]): { raw: Buffer; dictId: number } {
+  // Malformed-row gate: a non-finite ts (NaN/Infinity) would stringify to
+  // null inside the delta columns and decode back as silently wrong data.
+  // Reject loud at encode time instead of persisting a corrupt frame.
+  for (const r of rows) {
+    if (!Number.isFinite(r.ts)) throw new Error(`malformed row: non-finite ts for id ${r.id}`);
+    if (!Number.isFinite(r.seq)) throw new Error(`malformed row: non-finite seq for id ${r.id}`);
+  }
   const table = rows[0]?.table ?? 'log';
   const dev: string[] = [];
   const devIdx = new Map<string, number>();
@@ -217,6 +224,12 @@ export function decodeRows(raw: Buffer): HotRow[] {
   }
   if (f.ids.length !== f.devI.length || f.ids.length !== f.seqD.length || f.ids.length !== f.tsD.length) {
     throw new Error('frame corrupt: column length mismatch');
+  }
+  // Numeric integrity: null/non-finite bases or deltas (a NaN ts stringified
+  // to null, or a hand-crafted frame) must fail loud, never decode silently.
+  if (!Number.isFinite(f.seqB) || !Number.isFinite(f.tsB)) throw new Error('frame corrupt: non-finite seq/ts base');
+  for (let i = 0; i < f.ids.length; i++) {
+    if (!Number.isFinite(f.seqD[i]) || !Number.isFinite(f.tsD[i])) throw new Error('frame corrupt: non-finite seq/ts delta');
   }
   if (f.runs.length > 0 && f.pool.length === 0) {
     throw new Error('frame corrupt: body dictionary deleted');

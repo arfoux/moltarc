@@ -1,7 +1,9 @@
 // moltarc verify — hash verify, quarantine 1 bad chunk without total loss, repair-by-hash.
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
-import { crc32c, decodeHeader, HEADER_SIZE, sha256hex } from './chunk.js';
+import { crc32c, decodeChunk, decodeHeader, DICT_FLAG, HEADER_SIZE, sha256hex } from './chunk.js';
+import type { ChunkHeader } from './chunk.js';
+import { loadDictFor } from './dict.js';
 import { loadManifest, saveManifestAtomic, scanChunk } from './manifest.js';
 import type { ChunkEntry, Manifest } from './manifest.js';
 import { readRelayIndex } from './ship.js';
@@ -133,6 +135,10 @@ export function repairByHash(outDir: string, relayDir: string, file: string): vo
   writeChunkAtomic(dest, good);
   const check = verifyChunk(dest);
   if (!check.ok) throw new Error(`repaired chunk still bad: ${check.error}`);
+  // Bind the repaired bytes to the manifest: a well-formed (valid crc) but
+  // wrong-content chunk must never pass the post-repair check, and the entry
+  // below must never be re-scanned onto foreign bytes.
+  if (check.sha256 !== entry.sha256) throw new Error('repaired chunk sha differs from manifest');
   // Refill crc/bloom/minmax/rows from the fetched bytes: a quarantined stub
   // carries none, so the entry must be re-scanned, not left blank.
   const fresh = scanChunk(dest, entry.file, join(outDir, 'dicts'));
@@ -239,7 +245,42 @@ function checkOne(outDir: string, entry: ChunkEntry): FullVerifyItem {
   if (Number(seqMin) !== entry.seqMin || Number(seqMax) !== entry.seqMax || sha8 !== entry.sha256.slice(0, 8)) {
     return { file: entry.file, status: 'CORRUPT', reason: 'filename link mismatch' };
   }
+  // Foto blobs: warm bodies carry foto:sha256:<sha>:size=<n> hash refs whose
+  // bytes live beside the archive in foto/<sha>.bin. A missing or mismatched
+  // sidecar fails the walk on the owning chunk. Undecodable chunks (e.g. a
+  // missing trained dict) keep their prior verdict: no refs can be proven,
+  // so nothing is claimed.
+  const fotoBad = checkFoto(outDir, buf, header);
+  if (fotoBad) return { file: entry.file, status: 'CORRUPT', reason: fotoBad };
   return { file: entry.file, status: 'OK' };
+}
+
+const FOTO_REF_RE = /^foto:sha256:([0-9a-f]{64}):size=(\d+)$/;
+
+function checkFoto(outDir: string, buf: Buffer, header: ChunkHeader): string | null {
+  let rows;
+  try {
+    const dict = (header.flags & DICT_FLAG) !== 0
+      ? loadDictFor(join(outDir, 'dicts'), header.dictId) ?? undefined
+      : undefined;
+    rows = decodeChunk(buf, dict).rows;
+  } catch {
+    return null;
+  }
+  for (const r of rows) {
+    const m = FOTO_REF_RE.exec(r.body);
+    if (!m) continue;
+    const [, sha, size] = m;
+    let data: Buffer;
+    try {
+      data = readFileSync(join(outDir, 'foto', `${sha}.bin`));
+    } catch {
+      return `foto sidecar missing for sha ${sha}`;
+    }
+    if (data.length !== Number(size)) return `foto sidecar size differs for sha ${sha}`;
+    if (sha256hex(data) !== sha) return `foto sidecar hash differs for sha ${sha}`;
+  }
+  return null;
 }
 
 // Hash-chain links: per table, ordered chunks must continue prev.seqMax + 1.
@@ -318,6 +359,10 @@ export function repairAll(outDir: string, relayDir: string): RepairResult {
         writeChunkAtomic(dest, good);
         const check = verifyChunk(dest);
         if (!check.ok) throw new Error(`repaired chunk still bad: ${check.error}`);
+        // Bind the repaired bytes to the manifest: crc alone accepts a
+        // swapped-but-well-formed chunk, so the sha must match the entry
+        // before the entry is re-scanned onto these bytes below.
+        if (check.sha256 !== entry.sha256) throw new Error('repaired chunk sha differs from manifest');
         const fresh = scanChunk(dest, entry.file, join(outDir, 'dicts'));
         Object.assign(entry, fresh);
         delete entry.quarantined;
