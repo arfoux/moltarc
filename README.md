@@ -9,6 +9,14 @@ warm chunks compress schema-aware, cold archive ships once, query stays partial.
 [hot.db r/w SQLite] --seal--> [warm/*.zst 1-4MB immutable] --merge--> [cold/*.tar.zst] + manifest.json
 ```
 
+## See it work (12s each, loops)
+
+| | |
+|---|---|
+| ![hot rows flow](docs/gifs/part1-hot.gif)<br>**1. Hot stays boring** — 6000 rows land in plain SQLite, counter climbs, nothing custom. (`src/seal.ts` reads WAL) | ![seal funnels rows](docs/gifs/part2-seal.gif)<br>**2. Seal** — rows funnel into immutable chunks, 34.5x smaller, crc+sha per chunk. (`moltarc seal`) |
+| ![delta ships once](docs/gifs/part3-ship.gif)<br>**3. Ship** — relay compares hashes, only missing bytes fly, resume survives drops. (`moltarc ship`) | ![find fetches one chunk](docs/gifs/part4-find.gif)<br>**4. Find** — bloom prunes 150 chunks to 1, single fetch returns the trx. (`moltarc find`) |
+| ![big photos quarantine](docs/gifs/part5-foto.gif)<br>**5. Foto gate** — bodies ≥256KB skip the chunk path into `foto/` + thumb sidecars. (rule 4) | ![verify proves chain](docs/gifs/part6-verify.gif)<br>**6. Verify** — every chunk re-hashed, manifest chain checked, quarantine on mismatch. (`moltarc verify`) |
+
 CLI:
 
 ```
