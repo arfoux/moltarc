@@ -3,6 +3,17 @@
 User-visible changes per tag, from `git log`. Test-only hardening with no
 behavior change is marked as such.
 
+## v0.21.0
+
+- CLI +3: `p2p-sync`, `asof`, `migrate`; `src/index.ts` re-exports all ten
+  modules (sensor/ticket/bundle/alerts/readonly/cas/thumb stay library-only).
+- Tarball diet: `files` limits publish to src/bin/docs-core (3.6MB → 81KB);
+  gifs/tests/bench stay in git only.
+- P2P PSK rotation: `MOLTARC_PSK` comma-separated list, primary first,
+  verify tries each; single-key input unchanged.
+- Seal lock proven under real two-process contention (spawn test).
+- Dict SLA stated as measured range with seed, not a single number.
+
 ## v0.20.0
 
 - 39 temuan audit diperbaiki + dikunci regression test (suite 246/246,
