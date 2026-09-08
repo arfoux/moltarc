@@ -72,16 +72,14 @@ describe('gc cli', () => {
     assert.ok(existsSync(join(outDir, 'warm', survivor)), `live chunk kept: ${survivor}`);
   });
 
-  it('fail-closed without relay: apply removes nothing', { timeout: 30_000 }, async () => {
+  it('fail-closed without relay: apply throws and removes nothing', { timeout: 30_000 }, async () => {
     const dir = scratch('gc-cli-norelay');
     const { hotDb } = writeHotLog(dir, { rows: 200 });
     const outDir = join(dir, 'archive');
     await seal({ hotDb, outDir });
     const orphan = plantOrphan(outDir, 'sales-000777-000777-feedface.chk');
-    const out = run('gc', outDir, '--apply');
-    assert.ok(out.includes(`orphan ${orphan}`), `missing orphan line:\n${out}`);
-    assert.ok(out.includes(`retained ${orphan}`), `missing retained line:\n${out}`);
-    assert.ok(!out.includes(`removed ${orphan}`), `must not remove without relay:\n${out}`);
+    const text = runFail('gc', outDir, '--apply');
+    assert.match(text, /gc --apply requires relayDir/, `apply without relay must throw:\n${text}`);
     assert.ok(existsSync(join(outDir, 'warm', orphan)), 'fail-closed: orphan retained');
   });
 

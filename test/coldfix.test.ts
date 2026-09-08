@@ -134,8 +134,10 @@ describe('coldfix regressions', () => {
     assert.ok(flagged >= 1, 'at least one DICT_FLAG chunk sealed');
     assert.ok(hintOnly >= 1, 'at least one hint-only chunk sealed');
 
-    // gc sweep must not orphan the live trained dicts.
-    const swept = sweep(outDir, { dryRun: false });
+    // gc sweep must not orphan the live trained dicts (rule 7: apply needs relay ack).
+    const relayDir = join(dir, 'relay');
+    await ship({ outDir, relayDir, baseDelayMs: 1 });
+    const swept = sweep(outDir, { dryRun: false, relayDir });
     assert.deepEqual(swept.dictsRemoved, [], 'sweep removes no live dict');
     for (const e of manifest.chunks) {
       const h = decodeHeader(readFileSync(join(outDir, 'warm', e.file)));

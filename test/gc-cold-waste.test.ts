@@ -22,15 +22,13 @@ function plantOrphan(outDir: string): string {
 }
 
 describe('gc+cold waste fixes', () => {
-  it('sweep without relayDir retains every orphan (unacked-safe default)', { timeout: 30_000 }, async () => {
+  it('sweep apply without relayDir throws (ack unknowable, never deletes blind)', { timeout: 30_000 }, async () => {
     const dir = scratch('gcw-unacked');
     const { hotDb } = writeHotLog(dir, { rows: 200 });
     const outDir = join(dir, 'archive');
     await seal({ hotDb, outDir });
     const orphan = plantOrphan(outDir);
-    const r = sweep(outDir, { dryRun: false });
-    assert.deepEqual(r.removed, [], 'no relayDir: nothing deleted, ack unknown');
-    assert.deepEqual(r.skippedUnacked, [orphan], 'unknown-ack orphan reported retained');
+    assert.throws(() => sweep(outDir, { dryRun: false }), /gc --apply requires relayDir/);
     assert.ok(existsSync(join(outDir, 'warm', orphan)), 'orphan bytes stay on disk');
   });
 
@@ -228,7 +226,7 @@ describe('gc deep foto', () => {
     assert.deepEqual(r2.fotoRemoved, [], 'missing index deletes nothing');
   });
 
-  it('foto sweep is opt-in; torn chunks never fail it; local-only apply collects', { timeout: 30_000 }, async () => {
+  it('foto sweep is opt-in; torn chunks never fail it; apply without relay throws', { timeout: 30_000 }, async () => {
     const dir = scratch('gcw-foto-optin');
     const { outDir, refSha, deadSha } = await sealWithFoto(dir);
     const relayDir = join(dir, 'relay');
@@ -241,13 +239,11 @@ describe('gc deep foto', () => {
     writeRelayIndex(relayDir, { chunks: {}, foto: { [deadSha]: `${deadSha}.bin` } });
     const dry = sweep(outDir, { dryRun: true, relayDir, deepFoto: true });
     assert.ok(dry.fotoOrphans.includes(`foto/${deadSha}.bin`), 'scan survives the torn chunk');
-    // No relayDir: local-only apply collects the unreferenced sidecar, keeps the ref.
-    const local = sweep(outDir, { dryRun: false, deepFoto: true });
-    assert.ok(local.fotoRemoved.includes(`foto/${deadSha}.bin`), 'local-only apply collects');
-    assert.ok(!existsSync(join(outDir, 'foto', `${deadSha}.bin`)), 'dead sidecar gone');
+    // No relayDir: apply throws (ack unknowable) and deletes nothing.
+    assert.throws(() => sweep(outDir, { dryRun: false, deepFoto: true }), /gc --apply requires relayDir/);
+    assert.ok(existsSync(join(outDir, 'foto', `${deadSha}.bin`)), 'dead sidecar retained');
     assert.ok(existsSync(join(outDir, 'foto', `${refSha}.bin`)), 'referenced sidecar kept');
   });
-
   it('reports referenced shas with no sidecar file as fotoMissing', { timeout: 30_000 }, async () => {
     const dir = scratch('gcw-foto-missing');
     const { outDir, refSha } = await sealWithFoto(dir);
