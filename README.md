@@ -35,6 +35,19 @@ moltarc find <trx-id>  # fetch 1 chunk via manifest, not 100MB
 Details in [Measured SLA](#measured-sla) below. Older micro-benchmark (5-template POS log, 3.45MB → 10.7KB = 323x)
 is retired: too repetitive to plan from.
 
+## Where it sits (dimensions, not scores)
+
+| | moltarc | Litestream | restic/kopia | Turso/D1 |
+|---|---|---|---|---|
+| query 1 row without full restore | ✅ | ❌ | ❌ | ✅ |
+| cheap tiered cold archive | ✅ | ❌ | ~ | ❌ |
+| hash-delta ship + resume on bad links | ✅ | ~ | ✅ | ❌ |
+| runs offline on potato hardware | ✅ | ✅ | ~ | ❌ |
+| blob split (photos skip the text path) | ✅ | ❌ | ~ | ❌ |
+| as-of query over history | ✅ | ❌ | ❌ | ~ |
+| corrupt chunk quarantines 1/150, not total-loss | ✅ | ~ | ✅ | ~ |
+| schema-aware dict per table | ✅ | ❌ | ❌ | ❌ |
+
 ## Notes
 
 - Codec: zstd (Node 22 built-in) with deflate fallback; `codec` byte in the 64B header keeps chunks
