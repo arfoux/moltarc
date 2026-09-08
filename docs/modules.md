@@ -1,8 +1,9 @@
 # modules
 
 Source map for the whole repo. Library entrypoint is `src/index.ts`
-(re-exports the archive API; sensor/ticket/bundle/alerts/readonly/cas/thumb
-stay library-only — no CLI). CLI entrypoint is `bin/moltarc.ts`.
+(re-exports the archive API; sensor/ticket/bundle/readonly/cas/thumb
+stay library-only — no CLI; `alerts.checkUnacked` powers CLI `check`).
+CLI entrypoint is `bin/moltarc.ts`.
 
 ## Pipeline core
 

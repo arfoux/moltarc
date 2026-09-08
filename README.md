@@ -14,7 +14,7 @@ warm chunks compress schema-aware, cold archive ships once, query stays partial.
 | | |
 |---|---|
 | ![hot rows flow](docs/gifs/part1-hot.gif)<br>**1. Hot stays boring** — 6000 rows land in plain SQLite, counter climbs, nothing custom. (`src/seal.ts` reads WAL) | ![seal funnels rows](docs/gifs/part2-seal.gif)<br>**2. Seal** — rows funnel into immutable chunks, 34.5x smaller, crc+sha per chunk. (`moltarc seal`) |
-| ![delta ships once](docs/gifs/part3-ship.gif)<br>**3. Ship** — relay compares hashes, only missing bytes fly, resume survives drops. (`moltarc ship`) | ![find fetches one chunk](docs/gifs/part4-find.gif)<br>**4. Find** — bloom prunes 150 chunks to 1, single fetch returns the trx. (`moltarc find`) |
+| ![delta ships once](docs/gifs/part3-ship.gif)<br>**3. Ship** — relay compares hashes, only missing bytes fly, resume survives drops. (`moltarc ship`) | ![find fetches one chunk](docs/gifs/part4-find.gif)<br>**4. Find** — bloom prunes the candidates to a single-chunk fetch, which returns the trx. (`moltarc find`) |
 | ![big photos quarantine](docs/gifs/part5-foto.gif)<br>**5. Foto gate** — bodies ≥256KB skip the chunk path into `foto/` + thumb sidecars. (rule 4) | ![verify proves chain](docs/gifs/part6-verify.gif)<br>**6. Verify** — every chunk re-hashed, manifest chain checked, quarantine on mismatch. (`moltarc verify`) |
 
 ## Install
@@ -68,7 +68,7 @@ Ownership table with one-liners: [docs/modules.md](docs/modules.md).
 
 - Foto gate: bodies decoding past **256KB** become `foto/<sha>.bin` sidecars + hash refs, never inline chunks.
 - Bomb caps: 16MB decompressed frame, 32MB / 50 000-member tar, 1MB bloom probe, 32MB / 8192px thumb input.
-- Quarantine: a corrupt chunk parks 1/150 of history, never the archive; repair refetches by hash.
+- Quarantine: a corrupt chunk parks exactly one chunk of history (1/150 in a 150-chunk archive — illustrative size, not a measured archive), never the archive; repair refetches by hash.
 - Reserve: seal/merge/sweep-apply refuse below **50MB** free; `forget`/`gc` delete relay-acked chunks only.
 
 Numbers with enforcing constants: [docs/contracts.md](docs/contracts.md).
@@ -100,7 +100,7 @@ Raw `kasir.log` cashier events (`bayar`/`undo` + `nominal`) seal with no manual 
 - Repetitive tx text, 60% tx slice of `bun bench/mixed-corpus.ts` (6000 rows, seed 7) → **34.5x**
 - Mixed text+notes+refs, full mixed corpus of `bun bench/mixed-corpus.ts` (6000 rows, seed 7, blob bytes excluded) → **10.2x**
 - Real jpeg bytes, raw zstd over the 50 real jpeg of `bun bench/photo-bench.ts` (128x128 blurred noise, q85, 600 text rows, seed 11) → **1.05x** (details in [Photo SLA](#photo-sla))
-- Trained 32KB dict on repetitive text, `bun bench/dict-bench.ts` (12000 rows, seed 7, same corpus both sides) → **1.8%** smaller warm (1840-2003B measured range, seed 7; details in [Dict SLA](#dict-sla))
+- Trained 32KB dict on repetitive text, `bun bench/dict-bench.ts` (12000 rows, seed 7, same corpus both sides) → **1.8%** smaller warm (2003B measured, seed 7; details in [Dict SLA](#dict-sla))
 
 Details in [Measured SLA](#measured-sla) below. Older micro-benchmark (5-template POS log, 3.45MB → 10.7KB = 323x)
 is retired: too repetitive to plan from.

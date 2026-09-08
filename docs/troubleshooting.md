@@ -43,7 +43,7 @@ also lacks it, that chunk's rows are gone — re-seal them from the hot source.
 … needs migrate to v1 (run: moltarc migrate <outDir>) …
 ```
 
-Seven write paths call `assertMigrated()` (`src/migrate.ts`): a new binary
+Seven write paths call `assertMigrated()`/`requireMigrated()` (`src/migrate.ts`): a new binary
 never rewrites an old manifest in place. Run `moltarc migrate <outDir>
 --dry-run` to inspect, then without the flag (backup lands in
 `manifest.pre-migrate.json`), then retry. Chunk files are never touched.

@@ -14,10 +14,10 @@ timings move, ratios should not.
 | corpus | input | warm archive | ratio |
 |---|---|---|---|
 | repetitive tx text (60% repetitive tx, 6000 rows, seed 7) | 1.64MB | 48.6KB | **34.5x** |
-| mixed text+notes+refs (blob bytes excluded, 6000 rows, seed 7) | 2.40MB | 240.9KB | **10.2x** |
+| mixed text+notes+refs (blob bytes excluded, 6000 rows, seed 7) | 2.40MB | 241.0KB | **10.2x** |
 | photo blobs (3.23MB sidecar, lazy/on-demand) | excluded | excluded | n/a (incompressible) |
 | real jpeg bytes, raw zstd (50 jpeg 128x128 q85, seed 11) | 577KB raw | zstd | **1.05x** |
-| trained 32KB dict on repetitive text (12000 rows, seed 7) | — | 1.8KB saved | **1.7%** smaller warm |
+| trained 32KB dict on repetitive text (12000 rows, seed 7) | — | 2.0KB saved | **1.8%** smaller warm |
 
 Sources: `bun bench/mixed-corpus.ts`, `bun bench/photo-bench.ts`,
 `bun bench/dict-bench.ts` (each with `--write-readme` for the README tables).
@@ -26,15 +26,18 @@ Sources: `bun bench/mixed-corpus.ts`, `bun bench/photo-bench.ts`,
 
 | what | measured |
 |---|---|
-| seal throughput | **8.3MB/s** — 2518925B input sealed in 290ms into 3 warm chunks (246774B) |
+| seal throughput | **6.9MB/s** — 2518925B input sealed in 350ms into 3 warm chunks (246723B) |
 | ship full | **211716B in 2 chunks** (default lanes; blob table chunk ships only with `includeBlobs`) |
 | ship delta (600 new rows after full ship) | **1791B in 1 chunk** |
 | ship delta vs full ratio | **0.008** (1791 / 211716) |
-| find single-chunk latency | **7.62ms median** over 20 iters for `trx-00002000` (1 chunk fetched, 2 pruned) |
+| find warm latency (6 ids × 20 iters, `trx-00002571` representative) | **13.60ms p50 / 22.05ms p99** (cold-median first lookup 17.17ms; 11 fetched / 8 pruned total) |
 
 Method: seal once, ship full to an empty relay, append 600 rows (10%,
 new seqs/ids), reseal, ship again to the same relay — the second ship
-sends only the new chunk. Find times `findTrx` (read + crc verify +
+sends only the new chunk. Find spreads 6 ids across the corpus (early/late
+chunks, not one lucky chunk): the first lookup per id is cold
+(manifest/dict cache miss, reported as cold-median) and the timed samples
+after it are warm. Each sample times `findTrx` (read + crc verify +
 decode + id scan) with `performance.now()`.
 
 ## flakes

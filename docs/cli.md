@@ -116,8 +116,8 @@ Re-runs verify, refetches each bad chunk's good bytes by manifest sha256
 from the relay (`chunks/<file>`, index-mapped), re-scans the entry
 (crc/bloom/minmax refilled — quarantined stubs carry none), then re-verifies.
 Prints `REPAIRED` / `FAILED <file> (<error>)` lines plus the verify summary;
-exits 1 when still not ok. Unrepairable chunks stay quarantined: 1/150 of
-history lost, never the archive.
+exits 1 when still not ok. Unrepairable chunks stay quarantined: exactly one
+chunk of history lost (1/150 in a 150-chunk archive — illustrative size), never the archive.
 
 ### `check` — unacked escalation alert
 
