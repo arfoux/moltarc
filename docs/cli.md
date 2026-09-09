@@ -51,7 +51,7 @@ Pulls missing chunks from a live peer (`hello`/`want`-by-sha/`block`/`end`
 with journal resume and idempotent atomic apply). `--token` authenticates
 against the peer's `allowPeers` sha256 allowlist. Chunk bytes are
 HMAC-SHA256 framed; signing key comes from `MOLTARC_PSK` (comma-separated
-rotation list, primary first) or the trustee-LAN fallback when unset
+rotation list, primary first) or the trusted-LAN fallback when unset
 (`src/p2p.ts`). Prints `synced / skipped / failed / bytes` plus one line per
 received/failed chunk.
 

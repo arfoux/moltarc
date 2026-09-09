@@ -17,7 +17,7 @@ is source plus one npm package for the photo preview path.
 ```bash
 git clone https://github.com/arfoux/moltarc.git
 cd moltarc
-bun install          # installs jpeg-js (photo thumb previews); thats the only dependency
+bun install          # installs jpeg-js (photo thumb previews); that's the only dependency
 bun bin/moltarc.ts help
 ```
 

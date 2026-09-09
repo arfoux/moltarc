@@ -31,7 +31,7 @@ function v05ChunkBytes(table: string, seqBase: number, count: number): { bytes: 
     else runs.push([p, 1]);
   }
   const frame = {
-    v: 0, table, dev: ['pos-01'], seqB: seqBase,
+    v: 0, table, dev: ['dev-01'], seqB: seqBase,
     seqD: Array.from({ length: count }, (_, i) => (i === 0 ? 0 : 1)),
     tsB: 1_700_000_000_000 + seqBase * 1000,
     tsD: Array.from({ length: count }, (_, i) => (i === 0 ? 0 : 1000)),

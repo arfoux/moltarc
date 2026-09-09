@@ -1,4 +1,4 @@
-// examples/ledger-demo — 50 ledger receipts: seal -> ship -> find 1 receipt, print ratio.
+// examples/ledger-demo — 50 ledger entries: seal -> ship -> find 1 entry, print ratio.
 // Usage: bun examples/ledger-demo.ts [--out examples/out]
 import { mkdirSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -19,8 +19,8 @@ export interface LedgerResult {
   shipped: number;
 }
 
-const HEAD = 'SUMBER MAKMUR STORE JL RAYA BOGOR KM 42 RECEIPT:';
-const TAIL = 'THANK YOU FOR SHOPPING';
+const HEAD = 'ARCHIVE RECORD ENTRY 42 FILE GROUP ENTRY LOG NO:';
+const TAIL = 'END OF ARCHIVED RECORD';
 
 export function writeReceipt(dir: string, rows: number): { hotDb: string; ids: string[] } {
   mkdirSync(dir, { recursive: true });
@@ -34,7 +34,7 @@ export function writeReceipt(dir: string, rows: number): { hotDb: string; ids: s
     const amt = 5000 + ((i * 37) % 20) * 10000;
     lines.push(JSON.stringify({
       device_id: 'device-01', seq, ts: base + i * 30_000, id, table: 'events',
-      body: `${HEAD} no=${1000 + i} value=${amt} tend=${i % 3 === 0 ? 'cash' : 'qris'} actor=agus ${TAIL}`,
+      body: `${HEAD} no=${1000 + i} value=${amt} mode=${i % 3 === 0 ? 'fast' : 'slow'} actor=unit ${TAIL}`,
     }));
   }
   const hotDb = join(dir, 'ledger.jsonl');
@@ -49,7 +49,7 @@ export async function runLedgerDemo(baseDir: string, rows = 50): Promise<LedgerR
   const relayDir = join(baseDir, 'relay');
 
   const sealed = await seal({ hotDb, outDir });
-  console.log(`seal: ${sealed.rowsSealed} receipts -> ${sealed.chunks.length} chunk(s)`);
+  console.log(`seal: ${sealed.rowsSealed} entries -> ${sealed.chunks.length} chunk(s)`);
   const shipped = await ship({ outDir, relayDir, baseDelayMs: 1 });
   console.log(`ship: sent ${shipped.sent.length} chunk(s), relay holds ${Object.keys(readRelayIndex(relayDir).chunks).length}`);
 

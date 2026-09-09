@@ -2,11 +2,13 @@
 
 ![moltarc logo](./logo.jpg)
 
-Tiered SQLite database system: hot DB stays small and fast,
+Universal append-only pipeline for game events, file versions, device
+telemetry, and entry-ledgers alike: the hot feed stays small and fast,
 warm chunks compress schema-aware, cold archive ships once, query stays partial.
+An entry-ledger feed is one domain among many, not the model.
 
 ```
-[hot.db r/w SQLite] --seal--> [warm/*.zst 1-4MB immutable] --merge--> [cold/*.tar.zst] + manifest.json
+[hot.db r/w SQLite] --seal--> [warm/*.chk 1-4MB immutable] --merge--> [cold/*.tar] + manifest.json
 ```
 
 ## See it work (12s each, loops)
@@ -91,11 +93,14 @@ moltarc asof <outDir> <ts> [--seq <n>]
 moltarc migrate <outDir> [--dry-run]
 ```
 
-Every flag verified against [bin/moltarc.ts](bin/moltarc.ts); full reference in [docs/cli.md](docs/cli.md).
+## Interop (any append-only feed)
 
-## Interop (fielog)
+The core accepts any append-only feed (`device_id,seq,ts,id,table,body`):
+game events, file versions, and device telemetry seal with no manual
+conversion, and an entry-ledger (`ledger.log` with `entry`/`undo` + `value`)
+is one supported domain among many. Key table in [docs/interop.md](docs/interop.md)
+(proof: `test/interop.test.ts`).
 
-Raw `ledger.log` sales events (`entry`/`undo` + `value`) seal with no manual conversion; key table in [docs/interop.md](docs/interop.md) (proof: `test/interop.test.ts`).
 
 ## Honest SLA (measured, not planned)
 
@@ -104,7 +109,7 @@ Raw `ledger.log` sales events (`entry`/`undo` + `value`) seal with no manual con
 - Real jpeg bytes, raw zstd over the 50 real jpeg of `bun bench/photo-bench.ts` (128x128 blurred noise, q85, 600 text rows, seed 11) → **1.05x** (details in [Photo SLA](#photo-sla))
 - Trained 32KB dict on repetitive text, `bun bench/dict-bench.ts` (12000 rows, seed 7, same corpus both sides) → **1.8%** smaller warm (2003B measured, seed 7; details in [Dict SLA](#dict-sla))
 
-Details in [Measured SLA](#measured-sla) below. Older micro-benchmark (5-template POS log, 3.45MB → 10.7KB = 323x)
+Details in [Measured SLA](#measured-sla) below. Older micro-benchmark (5-template repetitive log, 3.45MB → 10.7KB = 323x)
 is retired: too repetitive to plan from.
 
 ## Where it sits (dimensions, not scores)

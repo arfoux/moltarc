@@ -7,7 +7,7 @@ below is re-audited for this page; rationale lives in `docs/decisions.md`.
 ## Pipeline
 
 ```text
-[hot.db r/w SQLite] --seal--> [warm/*.zst 1-4MB immutable] --merge--> [cold/*.tar.zst] + manifest.json
+[hot.db r/w SQLite] --seal--> [warm/*.chk 1-4MB immutable] --merge--> [cold/*.tar] + manifest.json
 ```
 
 CLI over archive dirs — 15 subcommands, full reference in `docs/cli.md`,

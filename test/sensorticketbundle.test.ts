@@ -25,7 +25,7 @@ describe('sensor+ticket+bundle', () => {
     assert.equal(unpackSensor(chunk).rows.length, buckets.length);
 
     const store = new TicketStore();
-    const voucher = store.issue(50000, base, 'qurban-1');
+    const voucher = store.issue(50000, base, 'event-1');
     assert.equal(store.redeem(voucher.id).ok, true);
     const rep = store.reconcile([voucher.id]);
     assert.deepEqual(rep.clean, [voucher.id]);

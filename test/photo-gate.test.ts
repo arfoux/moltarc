@@ -38,7 +38,7 @@ describe('photo gate', () => {
     const base = 1_700_000_000_000;
     const small = 'TRANSACTION OK value=15000 cashier=agus tend=cash change=0';
     const lines = [
-      JSON.stringify({ device_id: 'pos-01', seq: 1, ts: base + 1000, id: 'trx-00000001', table: 'events', body: small }),
+      JSON.stringify({ device_id: 'dev-01', seq: 1, ts: base + 1000, id: 'trx-00000001', table: 'events', body: small }),
       JSON.stringify({ device_id: 'cam-01', seq: 2, ts: base + 2000, id: 'trx-00000002', table: 'photo', body: jpeg.toString('base64') }),
       JSON.stringify({ device_id: 'cam-01', seq: 3, ts: base + 3000, id: 'trx-00000003', table: 'photo', body: blob.toString('base64') }),
     ];

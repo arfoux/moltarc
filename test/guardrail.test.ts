@@ -19,7 +19,7 @@ import { repairAll, verifyFull } from '../src/verify.js';
 import { scratch, writeHotLog } from './util.js';
 
 function row(ts: number): HotRow {
-  return { device_id: 'pos-01', seq: 1, ts, id: 'trx-00000001', table: 'events', body: 'ok' };
+  return { device_id: 'dev-01', seq: 1, ts, id: 'trx-00000001', table: 'events', body: 'ok' };
 }
 
 function owningChunk(outDir: string, ref: string): string {
@@ -126,7 +126,7 @@ describe('guardrails', () => {
     const blob = randomBytes(300 * 1024);
     const base = 1_700_000_000_000;
     const lines = [
-      JSON.stringify({ device_id: 'pos-01', seq: 1, ts: base + 1000, id: 'trx-00000001', table: 'events', body: 'TRANSACTION OK' }),
+      JSON.stringify({ device_id: 'dev-01', seq: 1, ts: base + 1000, id: 'trx-00000001', table: 'events', body: 'TRANSACTION OK' }),
       JSON.stringify({ device_id: 'cam-01', seq: 2, ts: base + 2000, id: 'trx-00000002', table: 'photo', body: blob.toString('base64') }),
     ];
     const hotDb = join(dir, 'hot.jsonl');

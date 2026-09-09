@@ -58,12 +58,12 @@ describe('clifix', () => {
     db.run('BEGIN');
     const txIns = db.query('INSERT INTO tx (device_id, seq, ts, id, "table", body) VALUES (?,?,?,?,?,?)');
     for (let i = 0; i < 10; i++) {
-      txIns.run('pos-01', i + 1, base + i * 1000, `trx-${String(i + 1).padStart(8, '0')}`, 'events',
+      txIns.run('dev-01', i + 1, base + i * 1000, `trx-${String(i + 1).padStart(8, '0')}`, 'events',
         `TRANSACTION OK value=${15000 + i} cashier=agus store=jakarta-selatan`);
     }
     const auIns = db.query('INSERT INTO audit (device_id, seq, ts, id, "table", body) VALUES (?,?,?,?,?,?)');
     for (let i = 0; i < 5; i++) {
-      auIns.run('pos-01', i + 1, base + i * 1000, `audit-${String(i + 1).padStart(8, '0')}`, 'audit',
+      auIns.run('dev-01', i + 1, base + i * 1000, `audit-${String(i + 1).padStart(8, '0')}`, 'audit',
         `AUDIT CHECK seq=${i + 1} store=jakarta-selatan`);
     }
     db.run('COMMIT');

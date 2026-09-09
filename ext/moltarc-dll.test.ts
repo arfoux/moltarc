@@ -9,9 +9,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const DLL = join(here, 'moltarc.dll');
 
 const rows = [
-  { device_id: 'dev0', seq: 1, ts: 1700000000001, id: 'trx-a', table: 'log', body: 'bayar nominal=15000 kasir=01' },
-  { device_id: 'dev0', seq: 2, ts: 1700000000002, id: 'trx-b', table: 'log', body: 'bayar nominal=27500 kasir=02' },
-  { device_id: 'dev0', seq: 3, ts: 1700000000003, id: 'trx-c', table: 'log', body: 'undo nominal=27500 alasan=salah-input' },
+  { device_id: 'dev0', seq: 1, ts: 1700000000001, id: 'trx-a', table: 'log', body: 'entry value=15000 device=01' },
+  { device_id: 'dev0', seq: 2, ts: 1700000000002, id: 'trx-b', table: 'log', body: 'entry value=27500 device=02' },
+  { device_id: 'dev0', seq: 3, ts: 1700000000003, id: 'trx-c', table: 'log', body: 'undo value=27500 reason=wrong-input' },
 ];
 
 describe('moltarc native dll (subprocess-backed)', () => {
@@ -29,7 +29,7 @@ describe('moltarc native dll (subprocess-backed)', () => {
     );
     expect(sealed.rowsSealed).toBe(3);
     const found = db.query('SELECT moltarc_find(?, ?) AS r').get(out, 'trx-b') as { r: string };
-    expect(JSON.parse(found.r).body).toBe('bayar nominal=27500 kasir=02');
+    expect(JSON.parse(found.r).body).toBe('entry value=27500 device=02');
     const miss = db.query('SELECT moltarc_find(?, ?) AS r').get(out, 'trx-nope') as { r: null };
     expect(miss.r).toBeNull();
     db.close();

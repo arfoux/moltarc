@@ -21,7 +21,7 @@ import { scratch } from './util.js';
 const here = dirname(fileURLToPath(import.meta.url));
 
 function row(id: string, seq: number, ts: number, body: string): HotRow {
-  return { device_id: 'pos-01', seq, ts, id, table: 'events', body };
+  return { device_id: 'dev-01', seq, ts, id, table: 'events', body };
 }
 
 function fixedArchive(): { outDir: string; names: string[] } {
