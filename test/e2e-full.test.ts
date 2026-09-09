@@ -47,11 +47,11 @@ function writeMixedHot(dir: string): { hotDb: string; ids: string[]; blobBytes: 
     if (slot < 0.6) {
       const seq = ++seqByTable.events;
       const dev = seq % 2 ? 'dev-01' : 'dev-02';
-      lines.push(JSON.stringify({ device_id: dev, seq, ts: base + i * 1000, id, table: 'events', body: `TRANSACTION OK value=${15000 + (i % 97)} cashier=agus tend=cash change=0 store=jakarta-selatan ref=${((i * 2654435761) >>> 0).toString(16)}` }));
+      lines.push(JSON.stringify({ device_id: dev, seq, ts: base + i * 1000, id, table: 'events', body: `EVENT OK value=${15000 + (i % 97)} operator=agus method=cash change=0 site=north-1 ref=${((i * 2654435761) >>> 0).toString(16)}............` }));
     } else if (slot < 0.85) {
       const seq = ++seqByTable.notes;
       const dev = seq % 2 ? 'dev-02' : 'dev-01';
-      lines.push(JSON.stringify({ device_id: dev, seq, ts: base + i * 1000, id, table: 'notes', body: `NOTE seq=${i} stok gudang menipis kirim segera catat manual nota=${((i * 40503) >>> 0).toString(16)}` }));
+      lines.push(JSON.stringify({ device_id: dev, seq, ts: base + i * 1000, id, table: 'notes', body: `NOTE seq=${i} stock warehouse thinning ship soon record manual note=${((i * 40503) >>> 0).toString(16)}` }));
     } else {
       const seq = ++seqByTable.photo;
       const dev = seq % 2 ? 'cam-01' : 'cam-02';

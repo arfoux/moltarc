@@ -47,7 +47,7 @@ function writeTwoTableLog(dir: string, rowsPerTable: number): { hotDb: string; i
       ids.push(id);
       lines.push(JSON.stringify({
         device_id: 'dev-01', seq, ts: base + seq * 1000,
-        id, table, body: `row ${i} of ${table} value=${15000 + (i % 97)} cashier=agus store=jakarta-selatan`,
+        id, table, body: `row ${i} of ${table} value=${15000 + (i % 97)} operator=agus site=north-1........`,
       }));
     }
   }

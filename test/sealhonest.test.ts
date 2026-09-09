@@ -60,7 +60,7 @@ describe('seal honesty', () => {
     const outDir = join(dir, 'arch');
     // Pre-fix every row pays strip+regex+decode+re-encode; the cheap length
     // check first routes only bodies >= ~341K chars into the full gate.
-    assert.equal(quarantinePhotoBody(outDir, 'TRANSACTION OK value=15000'), null);
+    assert.equal(quarantinePhotoBody(outDir, 'EVENT OK value=15000......'), null);
     assert.equal(quarantinePhotoBody(outDir, 'x'.repeat(400)), null);
     assert.equal(quarantinePhotoBody(outDir, 'not base64 at all !!!!'.repeat(30)), null);
     // Slow path stays honest: non-canonical bulk fails strict re-encode.

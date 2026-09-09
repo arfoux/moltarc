@@ -41,7 +41,7 @@ function v05Rows(seqBase: number, count: number): V05Row[] {
       ts: base + seq * 1000,
       id: `trx-${String(seq).padStart(8, '0')}`,
       table: 'events',
-      body: `TRANSACTION OK value=${15000 + seq} cashier=agus store=jakarta-selatan`,
+      body: `EVENT OK value=${15000 + seq} operator=agus site=north-1..............`,
     });
   }
   return rows;
@@ -149,7 +149,7 @@ describe('v0.5 cold archive compat', () => {
       const found = findTrx({ outDir, trxId: id });
       assert.equal(found.row.id, id);
       assert.equal(found.row.table, 'events');
-      assert.ok(found.row.body.includes('TRANSACTION OK'));
+      assert.ok(found.row.body.includes('EVENT OK'));
     }
     const mid = findTrx({ outDir, trxId: ids[4] });
     assert.equal(mid.row.seq, 5);

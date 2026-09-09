@@ -16,7 +16,7 @@ function rows(n: number, table = 'events'): HotRow[] {
     out.push({
       device_id: 'dev-01', seq: i + 1, ts: 1700000000000 + i * 1000,
       id: `trx-${String(i + 1).padStart(8, '0')}`, table,
-      body: `TRANSACTION OK value=15000 cashier=agus store=jakarta-selatan line=${i % 5}`,
+      body: `EVENT OK value=15000 operator=agus site=north-1 line=${i % 5}..............`,
     });
   }
   return out;

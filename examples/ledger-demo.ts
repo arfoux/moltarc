@@ -22,7 +22,7 @@ export interface LedgerResult {
 const HEAD = 'ARCHIVE RECORD ENTRY 42 FILE GROUP ENTRY LOG NO:';
 const TAIL = 'END OF ARCHIVED RECORD';
 
-export function writeReceipt(dir: string, rows: number): { hotDb: string; ids: string[] } {
+export function writeEntries(dir: string, rows: number): { hotDb: string; ids: string[] } {
   mkdirSync(dir, { recursive: true });
   const base = 1_700_000_000_000;
   const lines: string[] = [];
@@ -44,7 +44,7 @@ export function writeReceipt(dir: string, rows: number): { hotDb: string; ids: s
 
 export async function runLedgerDemo(baseDir: string, rows = 50): Promise<LedgerResult> {
   mkdirSync(baseDir, { recursive: true });
-  const { hotDb, ids } = writeReceipt(baseDir, rows);
+  const { hotDb, ids } = writeEntries(baseDir, rows);
   const outDir = join(baseDir, 'archive');
   const relayDir = join(baseDir, 'relay');
 

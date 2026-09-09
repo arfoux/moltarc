@@ -33,7 +33,7 @@ describe('seal from sqlite', () => {
     for (let i = 0; i < 800; i++) {
       const seq = i + 1;
       ins.run('dev-01', seq, base + i * 1000, `trx-${String(seq).padStart(8, '0')}`, 'events',
-        `TRANSACTION OK value=${5000 + (i % 20) * 10000} cashier=agus tend=qris store=bogor-kota`);
+        `EVENT OK value=${5000 + (i % 20) * 10000} operator=agus method=card site=north-1.......`);
     }
     db.run('COMMIT');
     db.close();
@@ -45,7 +45,7 @@ describe('seal from sqlite', () => {
     assert.ok(r.chunks.length >= 1);
     const found = findTrx({ outDir, trxId: 'trx-00000400' });
     assert.equal(found.row.id, 'trx-00000400');
-    assert.match(found.row.body, /TRANSACTION OK/);
+    assert.match(found.row.body, /EVENT OK/);
 
     // JSONL next to it still detects as non-sqlite.
     const jsonl = join(dir, 'hot.jsonl');

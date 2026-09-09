@@ -21,7 +21,7 @@ the same way. Below are sample usages.
 
 `writeEntries(dir, rows)` writes `entries.jsonl` — one JSON object per line with
 `device_id, seq, ts, id, table: events`, and a neutral event `body`
-(`no=`, `value=`, `mode=`, `actor=` fields — no shop-specific wording).
+(`no=`, `value=`, `mode=`, `actor=` fields — neutral event vocabulary).
 
 `runUniversalDemo(baseDir, rows = 50)` then seals to `<baseDir>/archive`,
 ships to `<baseDir>/relay`, finds the middle event by id, and prints the

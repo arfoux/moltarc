@@ -1,5 +1,5 @@
 // Interop: raw fielog ledger.log (entry/undo events, value payload)
-// seals with no manual conversion; one receipt reads back intact.
+// seals with no manual conversion; one entry reads back intact.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'fs';
@@ -19,7 +19,7 @@ function writeLedgerLog(dir: string, events: number): { hotDb: string; ids: stri
       const ref = `trx-${String(seq - 4).padStart(8, '0')}`;
       lines.push(JSON.stringify({
         device_id: 'device-01', seq, ts: base + i * 30_000, event: 'undo',
-        ref, reason: 'salah input', actor: 'agus',
+        ref, reason: 'wrong-input', actor: 'agus',
       }));
     } else {
       const id = `trx-${String(seq).padStart(8, '0')}`;
@@ -41,12 +41,12 @@ describe('fielog interop', () => {
     assert.equal(entry?.table, 'entry');
     assert.equal(entry?.id, 'trx-00000003');
     assert.ok((entry?.body ?? '').includes('value=55000'));
-    const undo = normRow({ device_id: 'device-01', seq: 9, event: 'undo', ref: 'trx-00000005', reason: 'salah input' }, 'log');
+    const undo = normRow({ device_id: 'device-01', seq: 9, event: 'undo', ref: 'trx-00000005', reason: 'wrong-input' }, 'log');
     assert.equal(undo?.table, 'undo');
     assert.ok((undo?.body ?? '').includes('ref=trx-00000005'));
   });
 
-  it('ledger.log seals directly and one receipt reads back', { timeout: 30_000 }, async () => {
+  it('ledger.log seals directly and one entry reads back', { timeout: 30_000 }, async () => {
     const dir = scratch('interop');
     const { hotDb, ids } = writeLedgerLog(dir, 90);
     const outDir = join(dir, 'archive');

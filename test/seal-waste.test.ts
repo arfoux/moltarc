@@ -47,7 +47,7 @@ describe('seal waste-fix', () => {
     const base = 1_700_000_000_000;
     const lines = [1, 2, 3].map((s) => JSON.stringify({
       device_id: 'dev-01', seq: s, ts: base + s * 1000,
-      id: `trx-${String(s).padStart(8, '0')}`, table: 'events', body: `cash sale ${s}`,
+      id: `trx-${String(s).padStart(8, '0')}`, table: 'events', body: `event ${s}....`,
     }));
     const photoId = 'trx-00000004';
     lines.push(JSON.stringify({

@@ -80,7 +80,7 @@ describe('seal validation', () => {
     db.run('BEGIN');
     const ins = db.query('INSERT INTO tx (device_id, no, waktu, trx, kind, payload) VALUES (?,?,?,?,?,?)');
     for (let i = 0; i < 50; i++) {
-      ins.run('dev-01', i + 1, BASE + i * 1000, `trx-${String(i + 1).padStart(8, '0')}`, 'events', `cash sale ${i}`);
+      ins.run('dev-01', i + 1, BASE + i * 1000, `trx-${String(i + 1).padStart(8, '0')}`, 'events', `event ${i}....`);
     }
     db.run('COMMIT');
     db.close();
