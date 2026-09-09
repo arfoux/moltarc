@@ -1,4 +1,4 @@
-# molt decisions — why each load-bearing choice
+# moltarc decisions — why each load-bearing choice
 
 Date: 2026-09-06. Each entry grounded in code + `bench/measured.json` / `docs/bench.md`.
 Reversed-consequence states what breaks, not opinion.

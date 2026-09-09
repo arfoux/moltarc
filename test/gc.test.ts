@@ -46,7 +46,7 @@ describe('gc orphan sweep', () => {
     const outDir = join(dir, 'archive');
     const relayDir = join(dir, 'relay');
     // Two devices seal two chunks, so one survives as the live control.
-    for (const device of ['pos-01', 'pos-02']) {
+    for (const device of ['dev-01', 'dev-02']) {
       const { hotDb } = writeHotLog(dir, { rows: 200, device, table: `t-${device}` });
       await seal({ hotDb, outDir });
     }

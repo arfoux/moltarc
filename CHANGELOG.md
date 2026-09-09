@@ -9,6 +9,9 @@ behavior change is marked as such.
   with a `value` payload (`total` still accepted; derived table `entries`);
   the large-image quarantine is renamed `foto` → `photo` (`photo/`
   sidecars, `photo:sha256:…` refs, `--deep-photo`, `PHOTO_INLINE_LIMIT_BYTES`).
+- Docs only, no behavior change: `README.md` and `docs/` lead with the
+  universal pipeline (game events, file versions, device telemetry first;
+  entry-ledger as one domain among many) with neutral example captions.
 
 ## v0.21.2
 

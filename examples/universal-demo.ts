@@ -1,4 +1,4 @@
-// examples/universal-demo — 50 universal shop orders: seal -> ship -> find 1 order, print ratio.
+// examples/universal-demo — 50 generic archive entries: seal -> ship -> find 1 entry, print ratio.
 // Usage: bun examples/universal-demo.ts [--out examples/out]
 import { mkdirSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -19,10 +19,10 @@ export interface UniversalResult {
   shipped: number;
 }
 
-const HEAD = 'GREEN MART 42 MARKET ST ORDER:';
-const TAIL = 'THANK YOU FOR SHOPPING WITH US';
+const HEAD = 'ARCHIVE ENTRY 42 ST RECORD NO:';
+const TAIL = 'END OF ARCHIVED ENTRY BLOCK OK';
 
-export function writeOrders(dir: string, rows: number): { hotDb: string; ids: string[] } {
+export function writeEntries(dir: string, rows: number): { hotDb: string; ids: string[] } {
   mkdirSync(dir, { recursive: true });
   const base = 1_700_000_000_000;
   const lines: string[] = [];
@@ -33,23 +33,23 @@ export function writeOrders(dir: string, rows: number): { hotDb: string; ids: st
     ids.push(id);
     const amt = 5000 + ((i * 37) % 20) * 10000;
     lines.push(JSON.stringify({
-      device_id: 'pos-01', seq, ts: base + i * 30_000, id, table: 'events',
-      body: `${HEAD} no=${1000 + i} value=${amt} tender=${i % 3 === 0 ? 'cash' : i % 3 === 1 ? 'card' : 'wallet'} clerk=alex ${TAIL}`,
+      device_id: 'dev-01', seq, ts: base + i * 30_000, id, table: 'events',
+      body: `${HEAD} no=${1000 + i} value=${amt} mode=${i % 3 === 0 ? 'fast' : i % 3 === 1 ? 'slow' : 'queued'} actor=unit ${TAIL}`,
     }));
   }
-  const hotDb = join(dir, 'orders.jsonl');
+  const hotDb = join(dir, 'entries.jsonl');
   writeFileSync(hotDb, `${lines.join('\n')}\n`);
   return { hotDb, ids };
 }
 
 export async function runUniversalDemo(baseDir: string, rows = 50): Promise<UniversalResult> {
   mkdirSync(baseDir, { recursive: true });
-  const { hotDb, ids } = writeOrders(baseDir, rows);
+  const { hotDb, ids } = writeEntries(baseDir, rows);
   const outDir = join(baseDir, 'archive');
   const relayDir = join(baseDir, 'relay');
 
   const sealed = await seal({ hotDb, outDir });
-  console.log(`seal: ${sealed.rowsSealed} orders -> ${sealed.chunks.length} chunk(s)`);
+  console.log(`seal: ${sealed.rowsSealed} entries -> ${sealed.chunks.length} chunk(s)`);
   const shipped = await ship({ outDir, relayDir, baseDelayMs: 1 });
   console.log(`ship: sent ${shipped.sent.length} chunk(s), relay holds ${Object.keys(readRelayIndex(relayDir).chunks).length}`);
 

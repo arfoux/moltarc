@@ -189,6 +189,6 @@ describe('p2p node identity', () => {
   it('resolveNodeId mints distinct identities when none is configured', { timeout: 30_000 }, () => {
     const ids = new Set([resolveNodeId(), resolveNodeId(), resolveNodeId()]);
     assert.equal(ids.size, 3);
-    assert.equal(resolveNodeId('  warung-1  '), 'warung-1');
+    assert.equal(resolveNodeId('  node-1  '), 'node-1');
   });
 });

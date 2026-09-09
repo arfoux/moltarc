@@ -14,7 +14,7 @@ import { mergeCold, readTar } from '../src/cold.js';
 import { loadManifest } from '../src/manifest.js';
 import { scratch, writeHotLog } from './util.js';
 
-function appendSeqRows(hotDb: string, fromSeq: number, count: number, device = 'pos-01', table = 'events'): void {
+function appendSeqRows(hotDb: string, fromSeq: number, count: number, device = 'dev-01', table = 'events'): void {
   const base = 1_700_000_000_000;
   const lines: string[] = [];
   for (let k = 0; k < count; k++) {
@@ -100,7 +100,7 @@ describe('coldfix regressions', () => {
     const lines: string[] = [];
     for (let i = 0; i < 3000; i++) {
       lines.push(JSON.stringify({
-        device_id: 'pos-01', seq: i + 1, ts: base + i * 1000,
+        device_id: 'dev-01', seq: i + 1, ts: base + i * 1000,
         id: `trx-${String(i + 1).padStart(8, '0')}`, table: 'events',
         body: `TRANSACTION OK value=${15000 + (i % 97)} cashier=agus tend=cash change=0 store=jakarta-selatan`,
       }));

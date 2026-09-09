@@ -30,7 +30,7 @@ function mulberry32(seed: number): () => number {
   };
 }
 // 60% events text / 25% notes text / 15% photo hash-refs (bytes stay in sidecar).
-// Four devices: events+notes share pos-01/pos-02 by seq parity, photo cam-01/cam-02.
+// Four devices: events+notes share dev-01/dev-02 by seq parity, photo cam-01/cam-02.
 function writeMixedHot(dir: string): { hotDb: string; ids: string[]; blobBytes: number } {
   const rnd = mulberry32(7);
   const base = 1_700_000_000_000;
@@ -46,11 +46,11 @@ function writeMixedHot(dir: string): { hotDb: string; ids: string[]; blobBytes: 
     const slot = rnd();
     if (slot < 0.6) {
       const seq = ++seqByTable.events;
-      const dev = seq % 2 ? 'pos-01' : 'pos-02';
+      const dev = seq % 2 ? 'dev-01' : 'dev-02';
       lines.push(JSON.stringify({ device_id: dev, seq, ts: base + i * 1000, id, table: 'events', body: `TRANSACTION OK value=${15000 + (i % 97)} cashier=agus tend=cash change=0 store=jakarta-selatan ref=${((i * 2654435761) >>> 0).toString(16)}` }));
     } else if (slot < 0.85) {
       const seq = ++seqByTable.notes;
-      const dev = seq % 2 ? 'pos-02' : 'pos-01';
+      const dev = seq % 2 ? 'dev-02' : 'dev-01';
       lines.push(JSON.stringify({ device_id: dev, seq, ts: base + i * 1000, id, table: 'notes', body: `NOTE seq=${i} stok gudang menipis kirim segera catat manual nota=${((i * 40503) >>> 0).toString(16)}` }));
     } else {
       const seq = ++seqByTable.photo;

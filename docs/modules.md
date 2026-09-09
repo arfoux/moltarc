@@ -52,9 +52,9 @@ CLI entrypoint is `bin/moltarc.ts`.
 | `bench/photo-bench.ts` | 50-real-JPEG bench, rewrites the Photo SLA table |
 | `bench/dict-bench.ts` | Dict off-vs-on bench, rewrites the Dict SLA table |
 | `bench/perf.ts` | Seal/ship/find timings, recorded under `perf` in `bench/measured.json` |
-| `examples/e2e.ts` | Field feed: 1200 rows seal → ship → find (`bun run e2e`) |
-| `examples/universal-demo.ts` | Generic shop orders, 50 rows, prints shrink ratio (`bun run demo`) |
-| `examples/ledger-demo.ts` | Event ledger, 50 rows (`bun run ledger`) |
+| `examples/e2e.ts` | Multi-device feed: 1200 rows seal → ship → find (`bun run e2e`) |
+| `examples/universal-demo.ts` | Generic event feed, 50 rows, prints shrink ratio (`bun run demo`) |
+| `examples/ledger-demo.ts` | Entry-ledger feed, 50 rows, one domain example (`bun run ledger`) |
 | `examples/dashboard.ts` | Timetravel polling demo: windowed recent-state fold polled N times |
 
 Tests mirror modules one-to-one under `test/` (`seal ↔ seal*.test.ts`,

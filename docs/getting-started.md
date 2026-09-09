@@ -29,7 +29,7 @@ bun bin/moltarc.ts seal /tmp/hot.jsonl /tmp/moltarc/archive
 # bun bin/moltarc.ts seal hot.db /tmp/moltarc/archive [--table <name>]
 ```
 
-What happens: per-table batches pack to ~2MB compressed chunks (`warm/*.zst`),
+What happens: per-table batches pack to ~2MB compressed chunks (`warm/*.chk`),
 and the per-device `sealed_upto_seq` watermark advances so re-seal is idempotent
 (`docs/architecture.md` Hot, CLI shape `bin/moltarc.ts:38`).
 

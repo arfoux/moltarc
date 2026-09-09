@@ -20,9 +20,9 @@ export function writeDashLog(dir: string, rows: number): string {
   for (let i = 0; i < rows; i++) {
     const seq = i + 1;
     lines.push(JSON.stringify({
-      device_id: 'cashier-01', seq, ts: base + i * 1000,
+      device_id: 'operator-01', seq, ts: base + i * 1000,
       id: `trx-${String(seq).padStart(8, '0')}`, table: 'events',
-      body: `DASH sale seq=${seq} value=${5000 + (i % 20) * 1000}`,
+      body: `EVENT entry seq=${seq} value=${5000 + (i % 20) * 1000}`,
     }));
   }
   const hotDb = join(dir, 'dash.jsonl');

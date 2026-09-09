@@ -10,7 +10,7 @@ import { queryAsOf } from '../src/timetravel.js';
 import { scratch } from './util.js';
 
 function row(id: string, seq: number, ts: number, body: string): HotRow {
-  return { device_id: 'pos-01', seq, ts, id, table: 'events', body };
+  return { device_id: 'dev-01', seq, ts, id, table: 'events', body };
 }
 
 describe('moltarc timetravel missing-chunk warning', () => {

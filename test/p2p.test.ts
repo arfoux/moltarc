@@ -206,10 +206,10 @@ describe('p2p hardening', () => {
       const aDir = join(dir, 'node-a');
       const bDir = join(dir, 'node-b');
       await seal({ hotDb, outDir: aDir, targetBytes: 16 * 1024 });
-      const a = startNode({ outDir: aDir, port: 0, token: 'warung-1' });
+      const a = startNode({ outDir: aDir, port: 0, token: 'node-1' });
       try {
         await assert.rejects(syncFromPeer(a.url, bDir, { blockBytes: 1024, timeoutMs: 8000 }), /connection lost|timeout/);
-        const allowed = await syncFromPeer(a.url, bDir, { blockBytes: 1024, token: 'warung-1', timeoutMs: 15000 });
+        const allowed = await syncFromPeer(a.url, bDir, { blockBytes: 1024, token: 'node-1', timeoutMs: 15000 });
         assert.ok(allowed.received.length >= 1, 'peer with token syncs');
       } finally {
         a.stop();
@@ -225,10 +225,10 @@ describe('p2p hardening', () => {
       const aDir = join(dirA, 'node-a');
       const bDir = join(dirB, 'node-b');
       await seal({ hotDb: hotA, outDir: aDir, targetBytes: 16 * 1024 });
-      const other = sha256hex(Buffer.from('warung-lain', 'utf8'));
-      const a = startNode({ outDir: aDir, port: 0, token: 'warung-1', allowPeers: [other] });
+      const other = sha256hex(Buffer.from('node-other', 'utf8'));
+      const a = startNode({ outDir: aDir, port: 0, token: 'node-1', allowPeers: [other] });
       try {
-        await assert.rejects(syncFromPeer(a.url, bDir, { blockBytes: 1024, token: 'warung-1', timeoutMs: 8000 }), /not allowed|connection lost|timeout/);
+        await assert.rejects(syncFromPeer(a.url, bDir, { blockBytes: 1024, token: 'node-1', timeoutMs: 8000 }), /not allowed|connection lost|timeout/);
       } finally {
         a.stop();
       }

@@ -52,7 +52,7 @@ describe('gc cli', () => {
     const dir = scratch('gc-cli-apply');
     const outDir = join(dir, 'archive');
     const relayDir = join(dir, 'relay');
-    for (const device of ['pos-01', 'pos-02']) {
+    for (const device of ['dev-01', 'dev-02']) {
       const { hotDb } = writeHotLog(dir, { rows: 200, device, table: `t-${device}` });
       await seal({ hotDb, outDir });
     }

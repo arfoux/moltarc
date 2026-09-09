@@ -1,12 +1,20 @@
-# fielog interop
+# interop (any append-only feed)
 
-moltarc seals raw fielog sales logs with no manual conversion step. Proof:
-`test/interop.test.ts` (90-event `ledger.log` seals; one receipt finds back).
+moltarc seals any append-only feed with no manual conversion step. Game
+events, file versions, device telemetry, and entry-ledger rows all normalize
+through the same aliases (`normRow`, `src/seal.ts:62-93`). Proof:
+`test/interop.test.ts` (90-event `ledger.log` seals; one entry finds back).
 
 ## What seals directly
 
-Raw sales events with `type`/`event` of `entry`/`undo` and a `value`
-payload (`test/interop.test.ts:11-36`):
+Any JSONL row carrying `device_id,seq,ts,id,table,body` — or one of the
+aliases below. First-class shapes:
+
+- game events: `{"device_id":"node-01","seq":3,"ts":1700000000000,"table":"events","body":"..."}`
+- file versions: same shape with `"table":"versions"` (one row per version)
+- device telemetry: same shape with `"table":"readings"`
+- entry-ledger: raw entry/undo events with a `value` payload, no `table` key
+  needed — the event kind becomes the table (`test/interop.test.ts:11-36`):
 
 ```json
 {"device_id":"device-01","seq":3,"ts":1700000000000,"type":"entry","trx":"trx-00000003","value":55000,"actor":"agus"}
@@ -39,8 +47,10 @@ So an `entry` event with `trx: trx-00000003` keeps id `trx-00000003` in table
 
 ## Related demos
 
-- `bun examples/ledger-demo.ts` — 50 event rows, seal → ship →
+- `bun examples/universal-demo.ts` — 50-row generic event feed, seal → ship →
+  find one event, prints the shrink ratio (`examples/universal-demo.ts`).
+- `bun examples/ledger-demo.ts` — 50-row entry-ledger feed, seal → ship →
   find one entry, prints the shrink ratio (`examples/ledger-demo.ts`).
-- `bun examples/e2e.ts` — 1200-row field feed (sensors + operator
+- `bun examples/e2e.ts` — 1200-row multi-device feed (sensors + operator
   activity across `device-01`/`device-02`), the multi-device watermark path
   (`examples/e2e.ts`).

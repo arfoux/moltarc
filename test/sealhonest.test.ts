@@ -80,7 +80,7 @@ describe('seal honesty', () => {
     const hotDb = join(dir, 'hot.jsonl');
     const { b64 } = bigBody();
     const lines = [
-      JSON.stringify({ device_id: 'pos-01', seq: 1, ts: BASE, id: 't-1', table: 'events', body: 'small text' }),
+      JSON.stringify({ device_id: 'dev-01', seq: 1, ts: BASE, id: 't-1', table: 'events', body: 'small text' }),
       JSON.stringify({ device_id: 'cam-01', seq: 2, ts: BASE + 1, id: 'f-1', table: 'photo', body: b64 }),
     ];
     writeFileSync(hotDb, `${lines.join('\n')}\n`);

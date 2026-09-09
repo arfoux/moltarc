@@ -36,7 +36,7 @@ function v05Rows(seqBase: number, count: number): V05Row[] {
   for (let i = 0; i < count; i++) {
     const seq = seqBase + i;
     rows.push({
-      device_id: 'pos-01',
+      device_id: 'dev-01',
       seq,
       ts: base + seq * 1000,
       id: `trx-${String(seq).padStart(8, '0')}`,
@@ -62,7 +62,7 @@ function buildV05Chunk(table: string, rows: V05Row[]): Buffer {
   const frame = {
     v: V05_FRAME_V,
     table,
-    dev: ['pos-01'],
+    dev: ['dev-01'],
     seqB: rows[0].seq,
     seqD: rows.map((r, i) => (i === 0 ? 0 : r.seq - rows[i - 1].seq)),
     tsB: rows[0].ts,

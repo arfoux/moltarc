@@ -50,8 +50,10 @@ bench and commit the regenerated table + `measured.json`.
 Evidence-first: every behavior claim must be grounded in `src/`, `bin/`, or
 `ext/`. Verify every CLI flag against `bin/moltarc.ts` usage lines; never
 invent APIs. One page per concern (`docs/`); `README.md` is the door + index,
-not a second copy. No dead links: every relative link must resolve to a file
-that exists in git.
+not a second copy. Docs lead with the universal pipeline (game events, file
+versions, device telemetry first; entry-ledger as one domain among many) and
+keep example captions neutral. No dead links: every relative link must
+resolve to a file that exists in git.
 
 ## Commit style and PR flow
 

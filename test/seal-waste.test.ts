@@ -18,12 +18,12 @@ describe('seal waste-fix', () => {
     assert.equal(first.rowsSealed, 200);
     assert.ok(first.chunks.length >= 1);
     const wm = JSON.parse(readFileSync(join(outDir, 'sealed_upto_seq'), 'utf8')) as Record<string, number>;
-    assert.equal(wm['pos-01'], 200);
+    assert.equal(wm['dev-01'], 200);
     const second = await seal({ hotDb, outDir });
     assert.equal(second.rowsSealed, 800);
     assert.equal(second.rowsSkipped, 200);
     const wm2 = JSON.parse(readFileSync(join(outDir, 'sealed_upto_seq'), 'utf8')) as Record<string, number>;
-    assert.equal(wm2['pos-01'], 1000);
+    assert.equal(wm2['dev-01'], 1000);
     assert.ok(verifyAll(outDir).ok);
   });
 
@@ -46,7 +46,7 @@ describe('seal waste-fix', () => {
     const big = randomBytes(300 * 1024).toString('base64');
     const base = 1_700_000_000_000;
     const lines = [1, 2, 3].map((s) => JSON.stringify({
-      device_id: 'pos-01', seq: s, ts: base + s * 1000,
+      device_id: 'dev-01', seq: s, ts: base + s * 1000,
       id: `trx-${String(s).padStart(8, '0')}`, table: 'events', body: `cash sale ${s}`,
     }));
     const photoId = 'trx-00000004';

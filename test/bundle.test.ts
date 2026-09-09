@@ -9,12 +9,12 @@ import { scratch } from './util.js';
 describe('bundle', () => {
   it('packs one text plus refs and verifies clean', { timeout: 30_000 }, () => {
     const dir = scratch('bundle-ok');
-    const m = packBundle(dir, 'qurban POD-7: 3 sapi, 7 kambing', [
-      { name: 'sapi.txt', data: Buffer.from('sapi 3 ekor') },
-      { name: 'kambing.txt', data: Buffer.from('kambing 7 ekor') },
+    const m = packBundle(dir, 'event batch-7: 3 alpha, 7 beta', [
+      { name: 'alpha.txt', data: Buffer.from('alpha 3 units') },
+      { name: 'beta.txt', data: Buffer.from('beta 7 units') },
     ]);
     assert.equal(m.refs.length, 2);
-    assert.equal(m.text, 'qurban POD-7: 3 sapi, 7 kambing');
+    assert.equal(m.text, 'event batch-7: 3 alpha, 7 beta');
     const v = verifyBundle(dir);
     assert.deepEqual(v, { ok: true, errors: [] });
     const loaded = loadBundleManifest(dir);

@@ -14,7 +14,7 @@ function rows(n: number, table = 'events'): HotRow[] {
   const out: HotRow[] = [];
   for (let i = 0; i < n; i++) {
     out.push({
-      device_id: 'pos-01', seq: i + 1, ts: 1700000000000 + i * 1000,
+      device_id: 'dev-01', seq: i + 1, ts: 1700000000000 + i * 1000,
       id: `trx-${String(i + 1).padStart(8, '0')}`, table,
       body: `TRANSACTION OK value=15000 cashier=agus store=jakarta-selatan line=${i % 5}`,
     });
