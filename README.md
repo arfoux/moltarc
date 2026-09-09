@@ -15,7 +15,7 @@ warm chunks compress schema-aware, cold archive ships once, query stays partial.
 |---|---|
 | ![hot rows flow](docs/gifs/part1-hot.png)<br>**1. Hot stays boring** — 6000 rows land in plain SQLite, counter climbs, nothing custom. (`src/seal.ts` reads WAL) | ![seal funnels rows](docs/gifs/part2-seal.png)<br>**2. Seal** — rows funnel into immutable chunks, 34.5x smaller, crc+sha per chunk. (`moltarc seal`) |
 | ![delta ships once](docs/gifs/part3-ship.png)<br>**3. Ship** — relay compares hashes, only missing bytes fly, resume survives drops. (`moltarc ship`) | ![find fetches one chunk](docs/gifs/part4-find.png)<br>**4. Find** — bloom prunes the candidates to a single-chunk fetch, which returns the trx. (`moltarc find`) |
-| ![big photos quarantine](docs/gifs/part5-foto.png)<br>**5. Foto gate** — bodies ≥256KB skip the chunk path into `foto/` + thumb sidecars. (rule 4) | ![verify proves chain](docs/gifs/part6-verify.png)<br>**6. Verify** — every chunk re-hashed, manifest chain checked, quarantine on mismatch. (`moltarc verify`) |
+| ![big photos quarantine](docs/gifs/part5-photo.png)<br>**5. Photo gate** — bodies ≥256KB skip the chunk path into `photo/` + thumb sidecars. (rule 4) | ![verify proves chain](docs/gifs/part6-verify.png)<br>**6. Verify** — every chunk re-hashed, manifest chain checked, quarantine on mismatch. (`moltarc verify`) |
 | ![warm merges to cold](docs/gifs/part7-cold.png)<br>**7. Cold** — warm merges to `cold/*.tar`, prune/repack sweep, restore-from-cold drill. (`moltarc merge`) | ![p2p delta sync](docs/gifs/part8-p2p.png)<br>**8. P2P** — WebSocket delta sync with journal resume, HMAC-SHA256 PSK frames. (`moltarc p2p-sync`) |
 | ![as-of query over history](docs/gifs/part9-timetravel.png)<br>**9. Timetravel** — read-only as-of query (seq or ts) with chunk proof. (`moltarc asof`) | ![hot to cold lifecycle](docs/gifs/part10-lifecycle.png)<br>**10. Lifecycle** — hot→warm→cold end to end, acked-only forget, nothing lost. (`moltarc seal` → `ship` → `merge`) |
 
@@ -68,7 +68,7 @@ Ownership table with one-liners: [docs/modules.md](docs/modules.md).
 
 ## Contracts and limits
 
-- Foto gate: bodies decoding past **256KB** become `foto/<sha>.bin` sidecars + hash refs, never inline chunks.
+- Photo gate: bodies decoding past **256KB** become `photo/<sha>.bin` sidecars + hash refs, never inline chunks.
 - Bomb caps: 16MB decompressed frame, 32MB / 50 000-member tar, 1MB bloom probe, 32MB / 8192px thumb input.
 - Quarantine: a corrupt chunk parks exactly one chunk of history (1/150 in a 150-chunk archive — illustrative size, not a measured archive), never the archive; repair refetches by hash.
 - Reserve: seal/merge/sweep-apply refuse below **50MB** free; `forget`/`gc` delete relay-acked chunks only.
@@ -83,7 +83,7 @@ moltarc ship <outDir> <relayDir> [--blobs]
 moltarc find <outDir> <trxId>
 moltarc verify <outDir>          moltarc repair <outDir> <relayDir>
 moltarc status <outDir> [relayDir]   moltarc check <outDir> <relayDir>
-moltarc gc <outDir> [relayDir] [--apply] [--deep-foto]
+moltarc gc <outDir> [relayDir] [--apply] [--deep-photo]
 moltarc merge <outDir>           moltarc forget <outDir> <relayDir> <chunk> [chunk...]
 moltarc coldg <outDir> [--apply] moltarc restore-from-cold <outDir> [--apply]
 moltarc p2p-sync <peerUrl> <outDir> [--token <t>]
@@ -95,7 +95,7 @@ Every flag verified against [bin/moltarc.ts](bin/moltarc.ts); full reference in 
 
 ## Interop (fielog)
 
-Raw `ledger.log` sales events (`payment`/`undo` + `amount`) seal with no manual conversion; key table in [docs/interop.md](docs/interop.md) (proof: `test/interop.test.ts`).
+Raw `ledger.log` sales events (`entry`/`undo` + `value`) seal with no manual conversion; key table in [docs/interop.md](docs/interop.md) (proof: `test/interop.test.ts`).
 
 ## Honest SLA (measured, not planned)
 
@@ -140,11 +140,11 @@ _Measured by `bun bench/mixed-corpus.ts --write-readme`; corpus deterministic (s
 | bytes | input | warm archive | ratio |
 |---|---|---|---|
 | 50 real jpeg (128x128 blurred noise, q85, 577KB raw) sealed as base64 lines | base64 in jsonl | per-table chunks | **1.41x** |
-| same jpeg bytes, raw zstd (the foto claim) | 577KB raw | zstd | **1.05x, inside 1.0-1.2x** |
+| same jpeg bytes, raw zstd (the photo claim) | 577KB raw | zstd | **1.05x, inside 1.0-1.2x** |
 | tx text beside the photos | text jsonl | text chunks + dict | **26.8x** |
-| 1 gate-sized jpeg (640x640 blurred noise, q85, 273KB raw, over the 256KB foto gate) | base64 line | foto/*.bin sidecar + hash ref | quarantined (bytes excluded) |
+| 1 gate-sized jpeg (640x640 blurred noise, q85, 273KB raw, over the 256KB photo gate) | base64 line | photo/*.bin sidecar + hash ref | quarantined (bytes excluded) |
 
-_Measured by `bun bench/photo-bench.ts --write-readme`; deterministic (seeded). The 128x128 variants (~12KB each) sit below the 256KB foto gate and seal inline — only the gate-sized row exercises the quarantine path. The base64 line ratio rides above raw because of the text envelope — raw jpeg bytes sit at ~1.05x, which is why photo bytes never enter the mandatory archive (hash refs only, lazy fetch)._
+_Measured by `bun bench/photo-bench.ts --write-readme`; deterministic (seeded). The 128x128 variants (~12KB each) sit below the 256KB photo gate and seal inline — only the gate-sized row exercises the quarantine path. The base64 line ratio rides above raw because of the text envelope — raw jpeg bytes sit at ~1.05x, which is why photo bytes never enter the mandatory archive (hash refs only, lazy fetch)._
 <!-- PHOTO-MEASURED-END -->
 
 ## Dict SLA

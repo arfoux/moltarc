@@ -1,10 +1,10 @@
-// seal waste-fix regression: bounded seal, malformed abort, foto gate, probe estimator.
+// seal waste-fix regression: bounded seal, malformed abort, photo gate, probe estimator.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { appendFileSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
-import { seal, readFotoSidecar } from '../src/seal.js';
+import { seal, readPhotoSidecar } from '../src/seal.js';
 import { findTrx } from '../src/find.js';
 import { verifyAll } from '../src/verify.js';
 import { scratch, writeHotLog } from './util.js';
@@ -41,32 +41,32 @@ describe('seal waste-fix', () => {
     await assert.rejects(seal({ hotDb: g2.hotDb, outDir: join(dir2, 'arch') }), /malformed/);
   });
 
-  it('foto gate quarantines >256kb base64 to sidecar hash-ref', { timeout: 60_000 }, async () => {
-    const dir = scratch('seal-foto');
+  it('photo gate quarantines >256kb base64 to sidecar hash-ref', { timeout: 60_000 }, async () => {
+    const dir = scratch('seal-photo');
     const big = randomBytes(300 * 1024).toString('base64');
     const base = 1_700_000_000_000;
     const lines = [1, 2, 3].map((s) => JSON.stringify({
       device_id: 'pos-01', seq: s, ts: base + s * 1000,
-      id: `trx-${String(s).padStart(8, '0')}`, table: 'sales', body: `cash sale ${s}`,
+      id: `trx-${String(s).padStart(8, '0')}`, table: 'events', body: `cash sale ${s}`,
     }));
-    const fotoId = 'trx-00000004';
+    const photoId = 'trx-00000004';
     lines.push(JSON.stringify({
       device_id: 'cam-01', seq: 4, ts: base + 4000,
-      id: fotoId, table: 'photo', body: big,
+      id: photoId, table: 'photo', body: big,
     }));
     const hotDb = join(dir, 'hot.jsonl');
     writeFileSync(hotDb, `${lines.join('\n')}\n`);
     const outDir = join(dir, 'arch');
     const r = await seal({ hotDb, outDir });
     assert.equal(r.rowsSealed, 4);
-    const found = findTrx({ outDir, trxId: fotoId });
-    assert.match(found.row.body, /^foto:sha256:[0-9a-f]{64}:size=\d+$/);
-    assert.ok(!found.row.body.includes(big.slice(0, 64)), 'foto bytes sealed inline');
-    assert.equal(readFotoSidecar(outDir, found.row.body).toString('base64'), big);
+    const found = findTrx({ outDir, trxId: photoId });
+    assert.match(found.row.body, /^photo:sha256:[0-9a-f]{64}:size=\d+$/);
+    assert.ok(!found.row.body.includes(big.slice(0, 64)), 'photo bytes sealed inline');
+    assert.equal(readPhotoSidecar(outDir, found.row.body).toString('base64'), big);
     const warmBytes = readdirSync(join(outDir, 'warm'))
       .filter((f) => f.endsWith('.chk'))
       .reduce((n, f) => n + statSync(join(outDir, 'warm', f)).size, 0);
-    assert.ok(warmBytes < 100 * 1024, `warm ${warmBytes}b carries foto bytes inline`);
+    assert.ok(warmBytes < 100 * 1024, `warm ${warmBytes}b carries photo bytes inline`);
   });
 
   it('probe estimator seals exact rows with few full encodes', { timeout: 120_000 }, async () => {

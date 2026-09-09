@@ -33,8 +33,8 @@ export function writeOrders(dir: string, rows: number): { hotDb: string; ids: st
     ids.push(id);
     const amt = 5000 + ((i * 37) % 20) * 10000;
     lines.push(JSON.stringify({
-      device_id: 'pos-01', seq, ts: base + i * 30_000, id, table: 'sales',
-      body: `${HEAD} no=${1000 + i} amount=${amt} tender=${i % 3 === 0 ? 'cash' : i % 3 === 1 ? 'card' : 'wallet'} clerk=alex ${TAIL}`,
+      device_id: 'pos-01', seq, ts: base + i * 30_000, id, table: 'events',
+      body: `${HEAD} no=${1000 + i} value=${amt} tender=${i % 3 === 0 ? 'cash' : i % 3 === 1 ? 'card' : 'wallet'} clerk=alex ${TAIL}`,
     }));
   }
   const hotDb = join(dir, 'orders.jsonl');

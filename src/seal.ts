@@ -17,9 +17,9 @@ import { atomicWrite } from './guard.js';
 export const TARGET_BYTES = 2 * 1024 * 1024;
 export const MIN_BYTES = 1 * 1024 * 1024;
 export const MAX_BYTES = 4 * 1024 * 1024;
-// Foto gate: a base64 body decoding past this never seals inline; the raw bytes
-// go to foto/<sha>.bin and the chunk keeps a foto:sha256:… hash ref instead.
-export const FOTO_INLINE_LIMIT_BYTES = 256 * 1024;
+// Photo gate: a base64 body decoding past this never seals inline; the raw bytes
+// go to photo/<sha>.bin and the chunk keeps a photo:sha256:… hash ref instead.
+export const PHOTO_INLINE_LIMIT_BYTES = 256 * 1024;
 // Malformed-row abort: malformed lines past this share of input fail loud.
 export const MALFORMED_ABORT_PCT = 0.01;
 export interface SealOpts {
@@ -41,7 +41,7 @@ export interface SealResult {
   rowsMalformed: number; // input lines that failed to parse/normalize
   rowsReplaced: number; // same-key different-body overwrites (keep-last dedupe)
   probeEncodes: number; // full chunk encodes spent on size probing
-  fotoQuarantined: string[]; // hash refs quarantined this call, for verify/ship/sweep audit
+  photoQuarantined: string[]; // hash refs quarantined this call, for verify/ship/sweep audit
 }
 
 // Seq/ts coercion: empty-string input must not silently become 0 via
@@ -57,7 +57,7 @@ function toInt(n: unknown): number | null {
 // outside 1..99999999 can never link back, so it is malformed at seal time.
 export const SEQ_MAX = 99_999_999;
 
-// Fielog interop: raw ledger events (`type`/`event` payment/undo, `amount`
+// Fielog interop: raw ledger events (`type`/`event` entry/undo, `value`
 // payload) normalize with no manual conversion step.
 export function normRow(o: Record<string, unknown>, fallbackTable: string): HotRow | null {
   // Structural numeric aliases (no/waktu): foreign sqlite schemas name their
@@ -69,14 +69,14 @@ export function normRow(o: Record<string, unknown>, fallbackTable: string): HotR
   const ts = toInt(o.ts ?? o.timestamp ?? o.waktu ?? Date.now());
   if (ts === null || ts < 0) return null;
   const kind = o.type ?? o.event;
-  const amount = o.amount ?? o.total;
+  const value = o.value ?? o.total;
   const bodyRaw = o.body ?? o.payload ?? o.msg ?? o.data ?? o.note ?? o.details ?? '';
   const device = String(o.device_id ?? o.device ?? 'dev0');
   const body = bodyRaw !== ''
     ? (typeof bodyRaw === 'string' ? bodyRaw : JSON.stringify(bodyRaw))
     : [
       kind !== undefined ? String(kind) : '',
-      amount !== undefined ? `amount=${String(amount)}` : '',
+      value !== undefined ? `value=${String(value)}` : '',
       o.actor !== undefined ? `actor=${String(o.actor)}` : '',
       o.ref !== undefined ? `ref=${String(o.ref)}` : '',
       o.reason !== undefined ? `reason=${String(o.reason)}` : '',
@@ -168,29 +168,29 @@ export async function readSqliteRows(hotDb: string, fallbackTable = 'log'): Prom
   return (await readSqliteRowsCounted(hotDb, fallbackTable)).rows;
 }
 
-const FOTO_REF_RE = /^foto:sha256:[0-9a-f]{64}:size=\d+$/;
+const PHOTO_REF_RE = /^photo:sha256:[0-9a-f]{64}:size=\d+$/;
 const B64_CHARS_RE = /^[A-Za-z0-9+/=\r\n]+$/;
 
-export function isFotoRef(body: string): boolean {
-  return FOTO_REF_RE.test(body);
+export function isPhotoRef(body: string): boolean {
+  return PHOTO_REF_RE.test(body);
 }
 
-// Foto gate: a base64 body decoding past FOTO_INLINE_LIMIT_BYTES is quarantined
-// to a sidecar file under <outDir>/foto/<sha>.bin; returns the hash ref to seal
+// Photo gate: a base64 body decoding past PHOTO_INLINE_LIMIT_BYTES is quarantined
+// to a sidecar file under <outDir>/photo/<sha>.bin; returns the hash ref to seal
 // instead of the inline bytes. Small bodies and non-base64 text return null and
 // keep sealing inline as before.
-// Minimum raw chars that can decode past FOTO_INLINE_LIMIT_BYTES (256KB ->
+// Minimum raw chars that can decode past PHOTO_INLINE_LIMIT_BYTES (256KB ->
 // ~341K base64 chars): the gate's cheap pre-filter. Any shorter body —
 // stripped or not — decodes within the inline limit, so it stays inline.
-export const FOTO_GATE_MIN_CHARS = Math.ceil((FOTO_INLINE_LIMIT_BYTES * 4) / 3);
-export function quarantineFotoBody(outDir: string, body: string): string | null {
+export const PHOTO_GATE_MIN_CHARS = Math.ceil((PHOTO_INLINE_LIMIT_BYTES * 4) / 3);
+export function quarantinePhotoBody(outDir: string, body: string): string | null {
   // Cheap pre-filter first: raw length lower-bounds stripped length, so a
   // short body can never decode past the gate — skip the strip+regex+
   // decode+re-encode per row. Only bodies >= ~341K chars take the full gate.
-  if (body.length < FOTO_GATE_MIN_CHARS) return null;
+  if (body.length < PHOTO_GATE_MIN_CHARS) return null;
   const chars = body.replace(/\s/g, '');
   // Fast path: shorter strings cannot decode past the limit; no base64 work.
-  if (chars.length < FOTO_GATE_MIN_CHARS) return null;
+  if (chars.length < PHOTO_GATE_MIN_CHARS) return null;
   if (chars.length % 4 !== 0 || !B64_CHARS_RE.test(chars)) return null;
   let raw: Buffer;
   try {
@@ -198,11 +198,11 @@ export function quarantineFotoBody(outDir: string, body: string): string | null 
   } catch {
     return null;
   }
-  if (raw.length <= FOTO_INLINE_LIMIT_BYTES) return null;
+  if (raw.length <= PHOTO_INLINE_LIMIT_BYTES) return null;
   // Strict re-encode: base64 decode is lenient, large prose must not match.
   if (raw.toString('base64') !== chars) return null;
   const sha = createHash('sha256').update(raw).digest('hex');
-  const dir = join(outDir, 'foto');
+  const dir = join(outDir, 'photo');
   mkdirSync(dir, { recursive: true });
   const dest = join(dir, `${sha}.bin`);
   if (!existsSync(dest)) {
@@ -211,18 +211,18 @@ export function quarantineFotoBody(outDir: string, body: string): string | null 
   }
   // Sidecar preview: best-effort, never fails the seal; the .bin stays authoritative.
   try { saveThumb(outDir, raw); } catch { /* thumb fallback already avoids throws */ }
-  return `foto:sha256:${sha}:size=${raw.length}`;
+  return `photo:sha256:${sha}:size=${raw.length}`;
 }
 
-// Read back quarantined foto bytes for a hash ref produced by quarantineFotoBody.
+// Read back quarantined photo bytes for a hash ref produced by quarantinePhotoBody.
 // The size suffix is enforced: a truncated or padded sidecar fails loud
-// instead of decoding as a silently wrong foto.
-export function readFotoSidecar(outDir: string, ref: string): Buffer {
-  const m = /^foto:sha256:([0-9a-f]{64}):size=(\d+)$/.exec(ref);
-  if (!m) throw new Error(`not a foto ref: ${ref.slice(0, 32)}`);
+// instead of decoding as a silently wrong photo.
+export function readPhotoSidecar(outDir: string, ref: string): Buffer {
+  const m = /^photo:sha256:([0-9a-f]{64}):size=(\d+)$/.exec(ref);
+  if (!m) throw new Error(`not a photo ref: ${ref.slice(0, 32)}`);
   const expect = Number(m[2]);
-  const buf = readFileSync(join(outDir, 'foto', `${m[1]}.bin`));
-  if (buf.length !== expect) throw new Error(`foto sidecar size mismatch: ${m[1].slice(0, 12)} expects ${expect} bytes, has ${buf.length}`);
+  const buf = readFileSync(join(outDir, 'photo', `${m[1]}.bin`));
+  if (buf.length !== expect) throw new Error(`photo sidecar size mismatch: ${m[1].slice(0, 12)} expects ${expect} bytes, has ${buf.length}`);
   return buf;
 }
 
@@ -386,21 +386,21 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   if (pending.length === 0) {
     const byDevice: Record<string, number> = {};
     for (const [k, v] of Object.entries(wm)) if (k !== '') byDevice[k] = v;
-    return { chunks: [], sealedUptoSeq: wmMax, sealedByDevice: byDevice, rowsSealed: 0, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes: 0, fotoQuarantined: [] };
+    return { chunks: [], sealedUptoSeq: wmMax, sealedByDevice: byDevice, rowsSealed: 0, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes: 0, photoQuarantined: [] };
   }
   // Write-path entry: refuse an old manifest in place even if one appeared
   // after the entry guard above. Fresh dirs with no manifest still seal
   // normally (nothing to migrate); only a present old copy throws.
   if (existsSync(join(opts.outDir, 'manifest.json')) || existsSync(join(opts.outDir, 'manifest.bak.json'))) assertMigrated(opts.outDir);
 
-  // Foto gate first: oversize base64 never reaches a chunk inline. Refs are
+  // Photo gate first: oversize base64 never reaches a chunk inline. Refs are
   // recorded on the result so verify/ship/sweep can audit quarantined blobs.
-  const fotoSet = new Set<string>();
+  const photoSet = new Set<string>();
   for (const r of pending) {
-    const ref = quarantineFotoBody(opts.outDir, r.body);
-    if (ref !== null) { r.body = ref; fotoSet.add(ref); }
+    const ref = quarantinePhotoBody(opts.outDir, r.body);
+    if (ref !== null) { r.body = ref; photoSet.add(ref); }
   }
-  const fotoQuarantined = [...fotoSet];
+  const photoQuarantined = [...photoSet];
 
   // Per-chunk watermark: every flush fsyncs its chunk, then persists the
   // per-device advance. A kill between flushes loses only the unflushed tail,
@@ -524,7 +524,7 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
       }
     }
     appendEntries(opts.outDir, entries);
-    return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes, fotoQuarantined };
+    return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes, photoQuarantined };
   }
 
   // First seal (no prior manifest): full rebuild owns the listing.
@@ -541,6 +541,6 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   const manifest = buildManifest(opts.outDir);
   if (cold !== undefined) manifest.cold = cold;
   saveManifestAtomic(opts.outDir, manifest);
-  return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes, fotoQuarantined };
+  return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes, photoQuarantined };
   } finally { releaseSealLock(); }
 }

@@ -43,9 +43,9 @@ shape in `bin/moltarc.ts:35-53`.
   mixed text 2.40 MB → 241.0 KB (**10.2x**) (`README.md` Measured SLA);
   dict saves ~1.8 % at 16 KB chunks, ~0 % at 2 MB production chunks
   (`README.md` Dict SLA).
-- Foto gate: base64 bodies decoding past 256 KB (`FOTO_INLINE_LIMIT_BYTES`,
-  `src/seal.ts:20-22`) land in `foto/<sha>.bin` + thumb companions while the
-  chunk keeps a `foto:sha256:…` hash ref (`src/seal.ts:176-213`,
+- Photo gate: base64 bodies decoding past 256 KB (`PHOTO_INLINE_LIMIT_BYTES`,
+  `src/seal.ts:20-22`) land in `photo/<sha>.bin` + thumb companions while the
+  chunk keeps a `photo:sha256:…` hash ref (`src/seal.ts:176-213`,
   `src/thumb.ts:147-159`). Full contract in `docs/contracts.md`.
 
 ## Manifest: dual-copy index
@@ -69,7 +69,7 @@ shape in `bin/moltarc.ts:35-53`.
 
 ## Ship: delta by hash, text-first lanes
 
-- `laneOf` maps blob/photo/foto/image/thumb tables to lane 1, everything
+- `laneOf` maps blob/photo/image/thumb tables to lane 1, everything
   else lane 0; `planShipment` skips lane 1 unless `includeBlobs` and sorts
   lane-then-seq (`src/ship.ts:36-60`).
 - Text-first because photo bytes compress ~1.05x raw while text hits 26.8x
@@ -78,7 +78,7 @@ shape in `bin/moltarc.ts:35-53`.
 - Delta economics come from immutable chunks: the relay index hash hit stays
   valid forever, giving 1791 B delta vs 211 716 B full (`docs/bench.md`,
   `src/ship.ts:63-67`).
-- With `includeBlobs`, `foto/*.bin` sidecars ship in the same call (small
+- With `includeBlobs`, `photo/*.bin` sidecars ship in the same call (small
   copy-if-missing, large resumable) — a ticket never precedes its painting
   (`src/ship.ts:218-228`).
 

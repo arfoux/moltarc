@@ -16,7 +16,7 @@ import { scratch, writeHotLog } from './util.js';
 function hotLine(device: string, seq: number, id: string): string {
   return JSON.stringify({
     device_id: device, seq, ts: 1_700_000_000_000 + seq,
-    id, table: 'sales', body: `payment amount=${seq * 1000} actor=${device} ref=${id}`,
+    id, table: 'events', body: `entry value=${seq * 1000} actor=${device} ref=${id}`,
   });
 }
 
@@ -70,7 +70,7 @@ describe('relay-ack guard on forget and gc', () => {
     assert.ok(!kept.removed.includes(only), 'gc keeps the live unshipped chunk');
     assert.ok(existsSync(join(outDir, 'warm', only)));
 
-    const orphan = 'sales-000001-000001-deadbeef.chk';
+    const orphan = 'events-000001-000001-deadbeef.chk';
     writeFileSync(join(outDir, 'warm', orphan), Buffer.from('orphan-bytes'));
     const held = sweep(outDir, { dryRun: false, relayDir });
     assert.ok(held.orphans.includes(orphan));

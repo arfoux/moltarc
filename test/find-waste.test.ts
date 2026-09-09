@@ -55,8 +55,8 @@ describe('find waste fixes', () => {
 
   it('prunes via the sparse index jump and keeps unknown ranges fetchable', { timeout: 30_000 }, () => {
     const entries = Array.from({ length: 10 }, (_, i) => ({
-      file: `sales-${String(i).padStart(4, '0')}.chk`,
-      table: 'sales',
+      file: `events-${String(i).padStart(4, '0')}.chk`,
+      table: 'events',
       seqMin: i * 100, seqMax: i * 100 + 99,
       tsMin: 0, tsMax: 0, rows: 100, bytes: 1000,
       sha256: 'x', crc32c: 0, dictId: 0, codec: 1,
@@ -72,12 +72,12 @@ describe('find waste fixes', () => {
     assert.equal(pruned, 9);
     // Unknown range (empty min/max): cannot prune, still a candidate.
     const withUnknown = [...entries, {
-      file: 'sales-unknown.chk', table: 'sales',
+      file: 'events-unknown.chk', table: 'events',
       seqMin: 0, seqMax: 0, tsMin: 0, tsMax: 0, rows: 0, bytes: 10,
       sha256: 'y', crc32c: 0, dictId: 0, codec: 1, minKey: '', maxKey: '', bloom: '',
     }];
     const r2 = candidates(withUnknown, 'trx-00000001');
-    assert.ok(r2.hit.some((e) => e.file === 'sales-unknown.chk'));
+    assert.ok(r2.hit.some((e) => e.file === 'events-unknown.chk'));
   });
 
   it('findCold scans tar members after the warm file is gone, with a cost warning', { timeout: 60_000 }, async () => {

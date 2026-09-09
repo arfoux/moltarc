@@ -116,7 +116,7 @@ describe('manifest waste-fix', () => {
     const seqBefore = before.seq as number;
 
     const template = before.chunks[0];
-    const fresh = { ...template, file: 'sales-99999991-99999999-deadbeef.chk', seqMin: 99999991, seqMax: 99999999 };
+    const fresh = { ...template, file: 'events-99999991-99999999-deadbeef.chk', seqMin: 99999991, seqMax: 99999999 };
     const merged = appendEntries(outDir, [fresh, template]);
     assert.ok(merged.chunks.some((e) => e.file === fresh.file), 'new entry appended');
     assert.equal(

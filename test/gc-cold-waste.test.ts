@@ -16,7 +16,7 @@ import { forgetChunks, mergeCold, readTar, sweepCold } from '../src/cold.js';
 import { scratch, writeHotLog } from './util.js';
 
 function plantOrphan(outDir: string): string {
-  const name = 'sales-000999-000999-deadbeef.chk';
+  const name = 'events-000999-000999-deadbeef.chk';
   writeFileSync(join(outDir, 'warm', name), Buffer.from('orphan-bytes'));
   return name;
 }
@@ -154,11 +154,11 @@ function writeRelayIndex(relayDir: string, index: unknown): void {
   writeFileSync(join(relayDir, 'index.json'), JSON.stringify(index));
 }
 
-// Seal a small archive whose warm chunks reference refSha via an inline foto
+// Seal a small archive whose warm chunks reference refSha via an inline photo
 // hash-ref body, with an unreferenced sidecar (+thumb companions) for deadSha
 // parked beside it. The ref body is short non-base64 text, so seal keeps it
-// inline and the deep-foto scan decodes it back out of the chunk.
-async function sealWithFoto(dir: string): Promise<{ outDir: string; refSha: string; deadSha: string }> {
+// inline and the deep-photo scan decodes it back out of the chunk.
+async function sealWithPhoto(dir: string): Promise<{ outDir: string; refSha: string; deadSha: string }> {
   const refBytes = randomBytes(64);
   const refSha = shaOf(refBytes);
   const deadBytes = randomBytes(96);
@@ -166,92 +166,92 @@ async function sealWithFoto(dir: string): Promise<{ outDir: string; refSha: stri
   const { hotDb } = writeHotLog(dir, { rows: 50 });
   appendFileSync(hotDb, `${JSON.stringify({
     device_id: 'cam-01', seq: 51, ts: 1_700_000_000_000 + 51 * 1000,
-    id: 'trx-foto-000001', table: 'foto', body: `foto:sha256:${refSha}:size=${refBytes.length}`,
+    id: 'trx-photo-000001', table: 'photo', body: `photo:sha256:${refSha}:size=${refBytes.length}`,
   })}\n`);
   const outDir = join(dir, 'archive');
   await seal({ hotDb, outDir });
-  mkdirSync(join(outDir, 'foto'), { recursive: true });
-  writeFileSync(join(outDir, 'foto', `${refSha}.bin`), refBytes);
-  writeFileSync(join(outDir, 'foto', `${deadSha}.bin`), deadBytes);
-  writeFileSync(join(outDir, 'foto', `thumb-${deadSha}.jpg`), Buffer.from('fake-jpg-bytes'));
-  writeFileSync(join(outDir, 'foto', `thumb-${deadSha}.json`), JSON.stringify({ fullSha: deadSha }));
+  mkdirSync(join(outDir, 'photo'), { recursive: true });
+  writeFileSync(join(outDir, 'photo', `${refSha}.bin`), refBytes);
+  writeFileSync(join(outDir, 'photo', `${deadSha}.bin`), deadBytes);
+  writeFileSync(join(outDir, 'photo', `thumb-${deadSha}.jpg`), Buffer.from('fake-jpg-bytes'));
+  writeFileSync(join(outDir, 'photo', `thumb-${deadSha}.json`), JSON.stringify({ fullSha: deadSha }));
   return { outDir, refSha, deadSha };
 }
 
-describe('gc deep foto', () => {
+describe('gc deep photo', () => {
   it('keeps referenced sidecars, collects relay-acked orphans with thumbs', { timeout: 30_000 }, async () => {
-    const dir = scratch('gcw-foto-acked');
-    const { outDir, refSha, deadSha } = await sealWithFoto(dir);
+    const dir = scratch('gcw-photo-acked');
+    const { outDir, refSha, deadSha } = await sealWithPhoto(dir);
     const relayDir = join(dir, 'relay');
-    writeRelayIndex(relayDir, { chunks: {}, foto: { [refSha]: `${refSha}.bin`, [deadSha]: `${deadSha}.bin` } });
-    const dead = [`foto/${deadSha}.bin`, `foto/thumb-${deadSha}.jpg`, `foto/thumb-${deadSha}.json`];
+    writeRelayIndex(relayDir, { chunks: {}, photo: { [refSha]: `${refSha}.bin`, [deadSha]: `${deadSha}.bin` } });
+    const dead = [`photo/${deadSha}.bin`, `photo/thumb-${deadSha}.jpg`, `photo/thumb-${deadSha}.json`];
 
-    const dry = sweep(outDir, { dryRun: true, relayDir, deepFoto: true });
-    assert.deepEqual(dry.fotoOrphans, dead, 'dry-run lists the dead sidecar plus thumbs');
-    assert.deepEqual(dry.fotoRemoved, [], 'dry-run deletes nothing');
-    assert.ok(existsSync(join(outDir, 'foto', `${deadSha}.bin`)), 'dry-run keeps bytes');
+    const dry = sweep(outDir, { dryRun: true, relayDir, deepPhoto: true });
+    assert.deepEqual(dry.photoOrphans, dead, 'dry-run lists the dead sidecar plus thumbs');
+    assert.deepEqual(dry.photoRemoved, [], 'dry-run deletes nothing');
+    assert.ok(existsSync(join(outDir, 'photo', `${deadSha}.bin`)), 'dry-run keeps bytes');
 
-    const applied = sweep(outDir, { dryRun: false, relayDir, deepFoto: true });
-    assert.deepEqual(applied.fotoRemoved, dead, 'apply deletes exactly the acked orphans');
+    const applied = sweep(outDir, { dryRun: false, relayDir, deepPhoto: true });
+    assert.deepEqual(applied.photoRemoved, dead, 'apply deletes exactly the acked orphans');
     for (const f of dead) assert.ok(!existsSync(join(outDir, f)), `acked orphan gone: ${f}`);
-    assert.ok(existsSync(join(outDir, 'foto', `${refSha}.bin`)), 'referenced sidecar retained');
-    assert.ok(applied.bytesReclaimed > 0, 'foto bytes accounted');
+    assert.ok(existsSync(join(outDir, 'photo', `${refSha}.bin`)), 'referenced sidecar retained');
+    assert.ok(applied.bytesReclaimed > 0, 'photo bytes accounted');
   });
 
-  it('retains unreferenced foto the relay has not acked', { timeout: 30_000 }, async () => {
-    const dir = scratch('gcw-foto-unacked');
-    const { outDir, refSha, deadSha } = await sealWithFoto(dir);
+  it('retains unreferenced photo the relay has not acked', { timeout: 30_000 }, async () => {
+    const dir = scratch('gcw-photo-unacked');
+    const { outDir, refSha, deadSha } = await sealWithPhoto(dir);
     const relayDir = join(dir, 'relay');
-    writeRelayIndex(relayDir, { chunks: {}, foto: { [refSha]: `${refSha}.bin` } });
-    const r = sweep(outDir, { dryRun: false, relayDir, deepFoto: true });
-    assert.ok(r.fotoOrphans.includes(`foto/${deadSha}.bin`), 'unacked sidecar still listed');
-    assert.deepEqual(r.fotoRemoved, [], 'nothing deleted without ack');
-    assert.ok(existsSync(join(outDir, 'foto', `${deadSha}.bin`)), 'unacked bytes stay on disk');
-    assert.ok(existsSync(join(outDir, 'foto', `thumb-${deadSha}.jpg`)), 'unacked thumb stays');
+    writeRelayIndex(relayDir, { chunks: {}, photo: { [refSha]: `${refSha}.bin` } });
+    const r = sweep(outDir, { dryRun: false, relayDir, deepPhoto: true });
+    assert.ok(r.photoOrphans.includes(`photo/${deadSha}.bin`), 'unacked sidecar still listed');
+    assert.deepEqual(r.photoRemoved, [], 'nothing deleted without ack');
+    assert.ok(existsSync(join(outDir, 'photo', `${deadSha}.bin`)), 'unacked bytes stay on disk');
+    assert.ok(existsSync(join(outDir, 'photo', `thumb-${deadSha}.jpg`)), 'unacked thumb stays');
   });
 
-  it('absent relay foto map retains all (Wave2-tolerant)', { timeout: 30_000 }, async () => {
-    const dir = scratch('gcw-foto-nomap');
-    const { outDir, deadSha } = await sealWithFoto(dir);
+  it('absent relay photo map retains all (Wave2-tolerant)', { timeout: 30_000 }, async () => {
+    const dir = scratch('gcw-photo-nomap');
+    const { outDir, deadSha } = await sealWithPhoto(dir);
     const relayDir = join(dir, 'relay');
-    writeRelayIndex(relayDir, { chunks: {} }); // pre-Wave2 index: no `foto` key
-    const r = sweep(outDir, { dryRun: false, relayDir, deepFoto: true });
-    assert.ok(r.fotoOrphans.includes(`foto/${deadSha}.bin`), 'orphan still listed');
-    assert.deepEqual(r.fotoRemoved, [], 'absent map deletes nothing');
-    assert.ok(existsSync(join(outDir, 'foto', `${deadSha}.bin`)), 'bytes stay on disk');
+    writeRelayIndex(relayDir, { chunks: {} }); // pre-Wave2 index: no `photo` key
+    const r = sweep(outDir, { dryRun: false, relayDir, deepPhoto: true });
+    assert.ok(r.photoOrphans.includes(`photo/${deadSha}.bin`), 'orphan still listed');
+    assert.deepEqual(r.photoRemoved, [], 'absent map deletes nothing');
+    assert.ok(existsSync(join(outDir, 'photo', `${deadSha}.bin`)), 'bytes stay on disk');
     // Relay dir without any index at all: same fail-closed outcome, no throw.
     const bare = join(dir, 'relay-bare');
     mkdirSync(bare, { recursive: true });
-    const r2 = sweep(outDir, { dryRun: false, relayDir: bare, deepFoto: true });
-    assert.deepEqual(r2.fotoRemoved, [], 'missing index deletes nothing');
+    const r2 = sweep(outDir, { dryRun: false, relayDir: bare, deepPhoto: true });
+    assert.deepEqual(r2.photoRemoved, [], 'missing index deletes nothing');
   });
 
-  it('foto sweep is opt-in; torn chunks never fail it; apply without relay throws', { timeout: 30_000 }, async () => {
-    const dir = scratch('gcw-foto-optin');
-    const { outDir, refSha, deadSha } = await sealWithFoto(dir);
+  it('photo sweep is opt-in; torn chunks never fail it; apply without relay throws', { timeout: 30_000 }, async () => {
+    const dir = scratch('gcw-photo-optin');
+    const { outDir, refSha, deadSha } = await sealWithPhoto(dir);
     const relayDir = join(dir, 'relay');
     const off = sweep(outDir, { dryRun: false, relayDir });
-    assert.deepEqual(off.fotoOrphans, [], 'deepFoto defaults off: no foto scan');
-    assert.deepEqual(off.fotoRemoved, [], 'deepFoto defaults off: no foto delete');
-    assert.ok(existsSync(join(outDir, 'foto', `${deadSha}.bin`)), 'sidecar untouched');
-    // Torn .chk garbage decodes to nothing: the foto scan skips it, never throws.
-    writeFileSync(join(outDir, 'warm', 'sales-000999-000999-deadbeef.chk'), Buffer.from('orphan-bytes'));
-    writeRelayIndex(relayDir, { chunks: {}, foto: { [deadSha]: `${deadSha}.bin` } });
-    const dry = sweep(outDir, { dryRun: true, relayDir, deepFoto: true });
-    assert.ok(dry.fotoOrphans.includes(`foto/${deadSha}.bin`), 'scan survives the torn chunk');
+    assert.deepEqual(off.photoOrphans, [], 'deepPhoto defaults off: no photo scan');
+    assert.deepEqual(off.photoRemoved, [], 'deepPhoto defaults off: no photo delete');
+    assert.ok(existsSync(join(outDir, 'photo', `${deadSha}.bin`)), 'sidecar untouched');
+    // Torn .chk garbage decodes to nothing: the photo scan skips it, never throws.
+    writeFileSync(join(outDir, 'warm', 'events-000999-000999-deadbeef.chk'), Buffer.from('orphan-bytes'));
+    writeRelayIndex(relayDir, { chunks: {}, photo: { [deadSha]: `${deadSha}.bin` } });
+    const dry = sweep(outDir, { dryRun: true, relayDir, deepPhoto: true });
+    assert.ok(dry.photoOrphans.includes(`photo/${deadSha}.bin`), 'scan survives the torn chunk');
     // No relayDir: apply throws (ack unknowable) and deletes nothing.
-    assert.throws(() => sweep(outDir, { dryRun: false, deepFoto: true }), /gc --apply requires relayDir/);
-    assert.ok(existsSync(join(outDir, 'foto', `${deadSha}.bin`)), 'dead sidecar retained');
-    assert.ok(existsSync(join(outDir, 'foto', `${refSha}.bin`)), 'referenced sidecar kept');
+    assert.throws(() => sweep(outDir, { dryRun: false, deepPhoto: true }), /gc --apply requires relayDir/);
+    assert.ok(existsSync(join(outDir, 'photo', `${deadSha}.bin`)), 'dead sidecar retained');
+    assert.ok(existsSync(join(outDir, 'photo', `${refSha}.bin`)), 'referenced sidecar kept');
   });
-  it('reports referenced shas with no sidecar file as fotoMissing', { timeout: 30_000 }, async () => {
-    const dir = scratch('gcw-foto-missing');
-    const { outDir, refSha } = await sealWithFoto(dir);
-    unlinkSync(join(outDir, 'foto', `${refSha}.bin`));
-    const r = sweep(outDir, { dryRun: true, deepFoto: true });
-    assert.equal(r.fotoMissing.length, 1);
-    assert.ok(r.fotoMissing[0].ref.includes(refSha));
-    assert.ok(r.fotoMissing[0].chunk.endsWith('.chk'));
+  it('reports referenced shas with no sidecar file as photoMissing', { timeout: 30_000 }, async () => {
+    const dir = scratch('gcw-photo-missing');
+    const { outDir, refSha } = await sealWithPhoto(dir);
+    unlinkSync(join(outDir, 'photo', `${refSha}.bin`));
+    const r = sweep(outDir, { dryRun: true, deepPhoto: true });
+    assert.equal(r.photoMissing.length, 1);
+    assert.ok(r.photoMissing[0].ref.includes(refSha));
+    assert.ok(r.photoMissing[0].chunk.endsWith('.chk'));
   });
 });
 describe('guard atomic tmp', () => {

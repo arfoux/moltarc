@@ -9,11 +9,11 @@ CLI entrypoint is `bin/moltarc.ts`.
 
 | Module | Owns |
 |---|---|
-| `src/seal.ts` | Hot WAL/JSONL/SQLite → warm columnar chunks (delta/RLE/dict + zstd); per-device watermark, `FOTO_INLINE_LIMIT_BYTES`, malformed abort, probe encodes |
+| `src/seal.ts` | Hot WAL/JSONL/SQLite → warm columnar chunks (delta/RLE/dict + zstd); per-device watermark, `PHOTO_INLINE_LIMIT_BYTES`, malformed abort, probe encodes |
 | `src/chunk.ts` | 64 B header (`UMK1`, codec, rows, `crc32c`, `dict_id`), columnar frame (delta seq/ts, dict device, RLE body), `DECOMPRESS_MAX_BYTES` cap |
 | `src/manifest.ts` | Atomic dual-copy manifest + envelope (seq/crc), min/max + bloom entries, monthly shard sidecars + sparse index, rebuild-from-filenames, `appendEntries` fast path |
 | `src/dict.ts` | Per-table 32 KB zstd dicts; trains only on ≥100 bodies with ≥4x sample ratio, never on blob tables |
-| `src/ship.ts` | Delta-by-hash to a relay dir, chunked resume journal, text-first lanes, foto sidecars on `--blobs` |
+| `src/ship.ts` | Delta-by-hash to a relay dir, chunked resume journal, text-first lanes, photo sidecars on `--blobs` |
 | `src/find.ts` | Warm point query: shard/sparse jump → min/max prune → scaled-bloom prune → single-chunk fetch; `findCold` opt-in for cold |
 | `src/verify.ts` | `verifyChunk`/`verifyAll`/`verifyFull` (hash walk + chain), `quarantine`, `repairByHash`/`repairAll` |
 | `src/cold.ts` | `mergeCold` (warm → `cold/*.tar`), `forgetChunks` (acked-only), `sweepCold` (prune/repack), `writeTar`/`readTar` with member caps |
@@ -34,7 +34,7 @@ CLI entrypoint is `bin/moltarc.ts`.
 | Module | Owns |
 |---|---|
 | `src/guard.ts` | `assertSha`, `assertChunkName` (traversal gate), `atomicWrite` (tmp + fsync + rename) |
-| `src/thumb.ts` | Foto previews: 32 px JPEG + hash-link meta beside the full bytes; input/dimension caps |
+| `src/thumb.ts` | Photo previews: 32 px JPEG + hash-link meta beside the full bytes; input/dimension caps |
 | `src/cas.ts` | Content-addressed blob store (`casPut`/`casGet`, owner refcounts, `casGc`) |
 | `src/bundle.ts` | Atomic 1-text + N-refs pack (`packBundle`/`verifyBundle`, hash-linked) |
 | `src/ticket.ts` | Hash-id ticket issuance + redemption (`issueTicket`, double-use guard) |
@@ -52,9 +52,9 @@ CLI entrypoint is `bin/moltarc.ts`.
 | `bench/photo-bench.ts` | 50-real-JPEG bench, rewrites the Photo SLA table |
 | `bench/dict-bench.ts` | Dict off-vs-on bench, rewrites the Dict SLA table |
 | `bench/perf.ts` | Seal/ship/find timings, recorded under `perf` in `bench/measured.json` |
-| `examples/e2e.ts` | Field-log feed: 1200 rows seal → ship → find (`bun run e2e`) |
+| `examples/e2e.ts` | Field feed: 1200 rows seal → ship → find (`bun run e2e`) |
 | `examples/universal-demo.ts` | Generic shop orders, 50 rows, prints shrink ratio (`bun run demo`) |
-| `examples/sales-demo.ts` | Sales receipts, 50 rows (`bun run sales`) |
+| `examples/ledger-demo.ts` | Event ledger, 50 rows (`bun run ledger`) |
 | `examples/dashboard.ts` | Timetravel polling demo: windowed recent-state fold polled N times |
 
 Tests mirror modules one-to-one under `test/` (`seal ↔ seal*.test.ts`,

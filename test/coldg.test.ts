@@ -40,14 +40,14 @@ function writeTwoTableLog(dir: string, rowsPerTable: number): { hotDb: string; i
   const ids: string[] = [];
   const base = 1_700_000_000_000;
   let seq = 0;
-  for (const table of ['sales', 'notes']) {
+  for (const table of ['events', 'notes']) {
     for (let i = 0; i < rowsPerTable; i++) {
       seq++;
       const id = `trx-${String(seq).padStart(8, '0')}`;
       ids.push(id);
       lines.push(JSON.stringify({
         device_id: 'pos-01', seq, ts: base + seq * 1000,
-        id, table, body: `row ${i} of ${table} amount=${15000 + (i % 97)} cashier=agus store=jakarta-selatan`,
+        id, table, body: `row ${i} of ${table} value=${15000 + (i % 97)} cashier=agus store=jakarta-selatan`,
       }));
     }
   }

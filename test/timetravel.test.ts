@@ -11,7 +11,7 @@ import { queryAsOf } from '../src/timetravel.js';
 import { scratch } from './util.js';
 
 function row(id: string, seq: number, ts: number, body: string): HotRow {
-  return { device_id: 'pos-01', seq, ts, id, table: 'sales', body };
+  return { device_id: 'pos-01', seq, ts, id, table: 'events', body };
 }
 
 function fixedArchive(): { outDir: string; names: string[] } {
@@ -25,12 +25,12 @@ function fixedArchive(): { outDir: string; names: string[] } {
     [row('a', 6, 6000, 'a-v2')],
   ];
   // Fixture names carry the real content hash: chunkName over the exact
-  // bytes on disk, so filename-link checks see honest sales-seq-sha8 names.
+  // bytes on disk, so filename-link checks see honest events-seq-sha8 names.
   const names = batches.map((rows) => {
-    const bytes = encodeChunk('sales', rows);
-    return chunkName('sales', rows[0].seq, rows[rows.length - 1].seq, bytes);
+    const bytes = encodeChunk('events', rows);
+    return chunkName('events', rows[0].seq, rows[rows.length - 1].seq, bytes);
   });
-  batches.forEach((rows, i) => writeFileSync(join(warm, names[i]), encodeChunk('sales', rows)));
+  batches.forEach((rows, i) => writeFileSync(join(warm, names[i]), encodeChunk('events', rows)));
   saveManifestAtomic(outDir, buildManifest(outDir));
   return { outDir, names };
 }
@@ -99,8 +99,8 @@ describe('moltarc timetravel O(k) prune + cap', () => {
     for (let i = 0; i < 1001; i++) {
       const seq = i + 1;
       const rows: HotRow[] = [row(`id-${i}`, seq, seq * 1000, `v${seq}`)];
-      const bytes = encodeChunk('sales', rows);
-      const name = chunkName('sales', seq, seq, bytes);
+      const bytes = encodeChunk('events', rows);
+      const name = chunkName('events', seq, seq, bytes);
       names.push(name);
       writeFileSync(join(warm, name), bytes);
     }

@@ -33,7 +33,7 @@ function v05Rows(seqBase: number, count: number): V05Row[] {
     const seq = seqBase + i;
     rows.push({
       device_id: 'pos-01', seq, ts: 1_700_000_000_000 + seq * 1000,
-      id: `trx-${String(seq).padStart(8, '0')}`, table: 'sales', body: `v05 body ${seq}`,
+      id: `trx-${String(seq).padStart(8, '0')}`, table: 'events', body: `v05 body ${seq}`,
     });
   }
   return rows;
@@ -83,15 +83,15 @@ function buildV05Archive(outDir: string): { ids: string[]; sha: Map<string, stri
   const sha = new Map<string, string>();
   const entries: Array<Record<string, unknown>> = [];
   for (const rows of [v05Rows(1, 3), v05Rows(4, 3)]) {
-    const bytes = buildV05Chunk('sales', rows);
+    const bytes = buildV05Chunk('events', rows);
     const digest = sha256hex(bytes);
     const pad = (n: number): string => String(n).padStart(8, '0');
-    const name = `sales-${pad(rows[0].seq)}-${pad(rows[rows.length - 1].seq)}-${digest.slice(0, 8)}.chk`;
+    const name = `events-${pad(rows[0].seq)}-${pad(rows[rows.length - 1].seq)}-${digest.slice(0, 8)}.chk`;
     writeFileSync(join(warm, name), bytes);
     sha.set(name, digest);
     for (const r of rows) ids.push(r.id);
     entries.push({
-      file: name, table: 'sales', seqMin: rows[0].seq, seqMax: rows[rows.length - 1].seq,
+      file: name, table: 'events', seqMin: rows[0].seq, seqMax: rows[rows.length - 1].seq,
       tsMin: rows[0].ts, tsMax: rows[rows.length - 1].ts, rows: rows.length,
       bytes: bytes.length, sha256: digest, crc32c: crc32c(bytes.subarray(64)) >>> 0,
       sealedBy: 'molt-0.5',

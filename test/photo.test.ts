@@ -13,7 +13,7 @@ describe('photo bench', () => {
     assert.equal(corpus.photoIds.length, 12);
     assert.ok(corpus.jpegBytes > 0);
     console.log(`photo-bench: raw=${measure.rawJpegRatio.toFixed(2)}x lines=${measure.photoRatio.toFixed(2)}x text=${measure.textRatio.toFixed(1)}x`);
-    assert.ok(measure.rawJpegRatio >= 1.0 && measure.rawJpegRatio <= 1.2, `foto claim 1.0-1.2x, got ${measure.rawJpegRatio.toFixed(2)}x`);
+    assert.ok(measure.rawJpegRatio >= 1.0 && measure.rawJpegRatio <= 1.2, `photo claim 1.0-1.2x, got ${measure.rawJpegRatio.toFixed(2)}x`);
     assert.ok(measure.photoRatio >= 1.0 && measure.photoRatio <= 1.6, `lines band, got ${measure.photoRatio.toFixed(2)}x`);
     assert.ok(measure.textRatio >= 20, `text beside photos still shrinks, got ${measure.textRatio.toFixed(1)}x`);
 

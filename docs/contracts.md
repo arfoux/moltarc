@@ -8,7 +8,7 @@ the file that enforces it, so you can check rather than trust.
 | Contract | Value | Enforced in |
 |---|---|---|
 | Warm chunk target / floor / ceiling | ~2 MB / 1 MB / 4 MB (`TARGET_BYTES`, `MIN_BYTES`, `MAX_BYTES`) | `src/seal.ts` |
-| Foto gate: base64 body decoding past this seals as sidecar, not inline | 256 KB (`FOTO_INLINE_LIMIT_BYTES`) | `src/seal.ts` |
+| Photo gate: base64 body decoding past this seals as sidecar, not inline | 256 KB (`PHOTO_INLINE_LIMIT_BYTES`) | `src/seal.ts` |
 | Decompressed frame cap (bomb frames fail loud) | 16 MB (`DECOMPRESS_MAX_BYTES`) | `src/chunk.ts` |
 | Tar member / member-count caps | 32 MB / 50 000 (`TAR_MEMBER_MAX_BYTES`, `TAR_MAX_MEMBERS`) | `src/cold.ts` |
 | Bloom bitset probe cap (oversize → fail-open fetch) | 1 MB (`BLOOM_MAX_BYTES`) | `src/find.ts` |
@@ -20,18 +20,18 @@ the file that enforces it, so you can check rather than trust.
 | Malformed-row abort share | 1 % (`MALFORMED_ABORT_PCT`) | `src/seal.ts` |
 | Sequence identity range (8-digit chunk filenames) | 1 … 99 999 999 (`SEQ_MAX`) | `src/seal.ts` |
 
-## Foto gate (rule 4)
+## Photo gate (rule 4)
 
 A base64 body whose decoded bytes exceed 256 KB never seals inline: raw bytes
-go to `foto/<sha256>.bin` with a `foto/thumb-<sha>.jpg` preview plus a
+go to `photo/<sha256>.bin` with a `photo/thumb-<sha>.jpg` preview plus a
 `.json` hash-link, and the chunk keeps only the ref
-`foto:sha256:<64hex>:size=<n>` (`quarantineFotoBody`, `src/seal.ts`; thumb
+`photo:sha256:<64hex>:size=<n>` (`quarantinePhotoBody`, `src/seal.ts`; thumb
 layout `src/thumb.ts`). Strict re-encode check keeps large prose from
-matching. Foto bytes are excluded from the mandatory archive (hash refs
+matching. Photo bytes are excluded from the mandatory archive (hash refs
 only, lazy fetch — raw JPEG compresses ~1.05x, `README.md` Photo SLA).
-`ship` sends sidecars only with `--blobs`; `gc --deep-foto` sweeps
+`ship` sends sidecars only with `--blobs`; `gc --deep-photo` sweeps
 unreferenced sidecars (relay-acked only) and reports referenced shas with no
-`.bin` as `fotoMissing`.
+`.bin` as `photoMissing`.
 
 ## Quarantine (rule 5)
 

@@ -11,8 +11,8 @@ import { mulberry32, recordMeasured } from './mixed-corpus.js';
 
 export const PHOTO_QUALITY = 85;
 export const PHOTO_SIZE = 128;
-// Gate-sized variant: decoded bytes clear the 256KB foto gate
-// (FOTO_INLINE_LIMIT_BYTES), so it seals via the quarantine path.
+// Gate-sized variant: decoded bytes clear the 256KB photo gate
+// (PHOTO_INLINE_LIMIT_BYTES), so it seals via the quarantine path.
 export const PHOTO_GATE_SIZE = 640;
 
 export interface PhotoCorpus {
@@ -146,8 +146,8 @@ export interface PhotoGateMeasure {
   warmBytes: number;
 }
 
-// Gate path: one jpeg whose decoded bytes clear FOTO_INLINE_LIMIT_BYTES
-// (256KB), sealed alone. Proves oversize base64 quarantines to foto/*.bin
+// Gate path: one jpeg whose decoded bytes clear PHOTO_INLINE_LIMIT_BYTES
+// (256KB), sealed alone. Proves oversize base64 quarantines to photo/*.bin
 // instead of sealing inline like the small variants below.
 export async function measureGateJpeg(dir: string, seed: number): Promise<PhotoGateMeasure> {
   const jpeg = makeJpegSized(seed, PHOTO_GATE_SIZE);
@@ -160,8 +160,8 @@ export async function measureGateJpeg(dir: string, seed: number): Promise<PhotoG
   await seal({ hotDb: hotPath, outDir });
   let quarantined = false;
   try {
-    quarantined = readdirSync(join(outDir, 'foto')).length > 0;
-  } catch { /* no foto dir: the jpeg sealed inline */ }
+    quarantined = readdirSync(join(outDir, 'photo')).length > 0;
+  } catch { /* no photo dir: the jpeg sealed inline */ }
   const warm = join(outDir, 'warm');
   const warmBytes = readdirSync(warm).filter((f: string) => f.endsWith('.chk')).reduce((n: number, f: string) => n + statSync(join(warm, f)).size, 0);
   return { jpegBytes: jpeg.length, quarantined, warmBytes };
@@ -172,19 +172,19 @@ const PHOTO_END = '<!-- PHOTO-MEASURED-END -->';
 
 export function photoTable(m: PhotoMeasure, jpegBytes: number, gate?: PhotoGateMeasure): string {
   const gateRow = gate
-    ? `| 1 gate-sized jpeg (${PHOTO_GATE_SIZE}x${PHOTO_GATE_SIZE} blurred noise, q85, ${Math.round(gate.jpegBytes / 1024)}KB raw, over the 256KB foto gate) | base64 line | foto/*.bin sidecar + hash ref | ${gate.quarantined ? 'quarantined (bytes excluded)' : '**NOT quarantined — sealed inline**'} |`
-    : '| 1 gate-sized jpeg (>=256KB, over the 256KB foto gate) | base64 line | foto/*.bin sidecar + hash ref | not measured — re-run bench |';
+    ? `| 1 gate-sized jpeg (${PHOTO_GATE_SIZE}x${PHOTO_GATE_SIZE} blurred noise, q85, ${Math.round(gate.jpegBytes / 1024)}KB raw, over the 256KB photo gate) | base64 line | photo/*.bin sidecar + hash ref | ${gate.quarantined ? 'quarantined (bytes excluded)' : '**NOT quarantined — sealed inline**'} |`
+    : '| 1 gate-sized jpeg (>=256KB, over the 256KB photo gate) | base64 line | photo/*.bin sidecar + hash ref | not measured — re-run bench |';
   return [
     `${PHOTO_START}`,
     '| bytes | input | warm archive | ratio |',
     '|---|---|---|---|',
     `| 50 real jpeg (128x128 blurred noise, q85, ${Math.round(jpegBytes / 1024)}KB raw) sealed as base64 lines | base64 in jsonl | per-table chunks | **${m.photoRatio.toFixed(2)}x** |`,
-    `| same jpeg bytes, raw zstd (the foto claim) | ${Math.round(jpegBytes / 1024)}KB raw | zstd | **${m.rawJpegRatio.toFixed(2)}x, inside 1.0-1.2x** |`,
+    `| same jpeg bytes, raw zstd (the photo claim) | ${Math.round(jpegBytes / 1024)}KB raw | zstd | **${m.rawJpegRatio.toFixed(2)}x, inside 1.0-1.2x** |`,
     `| tx text beside the photos | text jsonl | text chunks + dict | **${m.textRatio.toFixed(1)}x** |`,
     gateRow,
     '',
     '_Measured by `bun bench/photo-bench.ts --write-readme`; deterministic (seeded). ' +
-    'The 128x128 variants (~12KB each) sit below the 256KB foto gate and seal inline — ' +
+    'The 128x128 variants (~12KB each) sit below the 256KB photo gate and seal inline — ' +
     'only the gate-sized row exercises the quarantine path. ' +
     'The base64 line ratio rides above raw because of the text envelope — raw jpeg bytes sit ' +
     'at ~1.05x, which is why photo bytes never enter the mandatory archive (hash refs only, lazy fetch)._',

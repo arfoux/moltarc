@@ -94,7 +94,7 @@ async function runSoak(seed: number, ops: number): Promise<{ ops: number; seals:
       const body = `soak seq=${seq} r=${pick(1 << 30).toString(16)} pad=${'x'.repeat(pick(48))}`;
       idOfSeq.set(seq, id);
       bodyOf.set(id, body);
-      lines.push(JSON.stringify({ device_id: 'soak-01', seq, ts: 1_700_000_000_000 + seq * 1000, id, table: 'sales', body }));
+      lines.push(JSON.stringify({ device_id: 'soak-01', seq, ts: 1_700_000_000_000 + seq * 1000, id, table: 'events', body }));
     }
     appendFileSync(hotDb, `${lines.join('\n')}\n`);
   };

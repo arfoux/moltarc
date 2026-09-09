@@ -10,13 +10,13 @@ import {
 import type { HotRow } from '../src/chunk.js';
 import { trainTableDict } from '../src/dict.js';
 
-function rows(n: number, table = 'sales'): HotRow[] {
+function rows(n: number, table = 'events'): HotRow[] {
   const out: HotRow[] = [];
   for (let i = 0; i < n; i++) {
     out.push({
       device_id: 'pos-01', seq: i + 1, ts: 1700000000000 + i * 1000,
       id: `trx-${String(i + 1).padStart(8, '0')}`, table,
-      body: `TRANSACTION OK amount=15000 cashier=agus store=jakarta-selatan line=${i % 5}`,
+      body: `TRANSACTION OK value=15000 cashier=agus store=jakarta-selatan line=${i % 5}`,
     });
   }
   return out;
@@ -24,7 +24,7 @@ function rows(n: number, table = 'sales'): HotRow[] {
 
 describe('waste-fix codec+dict', () => {
   it('rejects header seq range tamper with valid body crc', { timeout: 30_000 }, () => {
-    const buf = Buffer.from(encodeChunk('sales', rows(50)));
+    const buf = Buffer.from(encodeChunk('events', rows(50)));
     const h = decodeHeader(buf);
     const bad = Buffer.concat([
       encodeHeader({ ...h, seqMax: h.seqMax + 100n }),
@@ -34,7 +34,7 @@ describe('waste-fix codec+dict', () => {
   });
 
   it('rejects header row count tamper with valid body crc', { timeout: 30_000 }, () => {
-    const buf = Buffer.from(encodeChunk('sales', rows(50)));
+    const buf = Buffer.from(encodeChunk('events', rows(50)));
     const h = decodeHeader(buf);
     const bad = Buffer.concat([
       encodeHeader({ ...h, rows: h.rows + 1 }),
@@ -57,7 +57,7 @@ describe('waste-fix codec+dict', () => {
   });
 
   it('ignores supplied dict when dict_flag off', { timeout: 30_000 }, () => {
-    const buf = Buffer.from(encodeChunk('sales', rows(20)));
+    const buf = Buffer.from(encodeChunk('events', rows(20)));
     const h = decodeHeader(buf);
     assert.equal(h.flags & DICT_FLAG, 0);
     const plain = decodeChunk(buf).rows;
@@ -67,7 +67,7 @@ describe('waste-fix codec+dict', () => {
   });
 
   it('flagless chunk with scribbled dict_id still decodes (non-authoritative)', { timeout: 30_000 }, () => {
-    const buf = Buffer.from(encodeChunk('sales', rows(20)));
+    const buf = Buffer.from(encodeChunk('events', rows(20)));
     const h = decodeHeader(buf);
     assert.equal(h.flags & DICT_FLAG, 0);
     const scribbled = Buffer.concat([
@@ -82,14 +82,14 @@ describe('waste-fix codec+dict', () => {
 
   it('skips trainDict for blob tables explicitly', { timeout: 30_000 }, () => {
     const bodies = rows(500).map((r) => r.body);
-    const text = trainTableDict(bodies, 'sales');
+    const text = trainTableDict(bodies, 'events');
     assert.ok(text, 'repetitive text table trains');
     for (const t of ['photo', 'blob', 'image', 'thumb', 'PHOTO']) {
       assert.equal(trainTableDict(bodies, t), null, `blob table ${t} skips`);
     }
   });
   it('rejects unknown header ver 99', { timeout: 30_000 }, () => {
-    const buf = Buffer.from(encodeChunk('sales', rows(5)));
+    const buf = Buffer.from(encodeChunk('events', rows(5)));
     const h = decodeHeader(buf);
     const bad = Buffer.concat([
       encodeHeader({ ...h, ver: 99 }),
@@ -99,7 +99,7 @@ describe('waste-fix codec+dict', () => {
     assert.throws(() => decodeChunk(bad), /99/);
   });
   it('rejects header tableId scribble with valid body crc', { timeout: 30_000 }, () => {
-    const buf = Buffer.from(encodeChunk('sales', rows(20)));
+    const buf = Buffer.from(encodeChunk('events', rows(20)));
     const h = decodeHeader(buf);
     const bad = Buffer.concat([
       encodeHeader({ ...h, tableId: (h.tableId ^ 0xffffffff) >>> 0 }),

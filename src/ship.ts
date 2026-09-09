@@ -30,11 +30,11 @@ export interface ShipResult {
 
 export interface RelayIndex {
   chunks: Record<string, string>;
-  foto?: Record<string, string>;
+  photo?: Record<string, string>;
 }
 
 function isBlobTable(table: string): boolean {
-  return /blob|photo|foto|image|thumb/i.test(table);
+  return /blob|photo|image|thumb/i.test(table);
 }
 
 // Text-first lanes: small text tables before blob tables; blobs deferred unless asked.
@@ -215,46 +215,46 @@ export async function ship(opts: ShipOpts): Promise<ShipResult> {
   const sent: string[] = [];
   const absent: string[] = [];
   let bytes = 0;
-  // Foto sidecars: opt-in via includeBlobs, lane last (after text), but within the
-  // same ship call foto goes first: a ticket must never precede its painting.
-  // Small foto (<1MB) copy-if-missing; large foto via resumable sendChunked.
+  // Photo sidecars: opt-in via includeBlobs, lane last (after text), but within the
+  // same ship call photo goes first: a ticket must never precede its painting.
+  // Small photo (<1MB) copy-if-missing; large photo via resumable sendChunked.
   if (opts.includeBlobs ?? false) {
-    const fotoSrcDir = join(opts.outDir, 'foto');
-    let fotoNames: string[] = [];
-    try { fotoNames = readdirSync(fotoSrcDir).filter((f: string) => /^[0-9a-f]{64}\.bin$/.test(f)).sort(); } catch { fotoNames = []; }
-    const fotoMissing: string[] = [];
-    remote.foto ??= {};
-    for (const f of fotoNames) {
+    const photoSrcDir = join(opts.outDir, 'photo');
+    let photoNames: string[] = [];
+    try { photoNames = readdirSync(photoSrcDir).filter((f: string) => /^[0-9a-f]{64}\.bin$/.test(f)).sort(); } catch { photoNames = []; }
+    const photoMissing: string[] = [];
+    remote.photo ??= {};
+    for (const f of photoNames) {
       const sha = f.slice(0, 64);
-      if (remote.foto[sha]) continue;
-      fotoMissing.push(f);
+      if (remote.photo[sha]) continue;
+      photoMissing.push(f);
     }
-    if (fotoMissing.length > 0) {
-      checkReserve(opts.outDir, undefined, 'ship foto');
-      const fotoDstDir = join(opts.relayDir, 'foto');
-      mkdirSync(fotoDstDir, { recursive: true });
-      for (const f of fotoMissing) {
+    if (photoMissing.length > 0) {
+      checkReserve(opts.outDir, undefined, 'ship photo');
+      const photoDstDir = join(opts.relayDir, 'photo');
+      mkdirSync(photoDstDir, { recursive: true });
+      for (const f of photoMissing) {
         const sha = f.slice(0, 64);
-        const src = join(fotoSrcDir, f);
-        const dst = join(fotoDstDir, f);
+        const src = join(photoSrcDir, f);
+        const dst = join(photoDstDir, f);
         try {
           const sz = statSync(src).size;
           if (sz < 1 << 20) {
             if (!existsSync(dst)) copyFileSync(src, dst);
           } else {
-            const state = join(opts.relayDir, `.ship-state-foto-${sha.slice(0, 12)}.json`);
-            const r = await sendChunked(src, dst, state, { blockBytes, maxRetries: opts.maxRetries ?? 5, baseDelayMs: opts.baseDelayMs ?? 200, failAtBytes: opts.failAtBytes, sleep, chunkFile: `foto/${f}` });
+            const state = join(opts.relayDir, `.ship-state-photo-${sha.slice(0, 12)}.json`);
+            const r = await sendChunked(src, dst, state, { blockBytes, maxRetries: opts.maxRetries ?? 5, baseDelayMs: opts.baseDelayMs ?? 200, failAtBytes: opts.failAtBytes, sleep, chunkFile: `photo/${f}` });
             bytes += r.bytes;
           }
           for (const thumb of [`thumb-${sha}.jpg`, `thumb-${sha}.json`] as const) {
-            const s = join(fotoSrcDir, thumb);
-            const d = join(fotoDstDir, thumb);
+            const s = join(photoSrcDir, thumb);
+            const d = join(photoDstDir, thumb);
             if (existsSync(s) && !existsSync(d)) copyFileSync(s, d);
           }
           if (statSync(src).size < 1 << 20) bytes += statSync(src).size;
-          remote.foto[sha] = `foto/${f}`;
-          sent.push(`foto/${f}`);
-        } catch { skipped.push(`foto/${f}`); absent.push(`foto/${f}`); }
+          remote.photo[sha] = `photo/${f}`;
+          sent.push(`photo/${f}`);
+        } catch { skipped.push(`photo/${f}`); absent.push(`photo/${f}`); }
       }
     }
   }

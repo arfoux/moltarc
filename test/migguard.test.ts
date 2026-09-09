@@ -62,14 +62,14 @@ function buildV0Archive(outDir: string): { files: string[] } {
   const entries: Array<Record<string, unknown>> = [];
   const files: string[] = [];
   for (const seqBase of [1, 4]) {
-    const { bytes } = v05ChunkBytes('sales', seqBase, 3);
+    const { bytes } = v05ChunkBytes('events', seqBase, 3);
     const digest = sha256hex(bytes);
     const pad = (n: number): string => String(n).padStart(8, '0');
-    const name = `sales-${pad(seqBase)}-${pad(seqBase + 2)}-${digest.slice(0, 8)}.chk`;
+    const name = `events-${pad(seqBase)}-${pad(seqBase + 2)}-${digest.slice(0, 8)}.chk`;
     writeFileSync(join(warm, name), bytes);
     files.push(name);
     entries.push({
-      file: name, table: 'sales', seqMin: seqBase, seqMax: seqBase + 2,
+      file: name, table: 'events', seqMin: seqBase, seqMax: seqBase + 2,
       tsMin: 1_700_000_000_000 + seqBase * 1000, tsMax: 1_700_000_000_000 + (seqBase + 2) * 1000,
       rows: 3, bytes: bytes.length, sha256: digest, crc32c: crc32c(bytes.subarray(64)) >>> 0,
       sealedBy: 'molt-0.5',

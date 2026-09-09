@@ -1,6 +1,6 @@
 // moltarc thumb — pure-js downscale previews (jpeg-js, no native build deps).
-// A thumb is keyed by the full blob sha: foto/thumb-<fullSha>.jpg plus a
-// foto/thumb-<fullSha>.json link {fullSha, thumbSha, width, height}, so a
+// A thumb is keyed by the full blob sha: photo/thumb-<fullSha>.jpg plus a
+// photo/thumb-<fullSha>.json link {fullSha, thumbSha, width, height}, so a
 // preview always resolves back to the exact full bytes it was made from.
 import { createHash } from 'crypto';
 import { existsSync, mkdirSync, readFileSync } from 'fs';
@@ -11,7 +11,7 @@ import { atomicWrite } from './guard.js';
 export const THUMB_MAX_SIDE = 32;
 export const THUMB_QUALITY = 70;
 // Input cap: jpeg-js decode allocates w*h*4 up front, so an unbounded input
-// is a memory bomb. 32MB still covers every real foto sidecar by ~60x.
+// is a memory bomb. 32MB still covers every real photo sidecar by ~60x.
 export const THUMB_INPUT_MAX_BYTES = 32 * 1024 * 1024;
 // Dimension cap enforced BEFORE decode by parsing the SOF header below.
 // 8192px covers 48MP photos; anything larger throws instead of decoding.
@@ -37,11 +37,11 @@ export function fullShaOf(data: Uint8Array): string {
 }
 
 export function thumbFile(outDir: string, fullSha: string): string {
-  return join(outDir, 'foto', `thumb-${fullSha}.jpg`);
+  return join(outDir, 'photo', `thumb-${fullSha}.jpg`);
 }
 
 export function thumbMetaFile(outDir: string, fullSha: string): string {
-  return join(outDir, 'foto', `thumb-${fullSha}.json`);
+  return join(outDir, 'photo', `thumb-${fullSha}.json`);
 }
 
 // Box-average downscale of RGBA pixels to fit inside maxSide (keeps aspect).
@@ -144,12 +144,12 @@ export function makeThumb(full: Uint8Array, maxSide = THUMB_MAX_SIDE): Thumb {
   return { data, width: px.width, height: px.height, fullSha, thumbSha: fullShaOf(data) };
 }
 
-// Write thumb jpg + hash-link meta under <outDir>/foto (idempotent per fullSha).
+// Write thumb jpg + hash-link meta under <outDir>/photo (idempotent per fullSha).
 // Both writes are atomic (tmp + fsync + rename + dir fsync via the shared
 // guard): a crash keeps the old preview or nothing, never a torn jpg/meta.
 export function saveThumb(outDir: string, full: Uint8Array): { path: string; metaPath: string; thumb: Thumb } {
   const thumb = makeThumb(full);
-  mkdirSync(join(outDir, 'foto'), { recursive: true });
+  mkdirSync(join(outDir, 'photo'), { recursive: true });
   const path = thumbFile(outDir, thumb.fullSha);
   const metaPath = thumbMetaFile(outDir, thumb.fullSha);
   if (!existsSync(path)) atomicWrite(path, thumb.data);

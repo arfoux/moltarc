@@ -32,7 +32,7 @@ describe('gc relay gate (rule 7)', () => {
     const { hotDb } = writeHotLog(dir, { rows: 200 });
     const outDir = join(dir, 'archive');
     await seal({ hotDb, outDir });
-    const orphan = plantOrphan(outDir, 'sales-000777-000777-feedface.chk');
+    const orphan = plantOrphan(outDir, 'events-000777-000777-feedface.chk');
     assert.throws(
       () => sweep(outDir, { dryRun: false }),
       /gc only deletes relay-acked chunks \(rule 7\)/,
@@ -47,7 +47,7 @@ describe('gc relay gate (rule 7)', () => {
     const { hotDb } = writeHotLog(dir, { rows: 200 });
     const outDir = join(dir, 'archive');
     await seal({ hotDb, outDir });
-    const orphan = plantOrphan(outDir, 'sales-000778-000778-feedface.chk');
+    const orphan = plantOrphan(outDir, 'events-000778-000778-feedface.chk');
     const r = sweep(outDir);
     assert.equal(r.dryRun, true);
     assert.ok(r.orphans.includes(orphan), 'orphan still listed');
@@ -70,7 +70,7 @@ describe('gc relay gate (rule 7)', () => {
     const victim = manifest.chunks[0].file;
     const survivor = manifest.chunks[1].file;
     forgetChunks(outDir, [victim], relayDir);
-    const garbage = plantOrphan(outDir, 'sales-000888-000888-cafebabe.chk');
+    const garbage = plantOrphan(outDir, 'events-000888-000888-cafebabe.chk');
     const r = sweep(outDir, { dryRun: false, relayDir });
     assert.deepEqual(r.removed, [victim], 'acked orphan collected');
     assert.ok(!existsSync(join(outDir, 'warm', victim)), 'orphan removed');
@@ -84,7 +84,7 @@ describe('gc relay gate (rule 7)', () => {
     const { hotDb } = writeHotLog(dir, { rows: 200 });
     const outDir = join(dir, 'archive');
     await seal({ hotDb, outDir });
-    const orphan = plantOrphan(outDir, 'sales-000779-000779-feedface.chk');
+    const orphan = plantOrphan(outDir, 'events-000779-000779-feedface.chk');
     let text = '';
     try {
       run('gc', outDir, '--apply');

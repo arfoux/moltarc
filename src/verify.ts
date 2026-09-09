@@ -245,19 +245,19 @@ function checkOne(outDir: string, entry: ChunkEntry): FullVerifyItem {
   if (Number(seqMin) !== entry.seqMin || Number(seqMax) !== entry.seqMax || sha8 !== entry.sha256.slice(0, 8)) {
     return { file: entry.file, status: 'CORRUPT', reason: 'filename link mismatch' };
   }
-  // Foto blobs: warm bodies carry foto:sha256:<sha>:size=<n> hash refs whose
-  // bytes live beside the archive in foto/<sha>.bin. A missing or mismatched
+  // Photo blobs: warm bodies carry photo:sha256:<sha>:size=<n> hash refs whose
+  // bytes live beside the archive in photo/<sha>.bin. A missing or mismatched
   // sidecar fails the walk on the owning chunk. Undecodable chunks (e.g. a
   // missing trained dict) keep their prior verdict: no refs can be proven,
   // so nothing is claimed.
-  const fotoBad = checkFoto(outDir, buf, header);
-  if (fotoBad) return { file: entry.file, status: 'CORRUPT', reason: fotoBad };
+  const photoBad = checkPhoto(outDir, buf, header);
+  if (photoBad) return { file: entry.file, status: 'CORRUPT', reason: photoBad };
   return { file: entry.file, status: 'OK' };
 }
 
-const FOTO_REF_RE = /^foto:sha256:([0-9a-f]{64}):size=(\d+)$/;
+const PHOTO_REF_RE = /^photo:sha256:([0-9a-f]{64}):size=(\d+)$/;
 
-function checkFoto(outDir: string, buf: Buffer, header: ChunkHeader): string | null {
+function checkPhoto(outDir: string, buf: Buffer, header: ChunkHeader): string | null {
   let rows;
   try {
     const dict = (header.flags & DICT_FLAG) !== 0
@@ -268,17 +268,17 @@ function checkFoto(outDir: string, buf: Buffer, header: ChunkHeader): string | n
     return null;
   }
   for (const r of rows) {
-    const m = FOTO_REF_RE.exec(r.body);
+    const m = PHOTO_REF_RE.exec(r.body);
     if (!m) continue;
     const [, sha, size] = m;
     let data: Buffer;
     try {
-      data = readFileSync(join(outDir, 'foto', `${sha}.bin`));
+      data = readFileSync(join(outDir, 'photo', `${sha}.bin`));
     } catch {
-      return `foto sidecar missing for sha ${sha}`;
+      return `photo sidecar missing for sha ${sha}`;
     }
-    if (data.length !== Number(size)) return `foto sidecar size differs for sha ${sha}`;
-    if (sha256hex(data) !== sha) return `foto sidecar hash differs for sha ${sha}`;
+    if (data.length !== Number(size)) return `photo sidecar size differs for sha ${sha}`;
+    if (sha256hex(data) !== sha) return `photo sidecar hash differs for sha ${sha}`;
   }
   return null;
 }

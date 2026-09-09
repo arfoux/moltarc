@@ -35,9 +35,9 @@ moltarc ship <outDir> <relayDir> [--blobs]
 ```
 
 Sends only chunks whose sha256 the relay index lacks, resumable per chunk
-(offset journal), text lane first. Blob-family tables
-(`*blob* | *photo* | *foto* | *image* | *thumb*`) ship last and are skipped
-unless `--blobs`; with `--blobs`, `foto/*.bin` sidecars go too (small ones
+Blob-family tables
+(`*blob* | *photo* | *image* | *thumb*`) ship last and are skipped
+unless `--blobs`; with `--blobs`, `photo/*.bin` sidecars go too (small ones
 copied if missing, large ones resumable). `--blobs` is the only accepted
 flag. Prints `shipped N chunk(s), skipped M, BB`.
 
@@ -158,16 +158,16 @@ per chunk plus the reminder: bytes stay on disk until `gc --apply` and
 ### `gc` — orphan sweep, dry-run by default
 
 ```
-moltarc gc <outDir> [relayDir] [--apply] [--deep-foto]
+moltarc gc <outDir> [relayDir] [--apply] [--deep-photo]
 ```
 
 Orphan = `warm/*.chk` with refcount 0 in the manifest. Default is dry-run
 (lists, deletes nothing). `--apply` deletes, and **requires** `relayDir`:
 only relay-acked orphans are removed (rule 7); without a relay dir every
-orphan is retained fail-closed. `--deep-foto` additionally scans warm bodies
-for `foto:sha256:…` refs, reports sidecars no chunk references as
-`foto-orphan` (deleted on apply iff the relay acks the sha) and referenced
-shas with no sidecar as `fotoMissing`. Tmp/state litter (`*.tmp.*`,
+orphan is retained fail-closed. `--deep-photo` additionally scans warm bodies
+for `photo:sha256:…` refs, reports sidecars no chunk references as
+`photo-orphan` (deleted on apply iff the relay acks the sha) and referenced
+shas with no sidecar as `photoMissing`. Tmp/state litter (`*.tmp.*`,
 `.p2p-state-*`) is reported on dry-run and collected on apply.
 
 ### `coldg` — cold prune + repack, dry-run by default
@@ -180,8 +180,8 @@ Prunes dead members from `cold/*.tar` (repack without them, manifest
 rewrite, dual-copy atomic) and reports reclaimable bytes. Dry-run by
 default; `--apply` performs the sweep after the 50 MB reserve check. Corrupt
 segments are listed as `corrupt … (left on disk, needs repair)` and never
-auto-deleted. `foto/` sidecars are census-counted here, never deleted
-(`gc --deep-foto` owns foto deletes).
+auto-deleted. `photo/` sidecars are census-counted here, never deleted
+(`gc --deep-photo` owns photo deletes).
 
 ### `restore-from-cold` — cold segments → warm
 
