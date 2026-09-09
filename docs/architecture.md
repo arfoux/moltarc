@@ -1,9 +1,8 @@
 # moltarc architecture
 
-Extraction of the hot-warm-cold pipeline as documented in `README.md` and
-`docs/decisions.md`. No new claims: every paragraph cites its source as
-`file:line`. `src/` paths below are repeated from those sources, not
-re-audited here.
+Hot-warm-cold pipeline plus the sync/history/upgrade paths around it. Every
+paragraph cites its source as `file` (+ line where stable). `src/` behavior
+below is re-audited for this page; rationale lives in `docs/decisions.md`.
 
 ## Pipeline
 
@@ -11,132 +10,166 @@ re-audited here.
 [hot.db r/w SQLite] --seal--> [warm/*.zst 1-4MB immutable] --merge--> [cold/*.tar.zst] + manifest.json
 ```
 
-(`README.md:9`). CLI over archive dirs: `seal | ship | find | status | gc | merge |
-forget | coldg` (`README.md:58`, `bin/moltarc.ts:35-48`).
+CLI over archive dirs — 15 subcommands, full reference in `docs/cli.md`,
+shape in `bin/moltarc.ts:35-53`.
 
 ## Hot: boring SQLite or JSONL WAL
 
 - Hot input auto-detects: `hot.db` SQLite (magic `SQLite format 3`, tables
-  `tx`/`log` with `device_id,seq,ts,id,table,body` via `bun:sqlite`) or JSONL WAL
-  export, one object per line (`README.md:34-35`).
+  `tx`/`log` with `device_id,seq,ts,id,table,body` via `bun:sqlite`) or JSONL
+  WAL export, one object per line (`src/seal.ts:95-124`).
 - Per-device `sealed_upto_seq` watermark (`device_id -> max seq`) plus
-  `device_id:seq` dedupe make re-seal idempotent (`README.md:36`).
-- Rule: hot stays SQLite boring, no custom header (`README.md:42`).
-- Rule: never delete unsealed/unacked data; `forget`/`gc` only drop relay-acked
-  chunks (`README.md:48`, `docs/decisions.md:64`).
+  keep-last dedupe on (table, device, seq) make re-seal idempotent; a second
+  concurrent seal fails loud on `seal.lock` (`src/seal.ts:1-3`, CLI
+  `docs/cli.md` seal).
+- Rule: hot stays SQLite boring, no custom header.
+- Rule: never delete unsealed/unacked data; `forget`/`gc` only drop
+  relay-acked chunks (`src/cold.ts:307-324`, `src/gc.ts:83-86`).
 
 ## Warm: sealed columnar chunks
 
-- Seal packs per-table batches to `TARGET_BYTES` 2MB; flush gates on target,
-  hard tail rule at `MAX_BYTES` 4MB, `MIN_BYTES` 1MB floor
-  (`docs/decisions.md:8`; packing loop `src/seal.ts:285-336`).
+- Seal packs per-table batches to `TARGET_BYTES` 2 MB; floor `MIN_BYTES`
+  1 MB, ceiling `MAX_BYTES` 4 MB (`src/seal.ts:17-19`).
 - Chunks are content-addressed and immutable once flushed; seal never deletes
   input, ship never deletes source, CAS puts never rewrite identical bytes
-  (`docs/decisions.md:64`).
-- Warm chunk header is 64B: `magic UMK1 | ver | codec | table | seq_min/max |
-  ts_min/max | rows | crc32c | dict_id` (`README.md:42`).
-- Codec: zstd (Node 22 built-in) with deflate fallback; `codec` byte keeps chunks
-  self-describing, dict inline in the frame
-  (`README.md:32-33`; `src/chunk.ts:118-129` decode `src/chunk.ts:145-151`,
-  `docs/decisions.md:15`).
-- zstd-only, no LZ4: one codec keeps `decodeHeader` + `DECOMPRESS_MAX_BYTES` cap
-  a single audit surface; measured 34.5x repetitive text / 10.2x mixed come from
-  zstd alone (`docs/decisions.md:15-16`).
-- Per-table 32KB zstd dicts, trained only when the sample compresses 4x+
-  (`README.md:57`); gate is `bodies >= 100`, `sampleRatio >= 4`, non-blob table,
-  dict capped at `DICT_MAX_BYTES` 32KB from first 10k rows
-  (`docs/decisions.md:22`).
-- Measured warm sizes: repetitive tx text 1.64MB -> 48.6KB (**34.5x**), mixed
-  text 2.40MB -> 241.0KB (**10.2x**), photo sidecar excluded as incompressible
-  (`README.md:75-81`); dict saves ~1.8% on repetitive text at 16KB chunks and
-  ~0% at 2MB production chunks (`README.md:100-104`).
-- Components: `src/seal.ts` hot WAL -> warm columnar chunks (delta/RLE/dict +
-  zstd) (`README.md:52`); `src/dict.ts` per-table dicts (`README.md:57`).
+  (`docs/decisions.md`, `src/cas.ts:34-46`).
+- Warm chunk header is 64 B: `magic UMK1 | ver | codec | table | seq_min/max
+  | ts_min/max | rows | crc32c | dict_id` (`src/chunk.ts:72-116`).
+- Codec: writers emit zstd only; readers decode `NONE`/`ZSTD`/`DEFLATE` and
+  hard-error on unknown ids — the N-2 window pinned in `docs/compat.md`.
+- Per-table 32 KB dicts train only on ≥100 bodies with ≥4x sample ratio and
+  never on blob tables (`src/dict.ts:44-47`, `DICT_MAX_BYTES` 32 KB).
+- Measured warm sizes: repetitive tx text 1.64 MB → 48.6 KB (**34.5x**),
+  mixed text 2.40 MB → 241.0 KB (**10.2x**) (`README.md` Measured SLA);
+  dict saves ~1.8 % at 16 KB chunks, ~0 % at 2 MB production chunks
+  (`README.md` Dict SLA).
+- Foto gate: base64 bodies decoding past 256 KB (`FOTO_INLINE_LIMIT_BYTES`,
+  `src/seal.ts:20-22`) land in `foto/<sha>.bin` + thumb companions while the
+  chunk keeps a `foto:sha256:…` hash ref (`src/seal.ts:176-213`,
+  `src/thumb.ts:147-159`). Full contract in `docs/contracts.md`.
 
 ## Manifest: dual-copy index
 
 - `saveManifestAtomic` writes identical payload to `manifest.json` +
-  `manifest.bak.json` via tmp+fsync+rename, then best-effort sidecars; load picks
-  best crc-valid seq, primary breaks ties
-  (`docs/decisions.md:57`; `src/manifest.ts:450-467` save,
-  `src/manifest.ts:469-493` load).
-- Sparse/shard sidecars carry the same seq and fall back to root on skew
-  (`docs/decisions.md:57`; `src/find.ts:250-262`, `src/manifest.ts:285-295`).
-- Each entry carries min/max range + bloom: legacy entries use `BLOOM_BITS =
-  2048`, 3 hashes; newer chunks scale to >= rows x 10 bits; reader mods by actual
-  stored length
-  (`docs/decisions.md:29`; `src/manifest.ts:8`, `src/manifest.ts:81-99`,
-  `src/find.ts:155-161`, `src/find.ts:169-173`).
-- Kill mid-batch loses only the unflushed tail: watermark advances per flushed
-  chunk and each save bumps the envelope seq
-  (`docs/decisions.md:58`; `src/seal.ts:1-3`).
-- Rule: manifest atomic (tmp + fsync + rename), dual copy + rebuild from
-  deterministic filenames (`README.md:43`).
-- Component: `src/manifest.ts` atomic manifest, min/max + bloom, rebuild scan
-  (`README.md:53`).
+  `manifest.bak.json` via tmp + fsync + rename with a seq+crc envelope; load
+  picks the best crc-valid copy, primary breaking ties (`src/manifest.ts`,
+  `manifestCrc`, `stripBom`).
+- Sparse/shard sidecars (`sparse.json`, `manifest-YYYY-MM.json`, ≤2048 B
+  pointer budget) carry the same seq and fall back to root on skew
+  (`src/manifest.ts:211-295`, `src/find.ts:245-295`).
+- Each entry carries min/max range + bloom: legacy `BLOOM_BITS = 2048`
+  (3 hashes), newer chunks scale to ≥ rows × 10 bits; oversize (>1 MB),
+  short, or corrupt bitsets fail open to fetch (`src/manifest.ts:8`,
+  `src/find.ts:157-195`).
+- Kill mid-batch loses only the unflushed tail: watermark advances per
+  flushed chunk and each save bumps the envelope seq (`src/seal.ts:1-3`).
+- Seal scans only new chunks and merges via `appendEntries` when a manifest
+  copy exists; full rebuild stays for first seal (`src/manifest.ts`,
+  `src/seal.ts`).
 
 ## Ship: delta by hash, text-first lanes
 
-- `laneOf` maps blob/photo/image/thumb tables to lane 1, everything else lane 0;
-  `planShipment` skips lane 1 unless `includeBlobs`, sorts lane then seq
-  (`docs/decisions.md:43`; `src/ship.ts:32-39`, `src/ship.ts:41-52`).
+- `laneOf` maps blob/photo/foto/image/thumb tables to lane 1, everything
+  else lane 0; `planShipment` skips lane 1 unless `includeBlobs` and sorts
+  lane-then-seq (`src/ship.ts:36-60`).
 - Text-first because photo bytes compress ~1.05x raw while text hits 26.8x
-  beside the photos, so blobs would dominate bytes for zero ratio
-  (`docs/decisions.md:44`; photo numbers `README.md:87-94`).
+  beside the photos — blobs would dominate bytes for zero ratio
+  (`README.md` Photo SLA).
 - Delta economics come from immutable chunks: the relay index hash hit stays
-  valid forever, giving 1791B delta vs 211716B full (0.008)
-  (`docs/decisions.md:65`; `src/ship.ts:47`).
-- Rule: text vs blob split — archive ships text+hash+thumb, full photos
-  lazy/on-demand (`README.md:45`).
-- Component: `src/ship.ts` delta by hash, chunked resume, text-first lanes
-  (`README.md:55`).
+  valid forever, giving 1791 B delta vs 211 716 B full (`docs/bench.md`,
+  `src/ship.ts:63-67`).
+- With `includeBlobs`, `foto/*.bin` sidecars ship in the same call (small
+  copy-if-missing, large resumable) — a ticket never precedes its painting
+  (`src/ship.ts:218-228`).
 
 ## Find: warm-default, single-chunk fetch
 
-- `findTrx` searches warm only and throws when absent; cold needs `findCold`,
-  which narrows by warm index then warns per scan
-  (`docs/decisions.md:50`; `src/find.ts:265-306`, `src/find.ts:308-354`,
-  warn at `src/find.ts:352-354`).
-- Warm find is 7.62ms median, 1 fetch / 2 pruned; the min/max + bloom chain is
-  what keeps it there
-  (`docs/decisions.md:30-51`; `src/find.ts:185-225`).
-- Cold scan is O(segments) tar decode over already-zstd members, slower by
-  construction (`docs/decisions.md:51`; `src/cold.ts:1-2`).
-- CLI: `moltarc find <trx-id>` fetches 1 chunk via manifest
-  (`README.md:17`; `bin/moltarc.ts:38`).
-- Component: `src/find.ts` prune + bloom + single-chunk fetch + sparse index
-  (`README.md:56`).
+- `findTrx` searches warm only and throws when absent; cold needs `findCold`
+  (`src/find.ts:321-370`).
+- Shard/sparse jump → min/max prune → scaled-bloom prune → ~1 fetch per lookup; warm
+  find is ~13.60 ms p50 over 6 probed ids × 20 iters (11 fetched / 8 pruned total;
+  `docs/bench.md`, `src/find.ts:197-295`).
+- Cold scan is O(segments) tar decode over already-zstd members — slower by
+  construction (`src/cold.ts`, `src/find.ts:366-370`).
+- Quarantined entries never return; compound `table:device:seq` ids match
+  via `matchRowId` (`src/find.ts:316-319`).
 
-## Cold: tar merge, prune, quarantine
+## Verify and quarantine
 
-- `src/cold.ts` warm-to-cold tar merge plus prune sweep (repack without dead
-  members, manifest rewrite) (`README.md:54`).
-- Cold prune keeps the manifest rewrite atomic dual-copy
-  (`docs/decisions.md:64`; `src/cold.ts:253-272`).
-- Corrupt segments quarantine-never-delete-blind; verify quarantines exactly one
-  chunk and repairs by hash from relay
-  (`docs/decisions.md:64`; `src/cold.ts:331`, `src/verify.ts:80-93`,
-  `src/verify.ts:116-123`).
-- Rule: per-chunk `crc32c + sha256`; corrupt chunk quarantines 1/150 of history,
-  never total-loss (`README.md:46`).
-- Sweep is dry-run by default and only deletes relay-acked orphans
-  (`docs/decisions.md:64`; `src/gc.ts:1-4`, `src/gc.ts:52-63`).
+- `verifyFull` walks every chunk (`crc32c + sha256` + manifest binding) and
+  checks the per-table seq chain: hard breaks fatal, forward seq skips
+  `GAP` warnings only (`src/verify.ts:319-343`).
+- Corrupt chunks park in `quarantine/` with a manifest flag — exactly one chunk
+  of history lost (1/150 in a 150-chunk archive — illustrative size), never the archive. `repairAll` refetches good bytes by
+  manifest sha256 from the relay and refills crc/bloom/minmax from the
+  fetched bytes (`src/verify.ts:92-148`).
+- Manifest load for quarantine/repair is strict (primary, then backup, else
+  throw) — a lost manifest shows, never silently heals
+  (`src/verify.ts:75-91`).
+
+## Cold: tar merge, prune, restore
+
+- `mergeCold` packs warm chunks plus their dict members into `cold/seg-*.tar`
+  (streamed through a 1 MB window, byte-identical output) and records the
+  segment (`src/cold.ts:110-124`).
+- `sweepCold` (dry-run default, `--apply` + 50 MB reserve check) repacks
+  segments without dead members and rewrites the manifest dual-copy atomic;
+  corrupt segments list loud and stay on disk (`src/cold.ts:368-453`).
+- `forgetChunks` is atomic all-or-nothing over relay-acked names only
+  (`src/cold.ts:307-324`); bytes free only after `gc --apply` + `coldg
+  --apply`.
+- `restore-from-cold` validates every tar member name before touching disk
+  and rebuilds warm + manifest from cold alone (`bin/moltarc.ts:78-137`).
+
+## P2P: websocket delta sync
+
+- Peers exchange summaries (`hello`/`welcome`), pull want-by-sha, stream
+  base64 blocks, and apply atomically + idempotently with journal resume
+  (`src/p2p.ts:76-120`).
+- Every frame is `HMAC-SHA256(json) + '.' + json`, verified on raw bytes
+  before parse against every listed key; `MOLTARC_PSK` rotates as a
+  comma-separated list, primary first. Unset means documented
+  trusted-LAN-only fallback (`src/p2p.ts:32-66`).
+- Serving is opt-in filtered: `allowPeers` holds `sha256(token)` strings,
+  empty serves anyone; quarantined entries are never served
+  (`src/p2p.ts:44-45`, `summaryOf`).
+
+## Timetravel: as-of reads
+
+- `queryAsOf({ outDir, seq } | { outDir, ts })` folds latest-row-per-id at
+  the target with chunk proof (consulted/pruned/`skippedMissing`)
+  (`src/timetravel.ts:66-104`).
+- Fail-closed on corrupt bytes (throws with the filename), explicit-partial
+  on missing files (warn + counter — callers must check before treating rows
+  as authoritative). Windowed folds (`windowMs`/`windowSeq`) return recent
+  state only (`examples/dashboard.ts`).
+
+## Migrate: forward-only upgrade
+
+- `planMigration` (dry-run report, no writes) + `migrate` (rescan warm into
+  a fresh v1 manifest, backup to `manifest.pre-migrate.json` first, atomic
+  swap). Chunk files never touched (`src/migrate.ts:1-14`,
+  `CURRENT_MANIFEST_VERSION = 1`).
+- Seven write paths call `assertMigrated()`/`requireMigrated()` so a new binary never rewrites
+  an old manifest in place — the guard error means "run migrate once"
+  (`src/migrate.ts`, `docs/cli.md` migrate).
 
 ## Disk-safety reserve
 
-- `RESERVE_BYTES = 50MB`; `checkReserve` throws before any write on
-  seal/merge/sweep-apply; sweep-delete-only never checks
-  (`docs/decisions.md:36`; `src/gc.ts:24`, `src/gc.ts:36-44`,
-  `src/seal.ts:230`, `src/cold.ts:303`, `src/gc.ts:11-14`).
-- The reserve guarantees tmp+fsync+rename never starts without room for the
-  largest expected write (one 4MB chunk + manifest copies + tar window)
-  (`docs/decisions.md:37`).
+- `RESERVE_BYTES = 50 MB`; `checkReserve` throws before any write on
+  seal/merge/sweep-apply; sweep-delete-only never checks (`src/gc.ts:17-39`).
+- The reserve guarantees tmp + fsync + rename never starts without room for
+  the largest expected write (one 4 MB chunk + manifest copies + tar
+  window).
 
 ## Source map
 
 | Concern | Source of truth |
 |---|---|
-| Design rationale for all of the above | `docs/decisions.md:1-67` |
-| Pipeline, CLI, rules, layout, measured SLA | `README.md:6-107` |
+| Design rationale for all of the above | `docs/decisions.md` |
+| Pipeline, CLI shapes, rules, measured SLA | `README.md`, `bin/moltarc.ts:35-53` |
+| Full CLI reference (15 subcommands) | `docs/cli.md` |
+| Module ownership table | `docs/modules.md` |
+| Numeric contracts and gates | `docs/contracts.md` |
 | Benchmark method behind the ratios | `docs/bench.md` |
 | Back-compat surface | `docs/compat.md` |

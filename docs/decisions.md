@@ -6,9 +6,9 @@ Reversed-consequence states what breaks, not opinion.
 ## 1. Chunk 1–4MB bounds, ~2MB target
 
 - Decision: seal packs per-table batches to `TARGET_BYTES` (2MB); flush gates on target, hard tail rule at `MAX_BYTES` (4MB); `MIN_BYTES` (1MB) documents the small-chunk floor. `src/seal.ts:15-17`, packing/probe loop `src/seal.ts:285-336`.
-- Context: mixed corpus (6000 rows, seed 7) seals 2.52MB input into 3 warm chunks, 246774B (`bench/measured.json` perf; `docs/bench.md` seal 8.3MB/s in 290ms). ~0.8MB compressed per chunk keeps find to 1 chunk fetch (`findFetched: 1`).
+- Context: mixed corpus (6000 rows, seed 7) seals 2.52MB input into 3 warm chunks, 246723B (`bench/measured.json` perf; `docs/bench.md` seal 6.9MB/s in 350ms; warm bytes jitter ±~30B run to run, ratio steady at 10.2x). ~0.8MB compressed per chunk keeps find to ~1 chunk fetch per lookup (`findFetched: 11` over 6 probed ids).
 - Alternatives rejected: 64KB chunks (manifest with thousands of entries, shard/sparse index bloat, ship delta fans out); 64MB chunks (find pays full read+crc+decode per lookup; a corrupt chunk quarantines 64MB instead of ~1MB, cf. `src/verify.ts:81-92` quarantine-one design).
-- If reversed: tiny chunks → manifest/shard/sparse growth + N-fetch finds; huge chunks → 7.62ms median find (`bench/measured.json`) regresses linearly with chunk bytes, quarantine blast radius grows with chunk size.
+- If reversed: tiny chunks → manifest/shard/sparse growth + N-fetch finds; huge chunks → warm p50 find (~13.60ms in `bench/measured.json`) regresses linearly with chunk bytes, quarantine blast radius grows with chunk size.
 
 ## 2. zstd only, no LZ4
 
@@ -20,14 +20,14 @@ Reversed-consequence states what breaks, not opinion.
 ## 3. Dict gate: train only when sample ≥4x, ≥100 rows, non-blob, 32KB cap
 
 - Decision: `trainTableDict` returns null unless `bodies ≥ 100`, `sampleRatio ≥ 4`, table not matching `BLOB_TABLE_RE`; dict capped at `DICT_MAX_BYTES` 32KB from first 10k rows (`src/dict.ts:10-11,44-62`; gate comment `src/dict.ts:22-23`).
-- Context: dict bench (12000 rows, seed 7) saves 1840B / 1.7% (`bench/measured.json` dict) — small because zstd already hits 30.5x plain. Photo bench shows jpeg at 1.05x raw, so blob tables would train a useless dict; hence the blob exclusion (`src/dict.ts:35-42`).
-- Alternatives rejected: always-train (a dict file + `DICT_FLAG` lookup per chunk for ~0% on blobs/jpegs); higher gate (8x — kills the measured 1.7% on real repetitive text); bigger dict (diminishing returns past ranked-line working set, more relay bytes via copy-if-missing `src/ship.ts:158-161`).
+- Context: dict bench (12000 rows, seed 7) saves 2003B / 1.8% (`bench/measured.json` dict) — small because zstd already hits 30.3x plain. Photo bench shows jpeg at 1.05x raw, so blob tables would train a useless dict; hence the blob exclusion (`src/dict.ts:35-42`).
+- Alternatives rejected: always-train (a dict file + `DICT_FLAG` lookup per chunk for ~0% on blobs/jpegs); higher gate (8x — kills the measured 1.8% on real repetitive text); bigger dict (diminishing returns past ranked-line working set, more relay bytes via copy-if-missing `src/ship.ts:158-161`).
 - If reversed: gate removed → dict files on incompressible tables, wasted relay copies + decode lookups; gate raised → the only measured dict win disappears.
 
 ## 4. Bloom 2048 bits, k=3, scaled reads
 
 - Decision: legacy entries use `BLOOM_BITS = 2048` (`src/manifest.ts:8`), 3 hashes (`src/manifest.ts:81-99`); `bloomBitsForRows` scales newer chunks to ≥ rows×10 bits (`src/find.ts:155-161`); reader mods by actual stored length (`src/find.ts:169-173`).
-- Context: perf find prunes 2 chunks while fetching 1 (`bench/measured.json` `findPruned: 2, findFetched: 1`) — min/max range + bloom chain (`src/find.ts:185-225`) is what keeps the 7.62ms median.
+- Context: perf find fetches 11 while pruning 8 across 6 probed ids (~1-2 fetches per lookup; `bench/measured.json` `findFetched: 11, findPruned: 8`) — min/max range + bloom chain (`src/find.ts:185-225`) is what keeps the warm p50 at ~13.60ms.
 - Alternatives rejected: no bloom (every in-range chunk decodes — fetched count rises with chunk count); 256-bit bloom (fp rate forces decodes of non-matching chunks); fixed-size-only reader (breaks scaled chunks or wastes bits on small ones).
 - If reversed: bloom removed/shrunk → `fetched` climbs, find latency follows decode cost; fixed-2048 reader → scaled entries mis-decode (false negatives = lost rows).
 
@@ -48,8 +48,8 @@ Reversed-consequence states what breaks, not opinion.
 ## 7. Warm-only `findTrx` default, `findCold` opt-in and loud
 
 - Decision: `findTrx` searches warm only and throws when absent (`src/find.ts:265-306`); cold needs `findCold`, which narrows by warm index then warns per scan (`src/find.ts:308-354`, warn at `src/find.ts:352-354`).
-- Context: warm find is 7.62ms median, 1 fetch / 2 pruned (`bench/measured.json`); cold scan is O(segments) tar decode over already-zstd members (`src/cold.ts:1-2`) — orders of magnitude slower by construction.
-- Alternatives rejected: unified find (every miss pays a tar scan; typo'd ids cost seconds); silent cold fallback (operators can't tell a 7ms hit from a multi-second scan in logs).
+- Context: warm find is ~13.60ms p50 over 6 probed ids × 20 iters (cold-median first lookup 17.17ms; `bench/measured.json`); cold scan is O(segments) tar decode over already-zstd members (`src/cold.ts:1-2`) — slower by construction.
+- Alternatives rejected: unified find (every miss pays a tar scan; typo'd ids cost seconds); silent cold fallback (operators can't tell a ~14ms hit from a multi-second scan in logs).
 - If reversed: default find latency becomes segment-count-dependent; fully-pruned keys still pay directory-list + open costs instead of failing fast at the index.
 
 ## 8. Dual-copy manifest (+ sparse/shard), best-seq-wins load

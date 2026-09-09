@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { decodeChunk, decodeHeader, compressFrame, decompressFrame, encodeHeader, crc32c, HEADER_SIZE } from '../src/chunk.js';
-import { trainTableDict, loadDictFor } from '../src/dict.js';
+import { trainTableDict, loadDictFor, isBlobTable } from '../src/dict.js';
 import { seal } from '../src/seal.js';
 import { findTrx } from '../src/find.js';
 import { loadManifest } from '../src/manifest.js';
@@ -50,6 +50,14 @@ describe('per-store dictionary', () => {
     const found = findTrx({ outDir, trxId: target });
     assert.equal(found.row.id, target);
     void r;
+  });
+
+  it('foto tables match the ship blob lane: no dict trained', { timeout: 30_000 }, () => {
+    for (const t of ['foto-pengiriman', 'FOTO-1', 'blob-x', 'photo-a', 'image-b', 'thumb-c']) {
+      assert.equal(isBlobTable(t), true, t);
+      assert.equal(trainTableDict(new Array(200).fill('x'.repeat(64)), t), null, t);
+    }
+    assert.equal(isBlobTable('bayar'), false);
   });
 
   it('pre-dict chunks (flagless, any dict_id) still decode', { timeout: 30_000 }, async () => {

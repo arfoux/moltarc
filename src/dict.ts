@@ -35,7 +35,7 @@ export function sampleRatio(bodies: string[]): number {
 // Blob tables never earn a dictionary: bodies are hash-refs or incompressible
 // bytes, so training wastes a dict file and a DICT_FLAG lookup per chunk.
 // Mirrors ship lane regex locally (dict owns this gate; seal passes table).
-export const BLOB_TABLE_RE = /blob|photo|image|thumb/i;
+export const BLOB_TABLE_RE = /blob|photo|foto|image|thumb/i;
 
 export function isBlobTable(table: string): boolean {
   return BLOB_TABLE_RE.test(table);
