@@ -132,7 +132,7 @@ storage. "Snapshot as-of" = restore the dataset to an arbitrary timestamp/TXN, n
 - [am] Ditto delta is PARTIAL: version-vector delta sync — only causally-new mutations
   transfer — but at document/field granularity, not SQLite page granularity.
 - [an] Ditto S3 backup is PARTIAL: durability goes through Ditto Cloud or
-  customer-built connectors; no native S3 backup target.
+  self-built connectors; no native S3 backup target.
 - [ao] Ditto analytics is PARTIAL: local queries plus limited cloud queries; no
   SQL-analytics/pushdown story comparable to Turso/D1.
 - [ap] Ditto self-host is PARTIAL: SDKs embed locally, but sync requires the Ditto

@@ -22,7 +22,7 @@ function appendSeqRows(hotDb: string, fromSeq: number, count: number, device = '
     lines.push(JSON.stringify({
       device_id: device, seq, ts: base + seq * 1000,
       id: `trx-${String(seq).padStart(8, '0')}`, table,
-      body: `TRANSACTION OK value=15000 cashier=agus seq=${seq} store=jakarta-selatan`,
+      body: `EVENT OK value=15000 operator=agus seq=${seq} site=north-1..............`,
     }));
   }
   appendFileSync(hotDb, `${lines.join('\n')}\n`);
@@ -102,7 +102,7 @@ describe('coldfix regressions', () => {
       lines.push(JSON.stringify({
         device_id: 'dev-01', seq: i + 1, ts: base + i * 1000,
         id: `trx-${String(i + 1).padStart(8, '0')}`, table: 'events',
-        body: `TRANSACTION OK value=${15000 + (i % 97)} cashier=agus tend=cash change=0 store=jakarta-selatan`,
+        body: `EVENT OK value=${15000 + (i % 97)} operator=agus method=cash change=0 site=north-1............`,
       }));
     }
     for (let i = 0; i < 1500; i++) {

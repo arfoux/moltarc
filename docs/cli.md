@@ -60,7 +60,7 @@ received/failed chunk.
 ### `find` — one row, one chunk
 
 ```
-moltarc find <outDir> <trxId>
+moltarc find <outDir> <id>
 ```
 
 Prunes via manifest min/max + bloom (+ shard/sparse fast path), fetches a

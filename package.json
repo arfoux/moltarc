@@ -2,7 +2,7 @@
   "name": "moltarc",
   "type": "module",
   "version": "0.21.2",
-  "description": "Moltarc — tiered SQLite database system: hot DB, warm chunks, cold archive.",
+  "description": "Moltarc — universal append-only pipeline: hot feed, warm chunks, cold archive.",
   "keywords": ["sqlite", "database", "archive", "zstd", "offline-first", "embedded", "edge", "iot", "tiered-storage", "typescript", "data-sync", "backup", "event-log", "telemetry", "append-only"],
   "homepage": "https://github.com/arfoux/moltarc#readme",
   "bugs": { "url": "https://github.com/arfoux/moltarc/issues" },

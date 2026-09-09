@@ -36,7 +36,7 @@ describe('photo gate', () => {
     assert.ok(jpeg.length > PHOTO_INLINE_LIMIT_BYTES, `full ${jpeg.length}b trips the gate`);
     const blob = randomBytes(300 * 1024);
     const base = 1_700_000_000_000;
-    const small = 'TRANSACTION OK value=15000 cashier=agus tend=cash change=0';
+    const small = 'EVENT OK value=15000 operator=agus method=cash change=0...';
     const lines = [
       JSON.stringify({ device_id: 'dev-01', seq: 1, ts: base + 1000, id: 'trx-00000001', table: 'events', body: small }),
       JSON.stringify({ device_id: 'cam-01', seq: 2, ts: base + 2000, id: 'trx-00000002', table: 'photo', body: jpeg.toString('base64') }),
