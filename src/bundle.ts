@@ -1,4 +1,4 @@
-// moltarc bundle — atomic 1-text+N-refs manifest pack (qurban/pod pattern):
+// moltarc bundle — atomic 1-text+N-refs manifest pack (one shared pot, N portions):
 // one human-readable text plus N content refs linked by sha256 hash. hash
 // primitives are import-only reuse from chunk.js; writes are tmp+rename.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';

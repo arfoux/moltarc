@@ -24,22 +24,22 @@ behavior change is marked as such.
 
 ## v0.20.0
 
-- 39 temuan audit diperbaiki + dikunci regression test (suite 246/246,
-  `tsc --noEmit` bersih). Yang user-visible:
-- Dedupe key jadi `table:device:seq`: baris sah beda-tabel tak lagi terbuang.
-- Bloom truncated fail-open: chunk hidup tak lagi di-prune saat buffer pendek.
-- Alerts fail-loud: arsip rusak/tak terbaca throw, bukan lapor `ok` nol.
-- Foto lifecycle: `foto/` ikut verify + ship opt-in + sweep; readTar cek
-  checksum ustar di level tar.
-- P2P: HMAC-SHA256 per blok (`MOLTARC_PSK`) + node identity; tanpa PSK
-  fallback trusted-LAN-only tertulis.
-- `seal.lock`: seal konkuren kedua gagal berisik, bukan watermark race.
-- Guard migrasi: 7 write-path panggil `assertMigrated()`, binari baru
-  menolak rewrite manifest lama in-place.
-- `gc --apply` wajib relay: hanya hapus yang sudah di-ack (rule 7); tanpa
-  relay error jelas. `forget` bilang byte tetap sampai gc + coldg apply.
-- Validasi seal: seq negatif/9-digit, `ts` non-finite (NaN), kolom sqlite
-  hilang, sidecar terpotong — semuanya malformed berisik di pintu.
+- 39 audit findings fixed + pinned by regression tests (suite 246/246,
+  `tsc --noEmit` clean). User-visible:
+- Dedupe key is now `table:device:seq`: legit rows in different tables are no longer dropped.
+- Truncated bloom fails open: live chunks are no longer pruned on a short buffer.
+- Alerts fail loud: a corrupt/unreadable archive throws instead of reporting zero `ok`.
+- Foto lifecycle: `foto/` joins verify + opt-in ship + sweep; readTar checks
+  the ustar checksum at the tar level.
+- P2P: HMAC-SHA256 per block (`MOLTARC_PSK`) + node identity; without a PSK
+  the documented trusted-LAN-only fallback applies.
+- `seal.lock`: a second concurrent seal fails loud instead of a watermark race.
+- Migration guard: 7 write paths call `assertMigrated()`; a new binary
+  refuses to rewrite an old manifest in place.
+- `gc --apply` requires a relay: only relay-acked chunks are deleted (rule 7);
+  without a relay the error is explicit. `forget` notes bytes stay until gc + coldg apply.
+- Seal validation: negative/9-digit seq, non-finite `ts` (NaN), missing sqlite
+  columns, truncated sidecars — all loud malformed at the gate.
 - Redeem O(1) amortized (Bloom cache), nonce `crypto.randomUUID`.
 
 ## v0.19.0

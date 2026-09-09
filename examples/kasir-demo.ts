@@ -1,4 +1,4 @@
-// examples/kasir-demo — 50 struk kasir: seal -> ship -> find 1 struk, print ratio.
+// examples/kasir-demo — 50 cashier receipts: seal -> ship -> find 1 receipt, print ratio.
 // Usage: bun examples/kasir-demo.ts [--out examples/out]
 import { mkdirSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -49,7 +49,7 @@ export async function runKasirDemo(baseDir: string, rows = 50): Promise<KasirRes
   const relayDir = join(baseDir, 'relay');
 
   const sealed = await seal({ hotDb, outDir });
-  console.log(`seal: ${sealed.rowsSealed} struk -> ${sealed.chunks.length} chunk(s)`);
+  console.log(`seal: ${sealed.rowsSealed} receipts -> ${sealed.chunks.length} chunk(s)`);
   const shipped = await ship({ outDir, relayDir, baseDelayMs: 1 });
   console.log(`ship: sent ${shipped.sent.length} chunk(s), relay holds ${Object.keys(readRelayIndex(relayDir).chunks).length}`);
 
@@ -69,7 +69,7 @@ export async function runKasirDemo(baseDir: string, rows = 50): Promise<KasirRes
 async function main(): Promise<void> {
   const out = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? join(dirname(fileURLToPath(import.meta.url)), 'kasir-out');
   await runKasirDemo(out);
-  console.log('kasir demo ok');
+  console.log('cashier demo ok');
 }
 
 const invoked = (process.argv[1] ?? '').replace(/\\/g, '/');
