@@ -11,15 +11,15 @@ Below are sample usages.
   `bun examples/universal-demo.ts [--out <dir>]` / `bun run demo`
 - `e2e.ts` — field-log feed (paddy sensors + farmer activity, 1200 rows).
   `bun examples/e2e.ts [--out <dir>]` / `bun run e2e`
-- `sales-demo.ts` — shop receipts (50 rows).
-  `bun examples/sales-demo.ts [--out <dir>]` / `bun run sales`
+- `ledger-demo.ts` — shop receipts (50 rows).
+  `bun examples/ledger-demo.ts [--out <dir>]` / `bun run ledger`
 ## Universal demo
 
 `writeOrders(dir, rows)` writes `orders.jsonl` — one JSON object per line with
-`device_id, seq, ts, id (trx-XXXXXXXX), table: sales, body`:
+`device_id, seq, ts, id (trx-XXXXXXXX), table: events, body`:
 
 ```text
-GREEN MART 42 MARKET ST ORDER: no=1001 amount=15000 tender=cash clerk=alex THANK YOU FOR SHOPPING WITH US
+GREEN MART 42 MARKET ST ORDER: no=1001 value=15000 tender=cash clerk=alex THANK YOU FOR SHOPPING WITH US
 ```
 
 `runUniversalDemo(baseDir, rows = 50)` then seals to `<baseDir>/archive`,

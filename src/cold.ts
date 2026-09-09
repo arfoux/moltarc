@@ -343,24 +343,24 @@ export interface ColdSweepResult {
   bytesAfter: number;
   bytesReclaimed: number;
   bytesCorrupt: number; // corrupt-segment bytes left on disk, excluded from bytesReclaimed
-  fotoFiles: number; // report-only census of foto/ sidecars: never deleted here (gc deepFoto owns deletes)
-  fotoBytes: number; // sum of foto/ file sizes, folded into no reclaim math
+  photoFiles: number; // report-only census of photo/ sidecars: never deleted here (gc deepPhoto owns deletes)
+  photoBytes: number; // sum of photo/ file sizes, folded into no reclaim math
   dryRun: boolean;
 }
-// Foto census: report-only byte/file count of the foto/ sidecar dir. Deletion
-// stays with gc deepFoto (relay-ack semantics); cold sweep/report never
-// removes foto bytes, it just makes them visible beside segment accounting.
-function fotoDiskBytes(outDir: string): { files: number; bytes: number } {
+// Photo census: report-only byte/file count of the photo/ sidecar dir. Deletion
+// stays with gc deepPhoto (relay-ack semantics); cold sweep/report never
+// removes photo bytes, it just makes them visible beside segment accounting.
+function photoDiskBytes(outDir: string): { files: number; bytes: number } {
   let files = 0;
   let bytes = 0;
   try {
-    for (const f of readdirSync(join(outDir, 'foto'))) {
+    for (const f of readdirSync(join(outDir, 'photo'))) {
       try {
-        const st = statSync(join(outDir, 'foto', f));
+        const st = statSync(join(outDir, 'photo', f));
         if (st.isFile()) { files++; bytes += st.size; }
       } catch { /* raced delete: ignore */ }
     }
-  } catch { /* no foto dir yet: nothing to report */ }
+  } catch { /* no photo dir yet: nothing to report */ }
   return { files, bytes };
 }
 
@@ -448,14 +448,14 @@ export function sweepCold(outDir: string, opts: ColdSweepOpts = {}): ColdSweepRe
   if (!dryRun && (pruned.length > 0 || repacked.length > 0)) {
     saveManifestAtomic(outDir, manifest);
   }
-  const foto = fotoDiskBytes(outDir);
-  return { segments, pruned, repacked, corrupt, bytesBefore, bytesAfter, bytesReclaimed, bytesCorrupt, fotoFiles: foto.files, fotoBytes: foto.bytes, dryRun };
+  const photo = photoDiskBytes(outDir);
+  return { segments, pruned, repacked, corrupt, bytesBefore, bytesAfter, bytesReclaimed, bytesCorrupt, photoFiles: photo.files, photoBytes: photo.bytes, dryRun };
 }
 
-export function coldDiskBytes(outDir: string): { segments: number; chunks: number; bytes: number; fotoFiles: number; fotoBytes: number } {
-  const foto = fotoDiskBytes(outDir);
+export function coldDiskBytes(outDir: string): { segments: number; chunks: number; bytes: number; photoFiles: number; photoBytes: number } {
+  const photo = photoDiskBytes(outDir);
   const cold = join(outDir, 'cold');
-  if (!existsSync(cold)) return { segments: 0, chunks: 0, bytes: 0, fotoFiles: foto.files, fotoBytes: foto.bytes };
+  if (!existsSync(cold)) return { segments: 0, chunks: 0, bytes: 0, photoFiles: photo.files, photoBytes: photo.bytes };
   let segments = 0;
   let chunks = 0;
   let bytes = 0;
@@ -467,5 +467,5 @@ export function coldDiskBytes(outDir: string): { segments: number; chunks: numbe
       try { chunks += readTar(raw).length; } catch { /* corrupt: count bytes only */ }
     } catch { /* raced delete */ }
   }
-  return { segments, chunks, bytes, fotoFiles: foto.files, fotoBytes: foto.bytes };
+  return { segments, chunks, bytes, photoFiles: photo.files, photoBytes: photo.bytes };
 }

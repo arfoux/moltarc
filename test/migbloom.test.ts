@@ -12,8 +12,8 @@ import { scratch } from './util.js';
 function v1Entry(): ChunkEntry {
   const ids = ['trx-00000001', 'trx-00000002'];
   return {
-    file: 'sales-00000001-00000002-abcdef12.chk',
-    table: 'sales', seqMin: 1, seqMax: 2,
+    file: 'events-00000001-00000002-abcdef12.chk',
+    table: 'events', seqMin: 1, seqMax: 2,
     tsMin: 1_700_000_000_000, tsMax: 1_700_000_001_000,
     rows: 2, bytes: 100, sha256: '0'.repeat(64), crc32c: 0,
     dictId: 0, codec: 0,

@@ -9,7 +9,7 @@ coverage/
 bench/out/
 examples/out/
 examples/e2e-out/
-examples/sales-out/
+examples/ledger-out/
 examples/universal-out/
 bench/photo-out/
 bench/dict-out/

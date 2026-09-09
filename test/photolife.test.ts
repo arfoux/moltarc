@@ -1,7 +1,7 @@
-// fotolife: foto lifecycle across ship lanes + cold tar/report honesty.
+// photolife: photo lifecycle across ship lanes + cold tar/report honesty.
 // (1) readTar verifies the ustar checksum field and fails at tar level.
-// (2) foto-table chunks ride the blob opt-in lane (deferred unless includeBlobs).
-// (3) cold-side sweep/report censes the foto/ dir (report-only; gc deepFoto owns deletes).
+// (2) photo-table chunks ride the blob opt-in lane (deferred unless includeBlobs).
+// (3) cold-side sweep/report censes the photo/ dir (report-only; gc deepPhoto owns deletes).
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'crypto';
@@ -21,9 +21,9 @@ function chunkEntry(over: Partial<ChunkEntry> & { file: string; table: string; s
   };
 }
 
-describe('fotolife', () => {
+describe('photolife', () => {
   it('readTar rejects a header with a broken ustar checksum at tar level', { timeout: 30_000 }, () => {
-    const members = [{ name: 'sales-000001-000001-abc123.chk', data: Buffer.from('sealed-bytes') }];
+    const members = [{ name: 'events-000001-000001-abc123.chk', data: Buffer.from('sealed-bytes') }];
     const good = writeTar(members);
     assert.deepEqual(readTar(good).map((m) => m.name), [members[0].name], 'round-trip intact');
     const bad = Buffer.from(good);
@@ -32,7 +32,7 @@ describe('fotolife', () => {
   });
 
   it('sweepCold reports checksum-corrupted segments as corrupt, never reclaimed', { timeout: 30_000 }, async () => {
-    const dir = scratch('fotolife-corrupt');
+    const dir = scratch('photolife-corrupt');
     const { hotDb } = writeHotLog(dir, { rows: 200 });
     const outDir = join(dir, 'archive');
     const relayDir = join(dir, 'relay');
@@ -55,59 +55,59 @@ describe('fotolife', () => {
     assert.ok(existsSync(segPath), 'corrupt segment left on disk');
   });
 
-  it('foto-table chunks ride the blob opt-in lane', { timeout: 30_000 }, () => {
-    const foto = chunkEntry({ file: 'foto-000001-000001-deadbeef.chk', table: 'foto', sha256: 'a'.repeat(64) });
-    const text = chunkEntry({ file: 'sales-000001-000001-cafe0001.chk', table: 'sales', sha256: 'b'.repeat(64) });
-    assert.equal(laneOf(foto), 1, 'foto is a blob-lane table');
+  it('photo-table chunks ride the blob opt-in lane', { timeout: 30_000 }, () => {
+    const photo = chunkEntry({ file: 'photo-000001-000001-deadbeef.chk', table: 'photo', sha256: 'a'.repeat(64) });
+    const text = chunkEntry({ file: 'events-000001-000001-cafe0001.chk', table: 'events', sha256: 'b'.repeat(64) });
+    assert.equal(laneOf(photo), 1, 'photo is a blob-lane table');
     assert.equal(laneOf(text), 0, 'text stays lane 0');
 
-    const deferred = planShipment([foto, text], { chunks: {} }, false);
+    const deferred = planShipment([photo, text], { chunks: {} }, false);
     assert.deepEqual(deferred.missing.map((e) => e.file), [text.file], 'default plan ships text only');
     assert.ok(
-      deferred.skipped.some((s) => s.file === foto.file && s.reason === 'blob-deferred'),
-      'foto chunk deferred without opt-in',
+      deferred.skipped.some((s) => s.file === photo.file && s.reason === 'blob-deferred'),
+      'photo chunk deferred without opt-in',
     );
 
-    const optIn = planShipment([foto, text], { chunks: {} }, true);
-    assert.deepEqual(optIn.missing.map((e) => e.file), [text.file, foto.file], 'opt-in ships text first, foto after');
+    const optIn = planShipment([photo, text], { chunks: {} }, true);
+    assert.deepEqual(optIn.missing.map((e) => e.file), [text.file, photo.file], 'opt-in ships text first, photo after');
   });
 
-  it('default ship defers foto chunks; includeBlobs ships them', { timeout: 30_000 }, async () => {
-    const dir = scratch('fotolife-shiplane');
+  it('default ship defers photo chunks; includeBlobs ships them', { timeout: 30_000 }, async () => {
+    const dir = scratch('photolife-shiplane');
     const hot = join(dir, 'hot.jsonl');
     const outDir = join(dir, 'archive');
     const relayDir = join(dir, 'relay');
-    writeFileSync(hot, `${JSON.stringify({ device_id: 'cam-01', seq: 1, ts: 1_700_000_000_000, id: 'foto-only-1', table: 'foto', body: 'small foto caption, inline text' })}\n`);
+    writeFileSync(hot, `${JSON.stringify({ device_id: 'cam-01', seq: 1, ts: 1_700_000_000_000, id: 'photo-only-1', table: 'photo', body: 'small photo caption, inline text' })}\n`);
     await seal({ hotDb: hot, outDir });
     const { manifest } = loadManifest(outDir);
     assert.equal(manifest.chunks.length, 1);
-    assert.equal(manifest.chunks[0].table, 'foto');
+    assert.equal(manifest.chunks[0].table, 'photo');
 
     const d = await ship({ outDir, relayDir, baseDelayMs: 1 });
-    assert.deepEqual(d.sent, [], 'default ship sends no foto chunk');
-    assert.ok(d.skipped.includes(manifest.chunks[0].file), 'foto chunk skipped without opt-in');
+    assert.deepEqual(d.sent, [], 'default ship sends no photo chunk');
+    assert.ok(d.skipped.includes(manifest.chunks[0].file), 'photo chunk skipped without opt-in');
 
     const o = await ship({ outDir, relayDir, includeBlobs: true, baseDelayMs: 1 });
-    assert.ok(o.sent.includes(manifest.chunks[0].file), 'opt-in ship sends the foto chunk');
+    assert.ok(o.sent.includes(manifest.chunks[0].file), 'opt-in ship sends the photo chunk');
   });
 
-  it('cold sweep and disk report include the foto/ dir without deleting it', { timeout: 60_000 }, async () => {
-    const dir = scratch('fotolife-coldreport');
+  it('cold sweep and disk report include the photo/ dir without deleting it', { timeout: 60_000 }, async () => {
+    const dir = scratch('photolife-coldreport');
     const hot = join(dir, 'hot.jsonl');
     const outDir = join(dir, 'archive');
     const body = randomBytes(300 * 1024).toString('base64');
-    writeFileSync(hot, `${JSON.stringify({ device_id: 'cam-01', seq: 1, ts: 1_700_000_000_000, id: 'big-foto-1', table: 'foto', body })}\n`);
+    writeFileSync(hot, `${JSON.stringify({ device_id: 'cam-01', seq: 1, ts: 1_700_000_000_000, id: 'big-photo-1', table: 'photo', body })}\n`);
     await seal({ hotDb: hot, outDir });
-    const sidecars = readdirSync(join(outDir, 'foto')).filter((f) => f.endsWith('.bin'));
-    assert.equal(sidecars.length, 1, 'big foto seals to exactly one sidecar');
+    const sidecars = readdirSync(join(outDir, 'photo')).filter((f) => f.endsWith('.bin'));
+    assert.equal(sidecars.length, 1, 'big photo seals to exactly one sidecar');
     mergeCold(outDir);
 
     const r = sweepCold(outDir);
-    assert.ok(r.fotoFiles >= 1, 'sweep reports foto files');
-    assert.ok(r.fotoBytes > 0, 'sweep reports foto bytes');
+    assert.ok(r.photoFiles >= 1, 'sweep reports photo files');
+    assert.ok(r.photoBytes > 0, 'sweep reports photo bytes');
     const disk = coldDiskBytes(outDir);
-    assert.ok(disk.fotoFiles >= 1, 'disk report counts foto files');
-    assert.equal(disk.fotoBytes, r.fotoBytes, 'sweep and disk report agree on foto bytes');
-    assert.ok(existsSync(join(outDir, 'foto', sidecars[0])), 'report-only: sweep never deletes foto bytes');
+    assert.ok(disk.photoFiles >= 1, 'disk report counts photo files');
+    assert.equal(disk.photoBytes, r.photoBytes, 'sweep and disk report agree on photo bytes');
+    assert.ok(existsSync(join(outDir, 'photo', sidecars[0])), 'report-only: sweep never deletes photo bytes');
   });
 });

@@ -1,7 +1,7 @@
 // Guardrail regressions: alerts must throw on missing/corrupt archives (never
 // ok-with-zero-counts), chunk codec must reject non-finite ts (never persist
 // null via JSON), repairAll must bind the manifest sha post-repair (not
-// crc-only), and verifyFull must cover foto sidecars.
+// crc-only), and verifyFull must cover photo sidecars.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'crypto';
@@ -19,7 +19,7 @@ import { repairAll, verifyFull } from '../src/verify.js';
 import { scratch, writeHotLog } from './util.js';
 
 function row(ts: number): HotRow {
-  return { device_id: 'pos-01', seq: 1, ts, id: 'trx-00000001', table: 'sales', body: 'ok' };
+  return { device_id: 'pos-01', seq: 1, ts, id: 'trx-00000001', table: 'events', body: 'ok' };
 }
 
 function owningChunk(outDir: string, ref: string): string {
@@ -63,7 +63,7 @@ describe('guardrails', () => {
   it('chunk codec rejects non-finite ts instead of persisting null', { timeout: 30_000 }, () => {
     assert.throws(() => encodeRows([row(NaN)]), /non-finite ts/);
     assert.throws(() => encodeRows([row(Infinity)]), /non-finite ts/);
-    assert.throws(() => encodeChunk('sales', [row(NaN)]), /non-finite ts/);
+    assert.throws(() => encodeChunk('events', [row(NaN)]), /non-finite ts/);
     // normRow half: NaN ts is malformed (dropped), never a row with null ts.
     assert.equal(normRow({ device_id: 'd', seq: 1, ts: NaN, id: 'x' }, 'log'), null);
     // A frame already carrying null ts (NaN stringified pre-fix, or crafted)
@@ -121,13 +121,13 @@ describe('guardrails', () => {
     assert.ok(verifyFull(outDir).ok);
   });
 
-  it('verifyFull covers foto blobs: missing or tampered sidecar fails', { timeout: 60_000 }, async () => {
-    const dir = scratch('guard-foto');
+  it('verifyFull covers photo blobs: missing or tampered sidecar fails', { timeout: 60_000 }, async () => {
+    const dir = scratch('guard-photo');
     const blob = randomBytes(300 * 1024);
     const base = 1_700_000_000_000;
     const lines = [
-      JSON.stringify({ device_id: 'pos-01', seq: 1, ts: base + 1000, id: 'trx-00000001', table: 'sales', body: 'TRANSACTION OK' }),
-      JSON.stringify({ device_id: 'cam-01', seq: 2, ts: base + 2000, id: 'trx-00000002', table: 'foto', body: blob.toString('base64') }),
+      JSON.stringify({ device_id: 'pos-01', seq: 1, ts: base + 1000, id: 'trx-00000001', table: 'events', body: 'TRANSACTION OK' }),
+      JSON.stringify({ device_id: 'cam-01', seq: 2, ts: base + 2000, id: 'trx-00000002', table: 'photo', body: blob.toString('base64') }),
     ];
     const hotDb = join(dir, 'hot.jsonl');
     writeFileSync(hotDb, `${lines.join('\n')}\n`);
@@ -135,25 +135,25 @@ describe('guardrails', () => {
     const sealed = await seal({ hotDb, outDir });
     assert.equal(sealed.rowsSealed, 2);
     const ref = findTrx({ outDir, trxId: 'trx-00000002' }).row.body;
-    const m = /^foto:sha256:([0-9a-f]{64}):size=(\d+)$/.exec(ref);
-    assert.ok(m, `foto body seals as a hash ref, got ${ref.slice(0, 40)}`);
+    const m = /^photo:sha256:([0-9a-f]{64}):size=(\d+)$/.exec(ref);
+    assert.ok(m, `photo body seals as a hash ref, got ${ref.slice(0, 40)}`);
     const owner = owningChunk(outDir, ref);
-    assert.ok(verifyFull(outDir).ok, 'intact foto archive verifies clean');
+    assert.ok(verifyFull(outDir).ok, 'intact photo archive verifies clean');
 
-    const sidecar = join(outDir, 'foto', `${m[1]}.bin`);
+    const sidecar = join(outDir, 'photo', `${m[1]}.bin`);
     const good = readFileSync(sidecar);
     unlinkSync(sidecar);
     const missing = verifyFull(outDir);
-    assert.equal(missing.ok, false, 'missing foto sidecar must fail verifyFull');
+    assert.equal(missing.ok, false, 'missing photo sidecar must fail verifyFull');
     assert.ok(missing.bad.includes(owner), 'bad names the owning chunk');
-    assert.match(missing.items.find((i) => i.file === owner)?.reason ?? '', /foto sidecar missing/);
+    assert.match(missing.items.find((i) => i.file === owner)?.reason ?? '', /photo sidecar missing/);
 
     const tampered = Buffer.from(good);
     tampered[0] ^= 0xff;
     writeFileSync(sidecar, tampered);
     const badHash = verifyFull(outDir);
-    assert.equal(badHash.ok, false, 'tampered foto sidecar must fail verifyFull');
-    assert.match(badHash.items.find((i) => i.file === owner)?.reason ?? '', /foto sidecar hash differs/);
+    assert.equal(badHash.ok, false, 'tampered photo sidecar must fail verifyFull');
+    assert.match(badHash.items.find((i) => i.file === owner)?.reason ?? '', /photo sidecar hash differs/);
 
     writeFileSync(sidecar, good);
     assert.ok(verifyFull(outDir).ok, 'restored sidecar verifies clean again');

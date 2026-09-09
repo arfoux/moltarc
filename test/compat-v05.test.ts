@@ -40,8 +40,8 @@ function v05Rows(seqBase: number, count: number): V05Row[] {
       seq,
       ts: base + seq * 1000,
       id: `trx-${String(seq).padStart(8, '0')}`,
-      table: 'sales',
-      body: `TRANSACTION OK amount=${15000 + seq} cashier=agus store=jakarta-selatan`,
+      table: 'events',
+      body: `TRANSACTION OK value=${15000 + seq} cashier=agus store=jakarta-selatan`,
     });
   }
   return rows;
@@ -102,16 +102,16 @@ function buildV05Archive(outDir: string): { files: string[]; ids: string[] } {
   const entries: Array<Record<string, unknown>> = [];
   const groups = [v05Rows(1, 3), v05Rows(4, 3)];
   for (const rows of groups) {
-    const bytes = buildV05Chunk('sales', rows);
+    const bytes = buildV05Chunk('events', rows);
     const sha = sha256hex(bytes);
     const pad = (n: number) => String(n).padStart(8, '0');
-    const name = `sales-${pad(rows[0].seq)}-${pad(rows[rows.length - 1].seq)}-${sha.slice(0, 8)}.chk`;
+    const name = `events-${pad(rows[0].seq)}-${pad(rows[rows.length - 1].seq)}-${sha.slice(0, 8)}.chk`;
     writeFileSync(join(warm, name), bytes);
     files.push(name);
     for (const r of rows) ids.push(r.id);
     entries.push({
       file: name,
-      table: 'sales',
+      table: 'events',
       seqMin: rows[0].seq,
       seqMax: rows[rows.length - 1].seq,
       tsMin: rows[0].ts,
@@ -148,7 +148,7 @@ describe('v0.5 cold archive compat', () => {
     for (const id of ids) {
       const found = findTrx({ outDir, trxId: id });
       assert.equal(found.row.id, id);
-      assert.equal(found.row.table, 'sales');
+      assert.equal(found.row.table, 'events');
       assert.ok(found.row.body.includes('TRANSACTION OK'));
     }
     const mid = findTrx({ outDir, trxId: ids[4] });
@@ -175,7 +175,7 @@ describe('v0.5 cold archive compat', () => {
 // any is ever added) must keep accepting ver 0 — this is the N-2 floor.
 describe('v0.5 header floor', () => {
   it('decodeHeader accepts ver 0 without a version error', { timeout: 30_000 }, () => {
-    const buf = buildV05Chunk('sales', v05Rows(1, 1));
+    const buf = buildV05Chunk('events', v05Rows(1, 1));
     const header = decodeHeader(buf);
     assert.equal(header.ver, 0);
     assert.equal(header.codec, CODEC_DEFLATE);

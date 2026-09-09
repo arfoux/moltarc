@@ -1,5 +1,5 @@
-// examples/sales-demo — 50 sales receipts: seal -> ship -> find 1 receipt, print ratio.
-// Usage: bun examples/sales-demo.ts [--out examples/out]
+// examples/ledger-demo — 50 ledger receipts: seal -> ship -> find 1 receipt, print ratio.
+// Usage: bun examples/ledger-demo.ts [--out examples/out]
 import { mkdirSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -8,7 +8,7 @@ import { ship, readRelayIndex } from '../src/ship.js';
 import { findTrx } from '../src/find.js';
 import type { HotRow } from '../src/chunk.js';
 
-export interface SalesResult {
+export interface LedgerResult {
   hotDb: string;
   targetId: string;
   row: HotRow;
@@ -33,8 +33,8 @@ export function writeReceipt(dir: string, rows: number): { hotDb: string; ids: s
     ids.push(id);
     const amt = 5000 + ((i * 37) % 20) * 10000;
     lines.push(JSON.stringify({
-      device_id: 'device-01', seq, ts: base + i * 30_000, id, table: 'sales',
-      body: `${HEAD} no=${1000 + i} amount=${amt} tend=${i % 3 === 0 ? 'cash' : 'qris'} actor=agus ${TAIL}`,
+      device_id: 'device-01', seq, ts: base + i * 30_000, id, table: 'events',
+      body: `${HEAD} no=${1000 + i} value=${amt} tend=${i % 3 === 0 ? 'cash' : 'qris'} actor=agus ${TAIL}`,
     }));
   }
   const hotDb = join(dir, 'ledger.jsonl');
@@ -42,7 +42,7 @@ export function writeReceipt(dir: string, rows: number): { hotDb: string; ids: s
   return { hotDb, ids };
 }
 
-export async function runSalesDemo(baseDir: string, rows = 50): Promise<SalesResult> {
+export async function runLedgerDemo(baseDir: string, rows = 50): Promise<LedgerResult> {
   mkdirSync(baseDir, { recursive: true });
   const { hotDb, ids } = writeReceipt(baseDir, rows);
   const outDir = join(baseDir, 'archive');
@@ -67,10 +67,10 @@ export async function runSalesDemo(baseDir: string, rows = 50): Promise<SalesRes
 }
 
 async function main(): Promise<void> {
-  const out = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? join(dirname(fileURLToPath(import.meta.url)), 'sales-out');
-  await runSalesDemo(out);
-  console.log('sales demo ok');
+  const out = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? join(dirname(fileURLToPath(import.meta.url)), 'ledger-out');
+  await runLedgerDemo(out);
+  console.log('ledger demo ok');
 }
 
 const invoked = (process.argv[1] ?? '').replace(/\\/g, '/');
-if (invoked.endsWith('examples/sales-demo.ts') || invoked.endsWith('examples/sales-demo.js')) await main();
+if (invoked.endsWith('examples/ledger-demo.ts') || invoked.endsWith('examples/ledger-demo.js')) await main();

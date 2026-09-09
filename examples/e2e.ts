@@ -1,4 +1,4 @@
-// examples/e2e — fielog JSONL -> seal -> ship to relay dir -> find one trx.
+// examples/e2e — feed JSONL -> seal -> ship to relay dir -> find one trx.
 // Usage: bun examples/e2e.ts [--out /tmp/moltarc-e2e]
 import { mkdirSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -18,9 +18,10 @@ export interface E2EResult {
   relayChunks: number;
 }
 
-// Fielog: paddy-field sensors + farmer activity, zero-padded ids for range prune.
-export function writeFielog(dir: string, rows: number): { hotDb: string; ids: string[] } {
-  const plots = ['petak-1', 'petak-2', 'petak-3', 'petak-4'];
+// Field sensors + operator activity, zero-padded ids for range prune.
+export function writeFeed(dir: string, rows: number): { hotDb: string; ids: string[] } {
+  mkdirSync(dir, { recursive: true });
+  const plots = ['plot-1', 'plot-2', 'plot-3', 'plot-4'];
   const lines: string[] = [];
   const ids: string[] = [];
   const base = 1_700_000_000_000;
@@ -31,21 +32,21 @@ export function writeFielog(dir: string, rows: number): { hotDb: string; ids: st
     const plot = plots[i % plots.length];
     const table = i % 10 === 9 ? 'activity' : 'reading';
     const body = table === 'reading'
-      ? `FIELD READING plot=${plot} temp=${24 + (i % 9)}C humidity=${70 + (i % 21)}% ph=6.${3 + (i % 5)} water=macak-macak sensor=fielog-01`
-      : `FIELD ACTIVITY plot=${plot} kerja=${['tandur', 'ngarit', 'pupuk', 'semprot', 'panen'][i % 5]} actor=${['pak-warto', 'bu-siti', 'mang-dadang'][i % 3]}`;
+      ? `FIELD READING plot=${plot} temp=${24 + (i % 9)}C humidity=${70 + (i % 21)}% ph=6.${3 + (i % 5)} water=wet sensor=device-01`
+      : `FIELD ACTIVITY plot=${plot} task=${['plant', 'cut', 'fertilize', 'spray', 'harvest'][i % 5]} actor=${['warto', 'siti', 'dadang'][i % 3]}`;
     lines.push(JSON.stringify({
-      device_id: i % 2 ? 'fielog-01' : 'fielog-02',
+      device_id: i % 2 ? 'device-01' : 'device-02',
       seq, ts: base + i * 60_000, id, table, body,
     }));
   }
-  const hotDb = join(dir, 'fielog.jsonl');
+  const hotDb = join(dir, 'feed.jsonl');
   writeFileSync(hotDb, `${lines.join('\n')}\n`);
   return { hotDb, ids };
 }
 
 export async function runE2E(baseDir: string, rows = 1200): Promise<E2EResult> {
   mkdirSync(baseDir, { recursive: true });
-  const { hotDb, ids } = writeFielog(baseDir, rows);
+  const { hotDb, ids } = writeFeed(baseDir, rows);
   const outDir = join(baseDir, 'archive');
   const relayDir = join(baseDir, 'relay');
 

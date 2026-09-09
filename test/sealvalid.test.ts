@@ -24,8 +24,8 @@ describe('seal validation', () => {
     const dir = scratch('sealvalid-seq');
     const { hotDb } = writeHotLog(dir, { rows: 300 });
     // 2 malformed / 302 total = 0.66%: under the 1% abort, so seal must succeed.
-    appendFileSync(hotDb, `${JSON.stringify({ device_id: 'pos-01', seq: -5, ts: BASE, id: 'trx-neg', table: 'sales', body: 'bad negative' })}\n`);
-    appendFileSync(hotDb, `${JSON.stringify({ device_id: 'pos-01', seq: 100_000_000, ts: BASE, id: 'trx-big', table: 'sales', body: 'bad oversize' })}\n`);
+    appendFileSync(hotDb, `${JSON.stringify({ device_id: 'pos-01', seq: -5, ts: BASE, id: 'trx-neg', table: 'events', body: 'bad negative' })}\n`);
+    appendFileSync(hotDb, `${JSON.stringify({ device_id: 'pos-01', seq: 100_000_000, ts: BASE, id: 'trx-big', table: 'events', body: 'bad oversize' })}\n`);
     const outDir = join(dir, 'arch');
     const r = await seal({ hotDb, outDir });
     assert.equal(r.rowsSealed, 300);
@@ -58,7 +58,7 @@ describe('seal validation', () => {
     const { hotDb } = writeHotLog(dir, { rows: 400 });
     // 3 malformed / 403 total = 0.74%: under the 1% abort.
     for (const bad of ['', 1.5, -2]) {
-      appendFileSync(hotDb, `${JSON.stringify({ device_id: 'pos-01', seq: bad, ts: BASE, id: `bad-${String(bad)}`, table: 'sales', body: 'bad' })}\n`);
+      appendFileSync(hotDb, `${JSON.stringify({ device_id: 'pos-01', seq: bad, ts: BASE, id: `bad-${String(bad)}`, table: 'events', body: 'bad' })}\n`);
     }
     const r = await seal({ hotDb, outDir: join(dir, 'arch') });
     assert.equal(r.rowsMalformed, 3);
@@ -80,7 +80,7 @@ describe('seal validation', () => {
     db.run('BEGIN');
     const ins = db.query('INSERT INTO tx (device_id, no, waktu, trx, kind, payload) VALUES (?,?,?,?,?,?)');
     for (let i = 0; i < 50; i++) {
-      ins.run('pos-01', i + 1, BASE + i * 1000, `trx-${String(i + 1).padStart(8, '0')}`, 'sales', `cash sale ${i}`);
+      ins.run('pos-01', i + 1, BASE + i * 1000, `trx-${String(i + 1).padStart(8, '0')}`, 'events', `cash sale ${i}`);
     }
     db.run('COMMIT');
     db.close();

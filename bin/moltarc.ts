@@ -41,7 +41,7 @@ function usageLines(): string[] {
     '  moltarc verify <outDir>',
     '  moltarc repair <outDir> <relayDir>',
     '  moltarc status <outDir> [relayDir]',
-    '  moltarc gc <outDir> [relayDir] [--apply] [--deep-foto]',
+    '  moltarc gc <outDir> [relayDir] [--apply] [--deep-photo]',
     '  moltarc merge <outDir>',
     '  moltarc forget <outDir> <relayDir> <chunk> [chunk...]',
     '  moltarc coldg <outDir> [--apply]',
@@ -210,11 +210,11 @@ async function main(): Promise<void> {
     const flags = rest.filter((a) => a.startsWith('--'));
     const positional = rest.filter((a) => !a.startsWith('--'));
     const apply = flags.includes('--apply');
-    const deepFoto = flags.includes('--deep-foto');
+    const deepPhoto = flags.includes('--deep-photo');
     const [outDir, relayDir] = positional;
-    if (!outDir || positional.length > 2 || flags.some((f) => f !== '--apply' && f !== '--deep-foto')) fail('usage: moltarc gc <outDir> [relayDir] [--apply] [--deep-foto]');
+    if (!outDir || positional.length > 2 || flags.some((f) => f !== '--apply' && f !== '--deep-photo')) fail('usage: moltarc gc <outDir> [relayDir] [--apply] [--deep-photo]');
     if (!relayDir) console.log('note: no relayDir given, ack state unknown — all orphans retained (fail-closed)');
-    const r = sweep(outDir, { dryRun: !apply, relayDir, deepFoto });
+    const r = sweep(outDir, { dryRun: !apply, relayDir, deepPhoto });
     if (r.dryRun) console.log(`dry-run: ${r.orphans.length} orphan(s), ${r.skippedUnacked.length} retained, ${r.dictOrphans.length} dict orphan(s), ${r.bytesReclaimed + r.dictBytesReclaimed}B reclaimable`);
     else console.log(`swept ${r.removed.length} chunk(s), ${r.dictsRemoved.length} dict(s), reclaimed ${r.bytesReclaimed + r.dictBytesReclaimed}B`);
     for (const f of r.orphans) console.log(`orphan ${f}`);
@@ -222,8 +222,8 @@ async function main(): Promise<void> {
     for (const f of r.skippedUnacked) console.log(`retained ${f}`);
     for (const f of r.dictOrphans) console.log(`dict-orphan ${f}`);
     for (const f of r.dictsRemoved) console.log(`dict-removed ${f}`);
-    for (const f of r.fotoOrphans) console.log(`foto-orphan ${f}`);
-    for (const f of r.fotoRemoved) console.log(`foto-removed ${f}`);
+    for (const f of r.photoOrphans) console.log(`photo-orphan ${f}`);
+    for (const f of r.photoRemoved) console.log(`photo-removed ${f}`);
     if (r.litter.length > 0) console.log(`litter ${r.litter.length} tmp file(s) collected`);
   } else if (cmd === 'repair') {
     const [outDir, relayDir] = rest;

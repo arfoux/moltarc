@@ -3,6 +3,13 @@
 User-visible changes per tag, from `git log`. Test-only hardening with no
 behavior change is marked as such.
 
+## Unreleased
+
+- Naming, no behavior change: fielog sales events seal as `entry`/`undo`
+  with a `value` payload (`total` still accepted; derived table `entries`);
+  the large-image quarantine is renamed `foto` → `photo` (`photo/`
+  sidecars, `photo:sha256:…` refs, `--deep-photo`, `PHOTO_INLINE_LIMIT_BYTES`).
+
 ## v0.21.2
 
 - No behavior change: npm publish bookkeeping only (`publish npm latest`).

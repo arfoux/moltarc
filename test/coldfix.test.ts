@@ -14,7 +14,7 @@ import { mergeCold, readTar } from '../src/cold.js';
 import { loadManifest } from '../src/manifest.js';
 import { scratch, writeHotLog } from './util.js';
 
-function appendSeqRows(hotDb: string, fromSeq: number, count: number, device = 'pos-01', table = 'sales'): void {
+function appendSeqRows(hotDb: string, fromSeq: number, count: number, device = 'pos-01', table = 'events'): void {
   const base = 1_700_000_000_000;
   const lines: string[] = [];
   for (let k = 0; k < count; k++) {
@@ -22,7 +22,7 @@ function appendSeqRows(hotDb: string, fromSeq: number, count: number, device = '
     lines.push(JSON.stringify({
       device_id: device, seq, ts: base + seq * 1000,
       id: `trx-${String(seq).padStart(8, '0')}`, table,
-      body: `TRANSACTION OK amount=15000 cashier=agus seq=${seq} store=jakarta-selatan`,
+      body: `TRANSACTION OK value=15000 cashier=agus seq=${seq} store=jakarta-selatan`,
     }));
   }
   appendFileSync(hotDb, `${lines.join('\n')}\n`);
@@ -31,7 +31,7 @@ function appendSeqRows(hotDb: string, fromSeq: number, count: number, device = '
 describe('coldfix regressions', () => {
   it('merge-seal-merge keeps cold listing stable with no duplicate chunks', { timeout: 30_000 }, async () => {
     const dir = scratch('coldfix-msm');
-    const { hotDb } = writeHotLog(dir, { rows: 1500, table: 'sales' });
+    const { hotDb } = writeHotLog(dir, { rows: 1500, table: 'events' });
     const outDir = join(dir, 'archive');
     await seal({ hotDb, outDir });
     const m1 = mergeCold(outDir);
@@ -61,7 +61,7 @@ describe('coldfix regressions', () => {
 
   it('ship reports missing warm sources as skipped with ids', { timeout: 30_000 }, async () => {
     const dir = scratch('coldfix-shipskip');
-    const { hotDb } = writeHotLog(dir, { rows: 1500, table: 'sales' });
+    const { hotDb } = writeHotLog(dir, { rows: 1500, table: 'events' });
     const outDir = join(dir, 'archive');
     const relayDir = join(dir, 'relay');
     await seal({ hotDb, outDir });
@@ -83,7 +83,7 @@ describe('coldfix regressions', () => {
     const dir = scratch('coldfix-dictless');
     mkdirSync(dir, { recursive: true });
     const outDir = join(dir, 'archive');
-    // sales: repetitive bodies earn a trained dict; photo: unique bodies earn none.
+    // events: repetitive bodies earn a trained dict; photo: unique bodies earn none.
     // Both tables seal dictId-tagged headers, but only DICT_FLAG chunks need a file.
     const base = 1_700_000_000_000;
     // Deterministic PRNG: photo hashes must be unique and incompressible
@@ -101,8 +101,8 @@ describe('coldfix regressions', () => {
     for (let i = 0; i < 3000; i++) {
       lines.push(JSON.stringify({
         device_id: 'pos-01', seq: i + 1, ts: base + i * 1000,
-        id: `trx-${String(i + 1).padStart(8, '0')}`, table: 'sales',
-        body: `TRANSACTION OK amount=${15000 + (i % 97)} cashier=agus tend=cash change=0 store=jakarta-selatan`,
+        id: `trx-${String(i + 1).padStart(8, '0')}`, table: 'events',
+        body: `TRANSACTION OK value=${15000 + (i % 97)} cashier=agus tend=cash change=0 store=jakarta-selatan`,
       }));
     }
     for (let i = 0; i < 1500; i++) {

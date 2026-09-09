@@ -41,7 +41,7 @@ export function checkReserve(dir: string, free?: number, op = 'seal'): void {
 export interface SweepOpts {
   dryRun?: boolean; // default true
   relayDir?: string; // REQUIRED when dryRun:false (gc --apply): gc only deletes relay-acked chunks (rule 7); dry-run without it retains all orphans, apply without it throws
-  deepFoto?: boolean; // default false: scan warm chunks for foto refs, sweep unreferenced foto/*.bin
+  deepPhoto?: boolean; // default false: scan warm chunks for photo refs, sweep unreferenced photo/*.bin
   freeSpaceBytes?: number; // reserved for future write paths; sweep deletes only, never checks
 }
 
@@ -52,9 +52,9 @@ export interface SweepResult {
   dictOrphans: string[]; // dict files unreferenced by any live manifest entry
   dictsRemoved: string[]; // orphan dicts deleted (dryRun:false only)
   dictBytesReclaimed: number;
-  fotoOrphans: string[]; // foto/<sha>.bin + thumb companions unreferenced by any warm chunk (deepFoto only)
-  fotoRemoved: string[]; // orphan foto files deleted (dryRun:false + relay ack; apply without relayDir throws)
-  fotoMissing: { ref: string; chunk: string }[]; // referenced shas with no sidecar file (deepFoto only)
+  photoOrphans: string[]; // photo/<sha>.bin + thumb companions unreferenced by any warm chunk (deepPhoto only)
+  photoRemoved: string[]; // orphan photo files deleted (dryRun:false + relay ack; apply without relayDir throws)
+  photoMissing: { ref: string; chunk: string }[]; // referenced shas with no sidecar file (deepPhoto only)
   litter: string[]; // tmp/state litter found (relative sub/file), reported even on dry-run
   litterRemoved: string[]; // litter deleted (dryRun:false only)
   bytesReclaimed: number;
@@ -63,16 +63,16 @@ export interface SweepResult {
   bytes: number;
 }
 
-const FOTO_SHA_RE = /^foto:sha256:([0-9a-f]{64}):size=\d+$/;
+const PHOTO_SHA_RE = /^photo:sha256:([0-9a-f]{64}):size=\d+$/;
 
-// Relay foto ack map (Wave2 relay/foto/<sha>.bin layout): returns null when
-// the index has no `foto` key or is unreadable — absent map retains all,
+// Relay photo ack map (Wave2 relay/photo/<sha>.bin layout): returns null when
+// the index has no `photo` key or is unreadable — absent map retains all,
 // never throws. Shape stays tolerant: keys are full shas, values filenames.
-function readRelayFotoMap(relayDir: string): Record<string, string> | null {
+function readRelayPhotoMap(relayDir: string): Record<string, string> | null {
   try {
-    const raw = JSON.parse(readFileSync(join(relayDir, 'index.json'), 'utf8')) as { foto?: unknown };
-    if (!raw || typeof raw !== 'object' || !('foto' in raw)) return null;
-    const m = raw.foto;
+    const raw = JSON.parse(readFileSync(join(relayDir, 'index.json'), 'utf8')) as { photo?: unknown };
+    if (!raw || typeof raw !== 'object' || !('photo' in raw)) return null;
+    const m = raw.photo;
     if (!m || typeof m !== 'object' || Array.isArray(m)) return null;
     return m as Record<string, string>;
   } catch {
@@ -196,21 +196,21 @@ export function sweep(outDir: string, opts: SweepOpts = {}): SweepResult {
     } catch { /* no dicts dir yet: nothing orphaned */ }
     if (dryRun) dictBytesReclaimed = dictOrphanBytes;
   }
-  // Deep foto sweep (opt-in via deepFoto): warm chunk bodies carry
-  // foto:sha256:<sha>:size=<n> hash refs whose bytes live beside the archive
-  // in foto/<sha>.bin (+thumb-<sha>.jpg/json previews). A sidecar no warm
-  // chunk references is dead weight: listed as foto/<file> in fotoOrphans,
+  // Deep photo sweep (opt-in via deepPhoto): warm chunk bodies carry
+  // photo:sha256:<sha>:size=<n> hash refs whose bytes live beside the archive
+  // in photo/<sha>.bin (+thumb-<sha>.jpg/json previews). A sidecar no warm
+  // chunk references is dead weight: listed as photo/<file> in photoOrphans,
   // deleted on apply iff the relay acks the sha. Ack state comes from the
-  // relay index `foto` map (Wave2 relay/foto/<sha>.bin layout); a relay
-  // index with no `foto` key proves nothing, so apply retains everything
+  // relay index `photo` map (Wave2 relay/photo/<sha>.bin layout); a relay
+  // index with no `photo` key proves nothing, so apply retains everything
   // (fail-closed, never throws). Apply without relayDir throws above, so
   // the no-relayDir path below only serves dry-run reclaimable estimates.
-  // Foto bytes reclaimed fold into bytesReclaimed; the ref scan decodes via decodeChunk and skips
+  // Photo bytes reclaimed fold into bytesReclaimed; the ref scan decodes via decodeChunk and skips
   // undecodable chunks (torn/orphan garbage) without failing the sweep.
-  const fotoOrphans: string[] = [];
-  const fotoRemoved: string[] = [];
-  const fotoMissing: { ref: string; chunk: string }[] = [];
-  if (opts.deepFoto) {
+  const photoOrphans: string[] = [];
+  const photoRemoved: string[] = [];
+  const photoMissing: { ref: string; chunk: string }[] = [];
+  if (opts.deepPhoto) {
     const referenced = new Set<string>();
     const refChunk = new Map<string, string>();
     let warmNames: string[] = [];
@@ -226,34 +226,34 @@ export function sweep(outDir: string, opts: SweepOpts = {}): SweepResult {
           : undefined;
         const { rows } = decodeChunk(buf, dict);
         for (const r of rows) {
-          const m = FOTO_SHA_RE.exec(r.body);
+          const m = PHOTO_SHA_RE.exec(r.body);
           if (m) { referenced.add(m[1]); if (!refChunk.has(m[1])) refChunk.set(m[1], f); }
         }
       } catch { /* undecodable chunk: contributes no refs, never fails the sweep */ }
     }
-    let fotoNames: string[] = [];
+    let photoNames: string[] = [];
     try {
-      fotoNames = readdirSync(join(outDir, 'foto')).sort();
-    } catch { fotoNames = []; } // no foto dir yet: nothing orphaned
-    const fotoSet = new Set(fotoNames);
+      photoNames = readdirSync(join(outDir, 'photo')).sort();
+    } catch { photoNames = []; } // no photo dir yet: nothing orphaned
+    const photoSet = new Set(photoNames);
     // Relay ack per sha: without relayDir (dry-run only: apply throws above)
     // counts as acked for the reclaimable estimate; a present relayDir needs
-    // the sha in its `foto` map, and an absent/unreadable map retains everything.
-    const relayFoto = opts.relayDir ? readRelayFotoMap(opts.relayDir) : null;
+    // the sha in its `photo` map, and an absent/unreadable map retains everything.
+    const relayPhoto = opts.relayDir ? readRelayPhotoMap(opts.relayDir) : null;
     const acked = (sha: string): boolean => {
       if (!opts.relayDir) return true;
-      if (relayFoto === null) return false;
-      if (Object.prototype.hasOwnProperty.call(relayFoto, sha)) return true;
-      return Object.values(relayFoto).some((v) => typeof v === 'string' && v.includes(sha));
+      if (relayPhoto === null) return false;
+      if (Object.prototype.hasOwnProperty.call(relayPhoto, sha)) return true;
+      return Object.values(relayPhoto).some((v) => typeof v === 'string' && v.includes(sha));
     };
-    for (const f of fotoNames) {
+    for (const f of photoNames) {
       const m = /^([0-9a-f]{64})\.bin$/.exec(f);
       if (!m || referenced.has(m[1])) continue;
       const sha = m[1];
-      const files = [`foto/${sha}.bin`];
-      if (fotoSet.has(`thumb-${sha}.jpg`)) files.push(`foto/thumb-${sha}.jpg`);
-      if (fotoSet.has(`thumb-${sha}.json`)) files.push(`foto/thumb-${sha}.json`);
-      fotoOrphans.push(...files);
+      const files = [`photo/${sha}.bin`];
+      if (photoSet.has(`thumb-${sha}.jpg`)) files.push(`photo/thumb-${sha}.jpg`);
+      if (photoSet.has(`thumb-${sha}.json`)) files.push(`photo/thumb-${sha}.json`);
+      photoOrphans.push(...files);
       const deletable = !dryRun && acked(sha);
       for (const rel of files) {
         let size = 0;
@@ -263,14 +263,14 @@ export function sweep(outDir: string, opts: SweepOpts = {}): SweepResult {
         } else if (deletable) {
           try {
             unlinkSync(join(outDir, rel));
-            fotoRemoved.push(rel);
+            photoRemoved.push(rel);
             bytesReclaimed += size;
           } catch { /* raced delete: ignore */ }
         }
       }
     }
     for (const sha of referenced) {
-      if (!fotoSet.has(`${sha}.bin`)) fotoMissing.push({ ref: `foto:sha256:${sha}`, chunk: refChunk.get(sha) ?? '' });
+      if (!photoSet.has(`${sha}.bin`)) photoMissing.push({ ref: `photo:sha256:${sha}`, chunk: refChunk.get(sha) ?? '' });
     }
   }
   // Tmp/state litter: crashed writers leave <name>.tmp.<pid> / <name>.tmp
@@ -298,7 +298,7 @@ export function sweep(outDir: string, opts: SweepOpts = {}): SweepResult {
       }
     }
   }
-  return { orphans, removed, skippedUnacked, dictOrphans, dictsRemoved, dictBytesReclaimed, fotoOrphans, fotoRemoved, fotoMissing, litter, litterRemoved, bytesReclaimed, dryRun, chunks, bytes };
+  return { orphans, removed, skippedUnacked, dictOrphans, dictsRemoved, dictBytesReclaimed, photoOrphans, photoRemoved, photoMissing, litter, litterRemoved, bytesReclaimed, dryRun, chunks, bytes };
 }
 
 export interface StatusInfo {

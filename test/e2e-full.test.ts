@@ -29,14 +29,14 @@ function mulberry32(seed: number): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-// 60% sales text / 25% notes text / 15% photo hash-refs (bytes stay in sidecar).
-// Four devices: sales+notes share pos-01/pos-02 by seq parity, photo cam-01/cam-02.
+// 60% events text / 25% notes text / 15% photo hash-refs (bytes stay in sidecar).
+// Four devices: events+notes share pos-01/pos-02 by seq parity, photo cam-01/cam-02.
 function writeMixedHot(dir: string): { hotDb: string; ids: string[]; blobBytes: number } {
   const rnd = mulberry32(7);
   const base = 1_700_000_000_000;
   // Per-table seq 1..N shared across devices (chain needs seq+1 continuity);
   // odd/even split keeps (device_id, seq) unique so dedupe drops nothing.
-  const seqByTable: Record<string, number> = { sales: 0, notes: 0, photo: 0 };
+  const seqByTable: Record<string, number> = { events: 0, notes: 0, photo: 0 };
   const lines: string[] = [];
   const ids: string[] = [];
   let blobBytes = 0;
@@ -45,9 +45,9 @@ function writeMixedHot(dir: string): { hotDb: string; ids: string[]; blobBytes: 
     ids.push(id);
     const slot = rnd();
     if (slot < 0.6) {
-      const seq = ++seqByTable.sales;
+      const seq = ++seqByTable.events;
       const dev = seq % 2 ? 'pos-01' : 'pos-02';
-      lines.push(JSON.stringify({ device_id: dev, seq, ts: base + i * 1000, id, table: 'sales', body: `TRANSACTION OK amount=${15000 + (i % 97)} cashier=agus tend=cash change=0 store=jakarta-selatan ref=${((i * 2654435761) >>> 0).toString(16)}` }));
+      lines.push(JSON.stringify({ device_id: dev, seq, ts: base + i * 1000, id, table: 'events', body: `TRANSACTION OK value=${15000 + (i % 97)} cashier=agus tend=cash change=0 store=jakarta-selatan ref=${((i * 2654435761) >>> 0).toString(16)}` }));
     } else if (slot < 0.85) {
       const seq = ++seqByTable.notes;
       const dev = seq % 2 ? 'pos-02' : 'pos-01';
@@ -81,7 +81,7 @@ describe('e2e full lifecycle', () => {
     let { manifest } = loadManifest(outDir);
     assert.equal(manifest.chunks.reduce((n, e) => n + e.rows, 0), ROWS, 'manifest rows match hot rows');
     assert.ok(manifest.chunks.some((e) => e.table === 'photo'), 'blob table sealed as hash refs');
-    assert.ok(manifest.chunks.some((e) => e.table === 'sales'), 'text table sealed');
+    assert.ok(manifest.chunks.some((e) => e.table === 'events'), 'text table sealed');
     const sealedFiles = manifest.chunks.map((e) => e.file).sort();
 
     // Ship: text-first lanes carry everything with includeBlobs.
@@ -100,7 +100,7 @@ describe('e2e full lifecycle', () => {
     }
 
     // Bitflip one text chunk; the walk must go RED on exactly that chunk.
-    const victim = manifest.chunks.find((e) => e.table === 'sales') ?? manifest.chunks[0];
+    const victim = manifest.chunks.find((e) => e.table === 'events') ?? manifest.chunks[0];
     const full = join(outDir, 'warm', victim.file);
     const buf = Buffer.from(readFileSync(full));
     buf[HEADER_SIZE + 11] ^= 0x01;

@@ -46,7 +46,7 @@ describe('ship resume', () => {
     const relayDir = join(dir, 'relay');
     mkdirSync(join(outDir, 'warm'), { recursive: true });
     const size = 30 * 1024 * 1024;
-    const name = 'sales-000001-000001-aa01.chk';
+    const name = 'events-000001-000001-aa01.chk';
     const buf = Buffer.alloc(size);
     for (let i = 0; i < size; i++) buf[i] = (9 + i * 31) & 0xff;
     writeFileSync(join(outDir, 'warm', name), buf);
@@ -55,7 +55,7 @@ describe('ship resume', () => {
       version: 1,
       createdAt: new Date(0).toISOString(),
       chunks: [{
-        file: name, table: 'sales', seqMin: 1, seqMax: 1,
+        file: name, table: 'events', seqMin: 1, seqMax: 1,
         tsMin: 1, tsMax: 1, rows: 1, bytes: size, sha256: hex,
         crc32c: 0, dictId: 0, codec: 0, minKey: '', maxKey: '', bloom: '',
       }],

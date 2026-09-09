@@ -21,7 +21,7 @@ import { scratch } from './util.js';
 const here = dirname(fileURLToPath(import.meta.url));
 
 function row(id: string, seq: number, ts: number, body: string): HotRow {
-  return { device_id: 'pos-01', seq, ts, id, table: 'sales', body };
+  return { device_id: 'pos-01', seq, ts, id, table: 'events', body };
 }
 
 function fixedArchive(): { outDir: string; names: string[] } {
@@ -35,10 +35,10 @@ function fixedArchive(): { outDir: string; names: string[] } {
     [row('a', 6, 6000, 'a-v2')],
   ];
   const names = batches.map((rows) => {
-    const bytes = encodeChunk('sales', rows);
-    return chunkName('sales', rows[0].seq, rows[rows.length - 1].seq, bytes);
+    const bytes = encodeChunk('events', rows);
+    return chunkName('events', rows[0].seq, rows[rows.length - 1].seq, bytes);
   });
-  batches.forEach((rows, i) => writeFileSync(join(warm, names[i]), encodeChunk('sales', rows)));
+  batches.forEach((rows, i) => writeFileSync(join(warm, names[i]), encodeChunk('events', rows)));
   saveManifestAtomic(outDir, buildManifest(outDir));
   return { outDir, names };
 }

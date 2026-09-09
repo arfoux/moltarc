@@ -32,8 +32,8 @@ describe('seal from sqlite', () => {
     const base = 1_700_000_000_000;
     for (let i = 0; i < 800; i++) {
       const seq = i + 1;
-      ins.run('pos-01', seq, base + i * 1000, `trx-${String(seq).padStart(8, '0')}`, 'sales',
-        `TRANSACTION OK amount=${5000 + (i % 20) * 10000} cashier=agus tend=qris store=bogor-kota`);
+      ins.run('pos-01', seq, base + i * 1000, `trx-${String(seq).padStart(8, '0')}`, 'events',
+        `TRANSACTION OK value=${5000 + (i % 20) * 10000} cashier=agus tend=qris store=bogor-kota`);
     }
     db.run('COMMIT');
     db.close();

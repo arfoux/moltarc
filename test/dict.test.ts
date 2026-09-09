@@ -52,12 +52,12 @@ describe('per-store dictionary', () => {
     void r;
   });
 
-  it('foto tables match the ship blob lane: no dict trained', { timeout: 30_000 }, () => {
-    for (const t of ['foto-pengiriman', 'FOTO-1', 'blob-x', 'photo-a', 'image-b', 'thumb-c']) {
+  it('photo tables match the ship blob lane: no dict trained', { timeout: 30_000 }, () => {
+    for (const t of ['photo-pengiriman', 'PHOTO-1', 'blob-x', 'photo-a', 'image-b', 'thumb-c']) {
       assert.equal(isBlobTable(t), true, t);
       assert.equal(trainTableDict(new Array(200).fill('x'.repeat(64)), t), null, t);
     }
-    assert.equal(isBlobTable('payment'), false);
+    assert.equal(isBlobTable('entry'), false);
   });
 
   it('pre-dict chunks (flagless, any dict_id) still decode', { timeout: 30_000 }, async () => {

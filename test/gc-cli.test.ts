@@ -41,7 +41,7 @@ describe('gc cli', () => {
     const outDir = join(dir, 'archive');
     const relayDir = join(dir, 'relay');
     await seal({ hotDb, outDir });
-    const orphan = plantOrphan(outDir, 'sales-000999-000999-deadbeef.chk');
+    const orphan = plantOrphan(outDir, 'events-000999-000999-deadbeef.chk');
     const out = run('gc', outDir, relayDir);
     assert.match(out, /dry-run/);
     assert.ok(out.includes(`orphan ${orphan}`), `missing orphan line:\n${out}`);
@@ -62,7 +62,7 @@ describe('gc cli', () => {
     const victim = manifest.chunks[0].file;
     const survivor = manifest.chunks[1].file;
     forgetChunks(outDir, [victim], relayDir);
-    const garbage = plantOrphan(outDir, 'sales-000888-000888-cafebabe.chk');
+    const garbage = plantOrphan(outDir, 'events-000888-000888-cafebabe.chk');
     const out = run('gc', outDir, relayDir, '--apply');
     assert.match(out, /swept/);
     assert.ok(out.includes(`removed ${victim}`), `missing removed line:\n${out}`);
@@ -77,7 +77,7 @@ describe('gc cli', () => {
     const { hotDb } = writeHotLog(dir, { rows: 200 });
     const outDir = join(dir, 'archive');
     await seal({ hotDb, outDir });
-    const orphan = plantOrphan(outDir, 'sales-000777-000777-feedface.chk');
+    const orphan = plantOrphan(outDir, 'events-000777-000777-feedface.chk');
     const text = runFail('gc', outDir, '--apply');
     assert.match(text, /gc --apply requires relayDir/, `apply without relay must throw:\n${text}`);
     assert.ok(existsSync(join(outDir, 'warm', orphan)), 'fail-closed: orphan retained');

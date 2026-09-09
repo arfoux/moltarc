@@ -11,11 +11,11 @@ Seal a hot log into warm chunks, ship deltas to a relay, find one record back.
 ## 1. Make a hot log (30 seconds)
 
 ```bash
-# Option A: run the canned example (1200 fielog rows -> archive -> relay -> find)
+# Option A: run the canned example (1200 feed rows -> archive -> relay -> find)
 bun examples/e2e.ts /tmp/moltarc-e2e
 
 # Option B: hand-write one JSONL line
-echo '{"device_id":"fielog-01","seq":1,"ts":1700000000000,"id":"trx-00000001","table":"reading","body":"FIELD READING plot=plot-1 temp=24C"}' > /tmp/hot.jsonl
+echo '{"device_id":"device-01","seq":1,"ts":1700000000000,"id":"trx-00000001","table":"reading","body":"FIELD READING plot=plot-1 temp=24C"}' > /tmp/hot.jsonl
 ```
 
 The example writes the log, seals, ships, and finds one id back

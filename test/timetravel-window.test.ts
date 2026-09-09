@@ -11,7 +11,7 @@ import { verifyFull } from '../src/verify.js';
 import { scratch } from './util.js';
 
 function row(id: string, seq: number, ts: number, body: string): HotRow {
-  return { device_id: 'pos-01', seq, ts, id, table: 'sales', body };
+  return { device_id: 'pos-01', seq, ts, id, table: 'events', body };
 }
 
 function windowArchive(): string {
@@ -25,9 +25,9 @@ function windowArchive(): string {
     [row('a', 6, 6000, 'a-v2')],
   ];
   for (const rows of groups) {
-    const buf = encodeChunk('sales', rows);
+    const buf = encodeChunk('events', rows);
     const seqs = rows.map((r) => r.seq);
-    const name = chunkName('sales', Math.min(...seqs), Math.max(...seqs), buf);
+    const name = chunkName('events', Math.min(...seqs), Math.max(...seqs), buf);
     writeFileSync(join(warm, name), buf);
   }
   saveManifestAtomic(outDir, buildManifest(outDir));

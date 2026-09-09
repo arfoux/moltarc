@@ -10,7 +10,7 @@ import { queryAsOf } from '../src/timetravel.js';
 import { scratch } from './util.js';
 
 function row(id: string, seq: number, ts: number, body: string): HotRow {
-  return { device_id: 'pos-01', seq, ts, id, table: 'sales', body };
+  return { device_id: 'pos-01', seq, ts, id, table: 'events', body };
 }
 
 describe('moltarc timetravel missing-chunk warning', () => {
@@ -24,10 +24,10 @@ describe('moltarc timetravel missing-chunk warning', () => {
       [row('b', 3, 3000, 'b-v2'), row('c', 4, 4000, 'c-v1')],
     ];
     const names = batches.map((rows) => {
-      const bytes = encodeChunk('sales', rows);
-      return chunkName('sales', rows[0].seq, rows[rows.length - 1].seq, bytes);
+      const bytes = encodeChunk('events', rows);
+      return chunkName('events', rows[0].seq, rows[rows.length - 1].seq, bytes);
     });
-    batches.forEach((rows, i) => writeFileSync(join(warm, names[i]), encodeChunk('sales', rows)));
+    batches.forEach((rows, i) => writeFileSync(join(warm, names[i]), encodeChunk('events', rows)));
     saveManifestAtomic(outDir, buildManifest(outDir));
 
     rmSync(join(warm, names[1]));

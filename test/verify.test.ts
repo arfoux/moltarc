@@ -146,8 +146,8 @@ describe('moltarc verify', () => {
         const seq = startSeq + i;
         lines.push(JSON.stringify({
           device_id: 'pos-01', seq, ts: 1_700_000_000_000 + seq * 1000,
-          id: `trx-${String(seq).padStart(8, '0')}`, table: 'sales',
-          body: `TRANSACTION seq=${seq} ref=${((seq * 2654435761) >>> 0).toString(16)} amount=${15000 + (seq % 97)}`,
+          id: `trx-${String(seq).padStart(8, '0')}`, table: 'events',
+          body: `TRANSACTION seq=${seq} ref=${((seq * 2654435761) >>> 0).toString(16)} value=${15000 + (seq % 97)}`,
         }));
       }
       const p = join(dir, name);

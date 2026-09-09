@@ -21,7 +21,7 @@ function run(...args: string[]): string {
 }
 
 function plantOrphan(outDir: string): string {
-  const name = 'sales-000999-000999-deadbeef.chk';
+  const name = 'events-000999-000999-deadbeef.chk';
   writeFileSync(join(outDir, 'warm', name), Buffer.from('orphan-bytes'));
   return name;
 }
