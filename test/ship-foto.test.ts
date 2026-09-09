@@ -1,4 +1,4 @@
-// ship foto: foto sidecars ikut-ship opt-in, foto-first order, resume, reserve gate
+// ship foto: foto sidecars ship only on opt-in, foto-first order, resume, reserve gate
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs';

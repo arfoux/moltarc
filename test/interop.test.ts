@@ -1,5 +1,5 @@
 // Interop: raw fielog kasir.log (bayar/undo events, nominal payload)
-// seals with no manual conversion; one struk finds back intact.
+// seals with no manual conversion; one receipt reads back intact.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'fs';
@@ -46,7 +46,7 @@ describe('fielog interop', () => {
     assert.ok((undo?.body ?? '').includes('ref=trx-00000005'));
   });
 
-  it('kasir.log seals directly and one struk finds back', { timeout: 30_000 }, async () => {
+  it('kasir.log seals directly and one receipt reads back', { timeout: 30_000 }, async () => {
     const dir = scratch('interop');
     const { hotDb, ids } = writeKasirLog(dir, 90);
     const outDir = join(dir, 'archive');
