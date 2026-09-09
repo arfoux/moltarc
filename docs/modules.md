@@ -54,7 +54,7 @@ CLI entrypoint is `bin/moltarc.ts`.
 | `bench/perf.ts` | Seal/ship/find timings, recorded under `perf` in `bench/measured.json` |
 | `examples/e2e.ts` | Field-log feed: 1200 rows seal → ship → find (`bun run e2e`) |
 | `examples/universal-demo.ts` | Generic shop orders, 50 rows, prints shrink ratio (`bun run demo`) |
-| `examples/kasir-demo.ts` | Indonesian struk kasir, 50 rows (`bun run kasir`) |
+| `examples/sales-demo.ts` | Sales receipts, 50 rows (`bun run sales`) |
 | `examples/dashboard.ts` | Timetravel polling demo: windowed recent-state fold polled N times |
 
 Tests mirror modules one-to-one under `test/` (`seal ↔ seal*.test.ts`,

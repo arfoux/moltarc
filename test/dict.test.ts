@@ -57,7 +57,7 @@ describe('per-store dictionary', () => {
       assert.equal(isBlobTable(t), true, t);
       assert.equal(trainTableDict(new Array(200).fill('x'.repeat(64)), t), null, t);
     }
-    assert.equal(isBlobTable('bayar'), false);
+    assert.equal(isBlobTable('payment'), false);
   });
 
   it('pre-dict chunks (flagless, any dict_id) still decode', { timeout: 30_000 }, async () => {

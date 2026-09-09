@@ -32,7 +32,7 @@ export function writeFielog(dir: string, rows: number): { hotDb: string; ids: st
     const table = i % 10 === 9 ? 'activity' : 'reading';
     const body = table === 'reading'
       ? `FIELD READING plot=${plot} temp=${24 + (i % 9)}C humidity=${70 + (i % 21)}% ph=6.${3 + (i % 5)} water=macak-macak sensor=fielog-01`
-      : `FIELD ACTIVITY plot=${plot} kerja=${['tandur', 'ngarit', 'pupuk', 'semprot', 'panen'][i % 5]} oleh=${['pak-warto', 'bu-siti', 'mang-dadang'][i % 3]}`;
+      : `FIELD ACTIVITY plot=${plot} kerja=${['tandur', 'ngarit', 'pupuk', 'semprot', 'panen'][i % 5]} actor=${['pak-warto', 'bu-siti', 'mang-dadang'][i % 3]}`;
     lines.push(JSON.stringify({
       device_id: i % 2 ? 'fielog-01' : 'fielog-02',
       seq, ts: base + i * 60_000, id, table, body,

@@ -13,7 +13,7 @@
   "files": ["src", "bin", "README.md", "CHANGELOG.md", "LICENSE"],
   "scripts": {
     "test": "bun test test/",
-    "test:stable": "bun test test/alerts.test.ts test/bundle.test.ts test/cas.test.ts test/chunk-waste.test.ts test/cli.test.ts test/cold-restore.test.ts test/coldfix.test.ts test/coldg.test.ts test/compat-v05.test.ts test/corrupt.test.ts test/dict.test.ts test/dictdelta.test.ts test/e2e-full.test.ts test/e2e.test.ts test/fault.test.ts test/find-waste.test.ts test/find.test.ts test/foto-gate.test.ts test/gc-cli.test.ts test/gc-cold-waste.test.ts test/gc.test.ts test/interop.test.ts test/kasir.test.ts test/lossfix.test.ts test/manifest-waste.test.ts test/mergecold-stream.test.ts test/migrate.test.ts test/mixed.test.ts test/perf-gate.test.ts test/photo.test.ts test/readme.test.ts test/readonly.test.ts test/repair.test.ts test/resume.test.ts test/seal-append.test.ts test/seal-waste.test.ts test/sensor.test.ts test/sensorticketbundle.test.ts test/ship-foto.test.ts test/ship-waste.test.ts test/shrink.test.ts test/sqlite.test.ts test/thumb.test.ts test/ticket.test.ts test/timeout-guard.test.ts test/timetravel-warn.test.ts test/timetravel.test.ts test/verify-waste.test.ts test/verify.test.ts",
+    "test:stable": "bun test test/alerts.test.ts test/bundle.test.ts test/cas.test.ts test/chunk-waste.test.ts test/cli.test.ts test/cold-restore.test.ts test/coldfix.test.ts test/coldg.test.ts test/compat-v05.test.ts test/corrupt.test.ts test/dict.test.ts test/dictdelta.test.ts test/e2e-full.test.ts test/e2e.test.ts test/fault.test.ts test/find-waste.test.ts test/find.test.ts test/foto-gate.test.ts test/gc-cli.test.ts test/gc-cold-waste.test.ts test/gc.test.ts test/interop.test.ts test/sales.test.ts test/lossfix.test.ts test/manifest-waste.test.ts test/mergecold-stream.test.ts test/migrate.test.ts test/mixed.test.ts test/perf-gate.test.ts test/photo.test.ts test/readme.test.ts test/readonly.test.ts test/repair.test.ts test/resume.test.ts test/seal-append.test.ts test/seal-waste.test.ts test/sensor.test.ts test/sensorticketbundle.test.ts test/ship-foto.test.ts test/ship-waste.test.ts test/shrink.test.ts test/sqlite.test.ts test/thumb.test.ts test/ticket.test.ts test/timeout-guard.test.ts test/timetravel-warn.test.ts test/timetravel.test.ts test/verify-waste.test.ts test/verify.test.ts",
     "test:heavy": "bun test test/concurrent.test.ts && bun test test/p2p.test.ts && bun test test/soak.test.ts && bun test test/worker-safety.test.ts",
     "build": "node node_modules/typescript/bin/tsc -p tsconfig.json",
     "fetch-sqlite": "bun ext/fetch-sqlite.ts",
@@ -23,7 +23,7 @@
     "dict": "bun bench/dict-bench.ts --write-readme",
     "perf": "bun bench/perf.ts",
     "e2e": "bun examples/e2e.ts",
-    "kasir": "bun examples/kasir-demo.ts",
+    "sales": "bun examples/sales-demo.ts",
     "demo": "bun examples/universal-demo.ts"
   },
   "license": "MIT",
