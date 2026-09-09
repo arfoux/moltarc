@@ -11,8 +11,8 @@ Below are sample usages.
   `bun examples/universal-demo.ts [--out <dir>]` / `bun run demo`
 - `e2e.ts` — field-log feed (paddy sensors + farmer activity, 1200 rows).
   `bun examples/e2e.ts [--out <dir>]` / `bun run e2e`
-- `kasir-demo.ts` — Indonesian shop receipts / struk kasir (50 rows).
-  `bun examples/kasir-demo.ts [--out <dir>]` / `bun run kasir`
+- `sales-demo.ts` — shop receipts (50 rows).
+  `bun examples/sales-demo.ts [--out <dir>]` / `bun run sales`
 ## Universal demo
 
 `writeOrders(dir, rows)` writes `orders.jsonl` — one JSON object per line with

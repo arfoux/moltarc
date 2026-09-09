@@ -16,31 +16,31 @@ import { scratch, writeHotLog } from './util.js';
 function hotLine(device: string, seq: number, id: string): string {
   return JSON.stringify({
     device_id: device, seq, ts: 1_700_000_000_000 + seq,
-    id, table: 'sales', body: `bayar nominal=${seq * 1000} kasir=${device} ref=${id}`,
+    id, table: 'sales', body: `payment amount=${seq * 1000} actor=${device} ref=${id}`,
   });
 }
 
 describe('per-device seal watermark', () => {
-  it('sealing kasir-01 seq1-5 never skips kasir-02 seq1-3', { timeout: 30_000 }, async () => {
+  it('sealing device-01 seq1-5 never skips device-02 seq1-3', { timeout: 30_000 }, async () => {
     const dir = scratch('lossfix-twodevice');
     mkdirSync(dir, { recursive: true });
     const hotDb = join(dir, 'hot.jsonl');
     const outDir = join(dir, 'archive');
     const lines: string[] = [];
-    for (let s = 1; s <= 5; s++) lines.push(hotLine('kasir-01', s, `k1-${s}`));
+    for (let s = 1; s <= 5; s++) lines.push(hotLine('device-01', s, `k1-${s}`));
     writeFileSync(hotDb, `${lines.join('\n')}\n`);
 
     const first = await seal({ hotDb, outDir });
     assert.equal(first.rowsSealed, 5);
-    assert.deepEqual(first.sealedByDevice, { 'kasir-01': 5 });
+    assert.deepEqual(first.sealedByDevice, { 'device-01': 5 });
 
-    for (let s = 1; s <= 3; s++) lines.push(hotLine('kasir-02', s, `k2-${s}`));
+    for (let s = 1; s <= 3; s++) lines.push(hotLine('device-02', s, `k2-${s}`));
     writeFileSync(hotDb, `${lines.join('\n')}\n`);
 
     const second = await seal({ hotDb, outDir });
     assert.equal(second.rowsSealed, 3);
     assert.equal(second.rowsSkipped, 5);
-    assert.deepEqual(second.sealedByDevice, { 'kasir-01': 5, 'kasir-02': 3 });
+    assert.deepEqual(second.sealedByDevice, { 'device-01': 5, 'device-02': 3 });
 
     const found = findTrx({ outDir, trxId: 'k2-2' });
     assert.equal(found.row.id, 'k2-2');

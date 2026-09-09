@@ -95,7 +95,7 @@ Every flag verified against [bin/moltarc.ts](bin/moltarc.ts); full reference in 
 
 ## Interop (fielog)
 
-Raw `kasir.log` cashier events (`bayar`/`undo` + `nominal`) seal with no manual conversion — Indonesian/English field aliases in `normRow`. Note and alias table in [docs/interop.md](docs/interop.md) (proof: `test/interop.test.ts`).
+Raw `ledger.log` sales events (`payment`/`undo` + `amount`) seal with no manual conversion; key table in [docs/interop.md](docs/interop.md) (proof: `test/interop.test.ts`).
 
 ## Honest SLA (measured, not planned)
 
@@ -167,7 +167,7 @@ _Measured by `bun bench/dict-bench.ts --write-readme`; same corpus both sides, o
 - [docs/cli.md](docs/cli.md) — every subcommand, flags verified against `bin/moltarc.ts`
 - [docs/modules.md](docs/modules.md) — module ownership table
 - [docs/contracts.md](docs/contracts.md) — numeric contracts and gates
-- [docs/interop.md](docs/interop.md) — fielog `kasir.log` interop + field aliases
+- [docs/interop.md](docs/interop.md) — fielog `ledger.log` interop + field aliases
 - [docs/troubleshooting.md](docs/troubleshooting.md) — symptoms, exact errors, fixes
 - [docs/bench.md](docs/bench.md) — how SLA numbers are measured + flake policy
 - [docs/compat.md](docs/compat.md) — N-2 codec rule, manifest tolerance, native binary note

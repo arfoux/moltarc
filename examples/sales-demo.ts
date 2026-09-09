@@ -1,5 +1,5 @@
-// examples/kasir-demo — 50 cashier receipts: seal -> ship -> find 1 receipt, print ratio.
-// Usage: bun examples/kasir-demo.ts [--out examples/out]
+// examples/sales-demo — 50 sales receipts: seal -> ship -> find 1 receipt, print ratio.
+// Usage: bun examples/sales-demo.ts [--out examples/out]
 import { mkdirSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -8,7 +8,7 @@ import { ship, readRelayIndex } from '../src/ship.js';
 import { findTrx } from '../src/find.js';
 import type { HotRow } from '../src/chunk.js';
 
-export interface KasirResult {
+export interface SalesResult {
   hotDb: string;
   targetId: string;
   row: HotRow;
@@ -19,10 +19,10 @@ export interface KasirResult {
   shipped: number;
 }
 
-const HEAD = 'TOKO SUMBER MAKMUR JL RAYA BOGOR KM 42 STRUK:';
-const TAIL = 'TERIMA KASIH SUDAH BERBELANJA';
+const HEAD = 'SUMBER MAKMUR STORE JL RAYA BOGOR KM 42 RECEIPT:';
+const TAIL = 'THANK YOU FOR SHOPPING';
 
-export function writeStruk(dir: string, rows: number): { hotDb: string; ids: string[] } {
+export function writeReceipt(dir: string, rows: number): { hotDb: string; ids: string[] } {
   mkdirSync(dir, { recursive: true });
   const base = 1_700_000_000_000;
   const lines: string[] = [];
@@ -33,18 +33,18 @@ export function writeStruk(dir: string, rows: number): { hotDb: string; ids: str
     ids.push(id);
     const amt = 5000 + ((i * 37) % 20) * 10000;
     lines.push(JSON.stringify({
-      device_id: 'kasir-01', seq, ts: base + i * 30_000, id, table: 'sales',
-      body: `${HEAD} no=${1000 + i} amount=${amt} tend=${i % 3 === 0 ? 'cash' : 'qris'} kasir=agus ${TAIL}`,
+      device_id: 'device-01', seq, ts: base + i * 30_000, id, table: 'sales',
+      body: `${HEAD} no=${1000 + i} amount=${amt} tend=${i % 3 === 0 ? 'cash' : 'qris'} actor=agus ${TAIL}`,
     }));
   }
-  const hotDb = join(dir, 'kasir.jsonl');
+  const hotDb = join(dir, 'ledger.jsonl');
   writeFileSync(hotDb, `${lines.join('\n')}\n`);
   return { hotDb, ids };
 }
 
-export async function runKasirDemo(baseDir: string, rows = 50): Promise<KasirResult> {
+export async function runSalesDemo(baseDir: string, rows = 50): Promise<SalesResult> {
   mkdirSync(baseDir, { recursive: true });
-  const { hotDb, ids } = writeStruk(baseDir, rows);
+  const { hotDb, ids } = writeReceipt(baseDir, rows);
   const outDir = join(baseDir, 'archive');
   const relayDir = join(baseDir, 'relay');
 
@@ -67,10 +67,10 @@ export async function runKasirDemo(baseDir: string, rows = 50): Promise<KasirRes
 }
 
 async function main(): Promise<void> {
-  const out = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? join(dirname(fileURLToPath(import.meta.url)), 'kasir-out');
-  await runKasirDemo(out);
-  console.log('cashier demo ok');
+  const out = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? join(dirname(fileURLToPath(import.meta.url)), 'sales-out');
+  await runSalesDemo(out);
+  console.log('sales demo ok');
 }
 
 const invoked = (process.argv[1] ?? '').replace(/\\/g, '/');
-if (invoked.endsWith('examples/kasir-demo.ts') || invoked.endsWith('examples/kasir-demo.js')) await main();
+if (invoked.endsWith('examples/sales-demo.ts') || invoked.endsWith('examples/sales-demo.js')) await main();

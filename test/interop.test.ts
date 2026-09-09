@@ -1,4 +1,4 @@
-// Interop: raw fielog kasir.log (bayar/undo events, nominal payload)
+// Interop: raw fielog ledger.log (payment/undo events, amount payload)
 // seals with no manual conversion; one receipt reads back intact.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,7 +8,7 @@ import { seal, normRow } from '../src/seal.js';
 import { findTrx } from '../src/find.js';
 import { scratch } from './util.js';
 
-function writeKasirLog(dir: string, events: number): { hotDb: string; ids: string[] } {
+function writeSalesLog(dir: string, events: number): { hotDb: string; ids: string[] } {
   const base = 1_700_000_000_000;
   const lines: string[] = [];
   const ids: string[] = [];
@@ -18,37 +18,37 @@ function writeKasirLog(dir: string, events: number): { hotDb: string; ids: strin
       // undo references an earlier trx; its own row keeps device:seq identity.
       const ref = `trx-${String(seq - 4).padStart(8, '0')}`;
       lines.push(JSON.stringify({
-        device_id: 'kasir-01', seq, ts: base + i * 30_000, event: 'undo',
-        ref, alasan: 'salah input', kasir: 'agus',
+        device_id: 'device-01', seq, ts: base + i * 30_000, event: 'undo',
+        ref, reason: 'salah input', actor: 'agus',
       }));
     } else {
       const id = `trx-${String(seq).padStart(8, '0')}`;
       ids.push(id);
       lines.push(JSON.stringify({
-        device_id: 'kasir-01', seq, ts: base + i * 30_000, type: 'bayar',
-        trx: id, nominal: 5000 + ((i * 37) % 20) * 10000, kasir: 'agus',
+        device_id: 'device-01', seq, ts: base + i * 30_000, type: 'payment',
+        trx: id, amount: 5000 + ((i * 37) % 20) * 10000, actor: 'agus',
       }));
     }
   }
-  const hotDb = join(dir, 'kasir.log');
+  const hotDb = join(dir, 'ledger.log');
   writeFileSync(hotDb, `${lines.join('\n')}\n`);
   return { hotDb, ids };
 }
 
 describe('fielog interop', () => {
-  it('normRow handles bayar/undo events with nominal payload', { timeout: 30_000 }, () => {
-    const bayar = normRow({ device_id: 'kasir-01', seq: 3, type: 'bayar', trx: 'trx-00000003', nominal: 55000, kasir: 'agus' }, 'log');
-    assert.equal(bayar?.table, 'bayar');
-    assert.equal(bayar?.id, 'trx-00000003');
-    assert.ok((bayar?.body ?? '').includes('nominal=55000'));
-    const undo = normRow({ device_id: 'kasir-01', seq: 9, event: 'undo', ref: 'trx-00000005', alasan: 'salah input' }, 'log');
+  it('normRow handles payment/undo events with amount payload', { timeout: 30_000 }, () => {
+    const payment = normRow({ device_id: 'device-01', seq: 3, type: 'payment', trx: 'trx-00000003', amount: 55000, actor: 'agus' }, 'log');
+    assert.equal(payment?.table, 'payment');
+    assert.equal(payment?.id, 'trx-00000003');
+    assert.ok((payment?.body ?? '').includes('amount=55000'));
+    const undo = normRow({ device_id: 'device-01', seq: 9, event: 'undo', ref: 'trx-00000005', reason: 'salah input' }, 'log');
     assert.equal(undo?.table, 'undo');
     assert.ok((undo?.body ?? '').includes('ref=trx-00000005'));
   });
 
-  it('kasir.log seals directly and one receipt reads back', { timeout: 30_000 }, async () => {
+  it('ledger.log seals directly and one receipt reads back', { timeout: 30_000 }, async () => {
     const dir = scratch('interop');
-    const { hotDb, ids } = writeKasirLog(dir, 90);
+    const { hotDb, ids } = writeSalesLog(dir, 90);
     const outDir = join(dir, 'archive');
     const r = await seal({ hotDb, outDir });
     assert.equal(r.rowsSealed, 90);
@@ -56,8 +56,8 @@ describe('fielog interop', () => {
     const target = ids[40];
     const found = findTrx({ outDir, trxId: target });
     assert.equal(found.row.id, target);
-    assert.equal(found.row.table, 'bayar');
-    assert.ok(found.row.body.includes('nominal='));
+    assert.equal(found.row.table, 'payment');
+    assert.ok(found.row.body.includes('amount='));
     assert.equal(found.chunksFetched, 1);
   });
 });

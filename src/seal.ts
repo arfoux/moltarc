@@ -57,27 +57,29 @@ function toInt(n: unknown): number | null {
 // outside 1..99999999 can never link back, so it is malformed at seal time.
 export const SEQ_MAX = 99_999_999;
 
-// Fielog interop: raw cashier events (`type`/`event` bayar/undo, `nominal`
+// Fielog interop: raw ledger events (`type`/`event` payment/undo, `amount`
 // payload) normalize with no manual conversion step.
 export function normRow(o: Record<string, unknown>, fallbackTable: string): HotRow | null {
-  const seqRaw = o.seq ?? o.no ?? o.nomor;
+  // Structural numeric aliases (no/waktu): foreign sqlite schemas name their
+  // sequence/time columns arbitrarily — sealing them is a feature, not interop.
+  const seqRaw = o.seq ?? o.no;
   if (seqRaw === undefined || seqRaw === null) return null;
   const seq = toInt(seqRaw);
   if (seq === null || seq <= 0 || seq > SEQ_MAX) return null;
   const ts = toInt(o.ts ?? o.timestamp ?? o.waktu ?? Date.now());
   if (ts === null || ts < 0) return null;
-  const kind = o.type ?? o.event ?? o.jenis;
-  const nominal = o.nominal ?? o.amount ?? o.total;
-  const bodyRaw = o.body ?? o.payload ?? o.msg ?? o.data ?? o.catatan ?? o.note ?? o.keterangan ?? '';
-  const device = String(o.device_id ?? o.device ?? o.kasir_id ?? 'dev0');
+  const kind = o.type ?? o.event;
+  const amount = o.amount ?? o.total;
+  const bodyRaw = o.body ?? o.payload ?? o.msg ?? o.data ?? o.note ?? o.details ?? '';
+  const device = String(o.device_id ?? o.device ?? 'dev0');
   const body = bodyRaw !== ''
     ? (typeof bodyRaw === 'string' ? bodyRaw : JSON.stringify(bodyRaw))
     : [
       kind !== undefined ? String(kind) : '',
-      nominal !== undefined ? `nominal=${String(nominal)}` : '',
-      o.kasir !== undefined ? `kasir=${String(o.kasir)}` : '',
+      amount !== undefined ? `amount=${String(amount)}` : '',
+      o.actor !== undefined ? `actor=${String(o.actor)}` : '',
       o.ref !== undefined ? `ref=${String(o.ref)}` : '',
-      o.alasan !== undefined ? `alasan=${String(o.alasan)}` : '',
+      o.reason !== undefined ? `reason=${String(o.reason)}` : '',
     ].filter((s) => s !== '').join(' ');
   // Fallback id is namespaced with the table: bare device:seq collides across
   // tables sharing one hot log, so find() can mistake one table's row for another's.
@@ -240,7 +242,7 @@ export function chunkName(table: string, seqMin: number, seqMax: number, bytes: 
 }
 // Per-device watermark: sealed_upto_seq holds a JSON map of device_id to
 // max sealed seq. A global r.seq <= watermark check drops slow devices
-// silently (kasir-02 seq 1..3 all fall under kasir-01 seq 1..5), so the
+// silently (device-02 seq 1..3 all fall under device-01 seq 1..5), so the
 // skip and the advance below are both keyed by device_id.
 // Legacy single-number files predate multi-device sealing: the old global
 // check skipped seq <= N for every device, so N floors each device seen
