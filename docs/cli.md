@@ -56,6 +56,10 @@ rotation list, primary first) or the trusted-LAN fallback when unset
 promote to `<new>` alone with an updated id once every node has the list. Prints `synced / skipped / failed / bytes` plus one line per
 received/failed chunk.
 
+> **WARNING: serving is LAN-open by default.** An empty `allowPeers` list serves anyone on
+> the LAN who can reach the port. Set `MOLTARC_PSK` and/or a non-empty `allowPeers`
+> allowlist before exposing a node past trusted LAN.
+
 ## Read path
 
 ### `find` — one row, one chunk

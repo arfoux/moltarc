@@ -56,4 +56,36 @@ describe('claim', () => {
     );
     assert.throws(() => ClaimStore.fromJSON({ issued: [], used: 'nope' } as never), /arrays/);
   });
+
+  it('expired claims are rejected; unexpired and timeless claims still spend', { timeout: 30_000 }, () => {
+    const s = new ClaimStore();
+    const old = s.issue(100, Date.now() - 10_000, 'old', 1000);
+    assert.equal(old.expiresAt, old.issuedAt + 1000);
+    assert.deepEqual(s.use(old.id), { ok: false, reason: 'expired' });
+    assert.equal(s.isUsed(old.id), false, 'expired use never marks spent');
+    assert.deepEqual(s.use(old.id), { ok: false, reason: 'expired' });
+
+    const fresh = s.issue(100, Date.now(), 'fresh', 60_000);
+    assert.equal(s.use(fresh.id).ok, true);
+
+    // No ttl = never expires, even with an ancient issuedAt.
+    const timeless = s.issue(100, 1, 'timeless');
+    assert.equal(timeless.expiresAt, undefined);
+    assert.equal(s.use(timeless.id).ok, true);
+  });
+
+  it('ttl validates, never enters the id hash, and survives snapshots', { timeout: 30_000 }, () => {
+    assert.equal(issueClaim(500, 9, 'x', 1000).id, issueClaim(500, 9, 'x').id);
+    assert.equal(issueClaim(500, 9, 'x', 1000).expiresAt, 1009);
+    assert.throws(() => issueClaim(5, 1, 'n', -1), /ttlMs/);
+    assert.throws(() => issueClaim(5, 1, 'n', NaN), /ttlMs/);
+    const s = new ClaimStore();
+    const old = s.issue(100, Date.now() - 10_000, 'snap-old', 1000);
+    const restored = ClaimStore.fromJSON(s.toJSON());
+    assert.equal(restored.use(old.id).reason, 'expired', 'snapshot keeps the expiry');
+    assert.throws(
+      () => ClaimStore.fromJSON({ issued: [{ id: 'x', value: 1, issuedAt: 1, nonce: 'n', expiresAt: NaN }], used: [], tries: [] }),
+      /invalid claim/,
+    );
+  });
 });

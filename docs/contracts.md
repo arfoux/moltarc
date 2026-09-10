@@ -91,3 +91,7 @@ P2P frames are `HMAC-SHA256(json) + '.' + json`, verified on raw bytes
 promote to `<new>` alone with an updated id once every node has the list (`src/p2p.ts`). No PSK means
 documented trusted-LAN-only fallback — anyone on the network can sync. The legacy `token` guards hello only; `allowPeers`
 holds `sha256(token)` strings and an empty list serves anyone.
+
+> **WARNING: serving is LAN-open by default.** An empty `allowPeers` list serves anyone on
+> the LAN who can reach the port. Set `MOLTARC_PSK` and/or a non-empty `allowPeers`
+> allowlist before exposing a node past trusted LAN.

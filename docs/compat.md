@@ -68,21 +68,20 @@ artifacts, never committed. They stay git-ignored (`ext/*.dll`, `ext/*.so`,
 `ext/amalg/` in `.gitignore`; do not un-ignore them) because a built binary
 is non-portable by construction:
 
-- Platform ABI: the checked-in proof binary is a MinGW gcc 14.2 x64 build
-  for Windows. It does not load on Linux/macOS or other architectures.
-- Baked-in absolute path: the build compiles
-  `-DMOLTARC_TS="<abs path>/ext/moltarc.ts"` into the subprocess hook
-  (`ext/moltarc_hook.c`), so the dll only works on the machine (and
-  checkout path) that built it.
+- Baked-in bridge path: the build compiles
+  `-DMOLTARC_TS="ext/moltarc.ts"` into the subprocess hook
+  (`ext/moltarc_hook.c`), so the dll shells out to `bun ext/moltarc.ts`
+  from the checkout root. Run SQL from the checkout root (or rebuild with
+  your own path); moving the dll without its checkout + bun breaks it.
 - Runtime dependency: every SQL call shells out to `bun ext/moltarc.ts`
   (`MOLTARC_BUN`, default `bun` on `PATH`); moving the dll without its
   checkout + bun breaks it.
 
-Rebuild per machine (MinGW gcc 14.2, sqlite amalgamation headers in
-`ext/amalg/`, kept out of git the same way):
+Rebuild per machine from the checkout root (MinGW gcc 14.2, sqlite
+amalgamation headers in `ext/amalg/`, kept out of git the same way):
 
 ```
-gcc -shared -O2 -I ext/amalg/sqlite-amalgamation-3530400 -DMOLTARC_TS="<abs path>/ext/moltarc.ts" ext/moltarc.c ext/moltarc_hook.c -o ext/moltarc.dll
+gcc -shared -O2 -I ext/amalg/sqlite-amalgamation-3530400 -DMOLTARC_TS="ext/moltarc.ts" ext/moltarc.c ext/moltarc_hook.c -o ext/moltarc.dll
 ```
 
 Proof after rebuilding: `bun test ext/moltarc-dll.test.ts` loads the local

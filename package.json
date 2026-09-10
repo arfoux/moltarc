@@ -17,7 +17,7 @@
     "test:heavy": "bun test test/concurrent.test.ts && bun test test/p2p.test.ts && bun test test/soak.test.ts && bun test test/worker-safety.test.ts",
     "build": "node node_modules/typescript/bin/tsc -p tsconfig.json",
     "fetch-sqlite": "bun ext/fetch-sqlite.ts",
-    "build:ext": "gcc -shared -O2 -I ext/amalg/sqlite-amalgamation-3530400 -DMOLTARC_TS=\"C:/Users/HP/documents/vscode/molt/ext/moltarc.ts\" ext/moltarc.c ext/moltarc_hook.c -o ext/moltarc.dll",
+    "build:ext": "gcc -shared -O2 -I ext/amalg/sqlite-amalgamation-3530400 -DMOLTARC_TS=\"ext/moltarc.ts\" ext/moltarc.c ext/moltarc_hook.c -o ext/moltarc.dll",
     "bench": "bun bench/mixed-corpus.ts --write-readme",
     "photo": "bun bench/photo-bench.ts --write-readme",
     "dict": "bun bench/dict-bench.ts --write-readme",

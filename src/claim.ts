@@ -8,9 +8,11 @@ export interface Claim {
   value: number;
   issuedAt: number;
   nonce: string;
+  /** absolute expiry (ms epoch). Absent = never expires (backward compatible). */
+  expiresAt?: number;
 }
 
-export type UseReason = 'ok' | 'double-use' | 'unknown';
+export type UseReason = 'ok' | 'double-use' | 'unknown' | 'expired';
 
 export interface UseResult {
   ok: boolean;
@@ -29,13 +31,17 @@ function randNonce(): string {
   return Buffer.from(bytes).toString('hex');
 }
 
-// deterministic id: same (value, issuedAt, nonce) reissues the same claim.
-export function issueClaim(value: number, issuedAt: number = Date.now(), nonce: string = randNonce()): Claim {
+// deterministic id: same (value, issuedAt, nonce) reissues the same claim
+// (ttl never enters the hash). ttlMs is a lifetime from issuedAt: the claim
+// carries expiresAt = issuedAt + ttlMs. Omitted ttlMs = never expires.
+export function issueClaim(value: number, issuedAt: number = Date.now(), nonce: string = randNonce(), ttlMs?: number): Claim {
   if (!Number.isFinite(value) || value <= 0) throw new Error('issueClaim: value must be > 0');
   if (!Number.isFinite(issuedAt)) throw new Error('issueClaim: issuedAt must be finite');
   if (nonce === '') throw new Error('issueClaim: nonce must be non-empty');
+  if (ttlMs !== undefined && (!Number.isFinite(ttlMs) || ttlMs < 0)) throw new Error('issueClaim: ttlMs must be >= 0');
   const id = `t-${sha256hex(Buffer.from(`${value}:${issuedAt}:${nonce}`, 'utf8')).slice(0, 12)}`;
-  return { id, value, issuedAt, nonce };
+  const expiresAt = ttlMs === undefined ? undefined : issuedAt + ttlMs;
+  return expiresAt === undefined ? { id, value, issuedAt, nonce } : { id, value, issuedAt, nonce, expiresAt };
 }
 
 // in-memory only: the used set lives in this process. callers MUST persist
@@ -46,8 +52,8 @@ export class ClaimStore {
   private used = new Set<string>();
   private tries = new Map<string, number>();
 
-  issue(value: number, issuedAt?: number, nonce?: string): Claim {
-    const v = issueClaim(value, issuedAt, nonce);
+  issue(value: number, issuedAt?: number, nonce?: string, ttlMs?: number): Claim {
+    const v = issueClaim(value, issuedAt, nonce, ttlMs);
     this.issued.set(v.id, v);
     return v;
   }
@@ -67,9 +73,13 @@ export class ClaimStore {
   // offline use: the exact used set decides, O(1) — no scan, no bloom
   // rebuild. unknown ids are rejected before any try is recorded, so
   // unissued ids never pollute the tries map. second use of the
-  // same id reports double-use; unissued ids report unknown.
+  // same id reports double-use; unissued ids report unknown. claims past
+  // expiresAt report expired and are never marked used (no default expiry:
+  // claims without expiresAt never expire).
   use(id: string): UseResult {
-    if (!this.issued.has(id)) return { ok: false, reason: 'unknown' };
+    const claim = this.issued.get(id);
+    if (!claim) return { ok: false, reason: 'unknown' };
+    if (claim.expiresAt !== undefined && Date.now() > claim.expiresAt) return { ok: false, reason: 'expired' };
     this.tries.set(id, (this.tries.get(id) ?? 0) + 1);
     if (this.used.has(id)) return { ok: false, reason: 'double-use' };
     this.used.add(id);
@@ -111,11 +121,14 @@ export class ClaimStore {
       if (
         typeof v !== 'object' || v === null || typeof v.id !== 'string' || v.id === '' ||
         !Number.isFinite(v.value) || v.value <= 0 || !Number.isFinite(v.issuedAt) ||
-        typeof v.nonce !== 'string' || v.nonce === ''
+        typeof v.nonce !== 'string' || v.nonce === '' ||
+        (v.expiresAt !== undefined && !Number.isFinite(v.expiresAt))
       ) {
         throw new Error('ClaimStore.fromJSON: invalid claim');
       }
-      s.issued.set(v.id, { id: v.id, value: v.value, issuedAt: v.issuedAt, nonce: v.nonce });
+      s.issued.set(v.id, v.expiresAt === undefined
+        ? { id: v.id, value: v.value, issuedAt: v.issuedAt, nonce: v.nonce }
+        : { id: v.id, value: v.value, issuedAt: v.issuedAt, nonce: v.nonce, expiresAt: v.expiresAt });
     }
     for (const id of snap.used) {
       if (typeof id !== 'string' || id === '') throw new Error('ClaimStore.fromJSON: invalid used id');

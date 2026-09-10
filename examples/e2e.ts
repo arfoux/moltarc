@@ -33,7 +33,7 @@ export function writeFeed(dir: string, rows: number): { hotDb: string; ids: stri
     const table = i % 10 === 9 ? 'activity' : 'reading';
     const body = table === 'reading'
       ? `FIELD READING plot=${plot} temp=${24 + (i % 9)}C humidity=${70 + (i % 21)}% ph=6.${3 + (i % 5)} water=wet sensor=device-01`
-      : `FIELD ACTIVITY plot=${plot} task=${['plant', 'cut', 'fertilize', 'spray', 'harvest'][i % 5]} actor=${['warto', 'siti', 'dadang'][i % 3]}`;
+      : `FIELD ACTIVITY plot=${plot} task=${['plant', 'cut', 'fertilize', 'spray', 'audit'][i % 5]} actor=${['warto', 'siti', 'dadang'][i % 3]}`;
     lines.push(JSON.stringify({
       device_id: i % 2 ? 'device-01' : 'device-02',
       seq, ts: base + i * 60_000, id, table, body,
