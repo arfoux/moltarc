@@ -79,7 +79,7 @@ shape in `bin/moltarc.ts:35-53`.
   valid forever, giving 1791 B delta vs 211 716 B full (`docs/bench.md`,
   `src/ship.ts:63-67`).
 - With `includeBlobs`, `photo/*.bin` sidecars ship in the same call (small
-  copy-if-missing, large resumable) — a ticket never precedes its painting
+  copy-if-missing, large resumable) — a claim never precedes its painting
   (`src/ship.ts:218-228`).
 
 ## Find: warm-default, single-chunk fetch

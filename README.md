@@ -63,7 +63,7 @@ Five minutes, step by step, in [docs/getting-started.md](docs/getting-started.md
 |---|---|
 | Pipeline | [src/seal.ts](src/seal.ts) · [src/chunk.ts](src/chunk.ts) · [src/manifest.ts](src/manifest.ts) · [src/dict.ts](src/dict.ts) · [src/ship.ts](src/ship.ts) · [src/find.ts](src/find.ts) · [src/verify.ts](src/verify.ts) · [src/cold.ts](src/cold.ts) · [src/gc.ts](src/gc.ts) |
 | Sync/history/upgrade | [src/p2p.ts](src/p2p.ts) · [src/timetravel.ts](src/timetravel.ts) · [src/migrate.ts](src/migrate.ts) · [src/readonly.ts](src/readonly.ts) · [src/alerts.ts](src/alerts.ts) |
-| Rails/media | [src/guard.ts](src/guard.ts) · [src/thumb.ts](src/thumb.ts) · [src/cas.ts](src/cas.ts) · [src/bundle.ts](src/bundle.ts) · [src/ticket.ts](src/ticket.ts) · [src/sensor.ts](src/sensor.ts) |
+| Rails/media | [src/guard.ts](src/guard.ts) · [src/thumb.ts](src/thumb.ts) · [src/cas.ts](src/cas.ts) · [src/bundle.ts](src/bundle.ts) · [src/claim.ts](src/claim.ts) · [src/sensor.ts](src/sensor.ts) |
 | Edges | [bin/moltarc.ts](bin/moltarc.ts) · [ext/moltarc.ts](ext/moltarc.ts) · [bench/](bench/mixed-corpus.ts) · [examples/](examples/e2e.ts) |
 
 Ownership table with one-liners: [docs/modules.md](docs/modules.md).

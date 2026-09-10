@@ -39,7 +39,7 @@ describe('cli3: barrel + new subcommands', () => {
       ['readonly', 'openArchiveReadOnly'],
       ['alerts', 'checkUnacked'],
       ['sensor', 'downsample'],
-      ['ticket', 'issueTicket'],
+      ['claim', 'issueClaim'],
       ['bundle', 'packBundle'],
       ['thumb', 'makeThumb'],
       ['cas', 'casPut'],

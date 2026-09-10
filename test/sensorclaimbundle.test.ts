@@ -1,14 +1,14 @@
-// combined sensor + ticket + bundle: quarantine a spike, spend a voucher,
+// combined sensor + claim + bundle: quarantine a spike, spend a claim,
 // pack both reports as one hash-linked bundle.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { downsample, flagAnomalies, routeQuarantine, bucketsToRows, packSensor, unpackSensor } from '../src/sensor.js';
-import { TicketStore } from '../src/ticket.js';
+import { ClaimStore } from '../src/claim.js';
 import { packBundle, verifyBundle } from '../src/bundle.js';
 import { scratch } from './util.js';
 
-describe('sensor+ticket+bundle', () => {
-  it('quarantine + voucher + hash-linked pack verify clean', { timeout: 30_000 }, () => {
+describe('sensor+claim+bundle', () => {
+  it('quarantine + claim + hash-linked pack verify clean', { timeout: 30_000 }, () => {
     const base = 1_700_000_000_000;
     const points = Array.from({ length: 20 }, (_, i) => ({
       ts: base + i * 1000,
@@ -24,14 +24,14 @@ describe('sensor+ticket+bundle', () => {
     const chunk = packSensor('sensor', bucketsToRows(buckets));
     assert.equal(unpackSensor(chunk).rows.length, buckets.length);
 
-    const store = new TicketStore();
-    const voucher = store.issue(50000, base, 'event-1');
-    assert.equal(store.redeem(voucher.id).ok, true);
-    const rep = store.reconcile([voucher.id]);
-    assert.deepEqual(rep.clean, [voucher.id]);
+    const store = new ClaimStore();
+    const claim = store.issue(50000, base, 'event-1');
+    assert.equal(store.use(claim.id).ok, true);
+    const rep = store.reconcile([claim.id]);
+    assert.deepEqual(rep.clean, [claim.id]);
 
     const dir = scratch('stb-combined');
-    const text = `posko: quarantined=${route.quarantined.length} spent=${voucher.id}`;
+    const text = `posko: quarantined=${route.quarantined.length} spent=${claim.id}`;
     packBundle(dir, text, [
       { name: 'sensor.chunk', data: chunk },
       { name: 'reconcile.json', data: Buffer.from(JSON.stringify(rep)) },
