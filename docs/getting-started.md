@@ -19,7 +19,7 @@ echo '{"device_id":"device-01","seq":1,"ts":1700000000000,"id":"evt-00000001","t
 ```
 
 The example writes the log, seals, ships, and finds one id back
-(`examples/e2e.ts:46-65`).
+(`examples/e2e.ts:47-66`).
 
 ## 2. Seal hot -> warm (1 minute)
 
@@ -68,7 +68,7 @@ bun bin/moltarc.ts merge /tmp/moltarc/archive
 
 ## What good looks like
 
-- `seal` prints rows sealed + chunk count (see `examples/e2e.ts:53`).
+- `seal` prints rows sealed + chunk count (see `examples/e2e.ts:54`).
 - `ship` prints chunks sent; a second `ship` with no new data sends nothing.
 - `find` prints the chunk name and `fetched 1`-style single-chunk hit.
 - Measured ratios for planning (seeded benches, `README.md` Honest SLA):

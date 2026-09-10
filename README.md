@@ -83,7 +83,7 @@ Numbers with enforcing constants: [docs/contracts.md](docs/contracts.md).
 moltarc seal <hot.jsonl|hot.db> <outDir> [--table <name>]
 moltarc ship <outDir> <relayDir> [--blobs]
 moltarc find <outDir> <id>
-moltarc verify <outDir>          moltarc repair <outDir> <relayDir>
+moltarc find-cold <outDir> <id>
 moltarc status <outDir> [relayDir]   moltarc check <outDir> <relayDir>
 moltarc gc <outDir> [relayDir] [--apply] [--deep-photo]
 moltarc merge <outDir>           moltarc forget <outDir> <relayDir> <chunk> [chunk...]

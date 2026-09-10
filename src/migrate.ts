@@ -117,7 +117,7 @@ export function requireMigrated(outDir: string): void {
 // untouched) and atomically swaps the dual copy + sidecars. Idempotent:
 // a current archive plans clean and rewrites nothing.
 export function migrate(outDir: string, opts?: { dryRun?: boolean }): MigrationResult {
-  const dryRun = opts?.dryRun ?? false;
+  const dryRun = opts?.dryRun ?? true;
   const plan = planMigration(outDir);
   const idle: MigrationResult = { ...plan, dryRun, backup: null, migrated: 0 };
   if (!plan.needs) return idle;

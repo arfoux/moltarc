@@ -310,17 +310,32 @@ function readWatermark(wmPath: string): Record<string, number> {
 // clearly instead of watermark-racing. A lock whose pid is dead (ESRCH) is
 // stale (crashed holder) and is removed once before retrying; any other case
 // (live pid, EPERM, unparsable content, same-process re-entry) stays locked.
+// Scope: this guards seal() only. mergeCold/sweepCold --apply and p2p receive
+// rewrite the same manifest WITHOUT taking it, so only one writer (seal,
+// merge, coldg --apply, p2p-sync apply, restore --apply, migrate) may run at
+// a time — see docs/architecture.md single-writer rule.
+// Reclaim fencing: the stale check re-reads the file immediately before
+// unlinking, so a waiter never deletes a successor's fresh lock (a vanished
+// file retries the create, changed content stays locked). The reclaiming
+// create then verifies the file still holds our pid before returning, and
+// release unlinks only when the file still holds our pid — a stale holder's
+// late finally can never delete its successor.
 function acquireSealLock(outDir: string): () => void {
   const lockPath = join(outDir, 'seal.lock');
-  const removeIfStale = (): boolean => {
+  const readPid = (): number | null => {
     let text: string;
     try {
       text = readFileSync(lockPath, 'utf8');
     } catch {
-      return true; // raced away: retry the exclusive create
+      return null; // missing: never held or raced away
     }
     const pid = Number(text.trim().split(/\s+/)[0]);
-    if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return false;
+    return Number.isInteger(pid) && pid > 0 ? pid : NaN;
+  };
+  const removeIfStale = (): boolean => {
+    const pid = readPid();
+    if (pid === null) return true; // raced away: retry the exclusive create
+    if (!Number.isInteger(pid) || pid === process.pid) return false;
     try {
       process.kill(pid, 0);
       return false; // alive: locked
@@ -328,6 +343,10 @@ function acquireSealLock(outDir: string): () => void {
       const code = e !== null && typeof e === 'object' && 'code' in e ? e.code : undefined;
       if (code !== 'ESRCH') return false; // EPERM etc: holder alive, locked
     }
+    // Fence: never unlink a successor installed after the liveness check.
+    const fresh = readPid();
+    if (fresh === null) return true; // freed under us: retry the create
+    if (fresh !== pid) return false; // successor holds it: locked
     try {
       unlinkSync(lockPath);
     } catch {
@@ -357,11 +376,13 @@ function acquireSealLock(outDir: string): () => void {
     } finally {
       closeSync(fd);
     }
+    if (attempt === 1 && readPid() !== process.pid) throw lockedError();
     let released = false;
     return () => {
       if (released) return;
       released = true;
       try {
+        if (readPid() !== process.pid) return; // successor's lock: keep it
         unlinkSync(lockPath);
       } catch { /* raced release: ignore */ }
     };

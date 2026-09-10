@@ -5,7 +5,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
 import { seal } from '../src/seal.js';
-import { ship, readRelayIndex } from '../src/ship.js';
+import { sendChunked, ship, readRelayIndex } from '../src/ship.js';
 import { scratch } from './util.js';
 
 function bigPhotoBody(): string {
@@ -66,6 +66,29 @@ describe('ship photo', () => {
     assert.ok(r.sent.length >= 1 || readdirSync(join(relayDir, 'photo')).length >= 1);
     assert.ok(readFileSync(join(relayDir, 'photo', bin)).equals(readFileSync(join(outDir, 'photo', bin))));
     assert.equal(readdirSync(relayDir).filter((f) => f.startsWith('.ship-state-photo-')).length, 0);
+  });
+
+  it('corrupt dst after bytes land fails loud on post-copy hash mismatch', { timeout: 30_000 }, async () => {
+    const dir = scratch('ship-postcopy');
+    const src = join(dir, 'src.bin');
+    const dst = join(dir, 'dst.bin');
+    const state = join(dir, 'ship-state.json');
+    writeFileSync(src, randomBytes(3 * 1024 * 1024));
+    const sleep = async (): Promise<void> => {};
+    // Land partial bytes with an injected kill, leaving dst + journal behind.
+    await assert.rejects(
+      sendChunked(src, dst, state, { blockBytes: 64 * 1024, maxRetries: 0, baseDelayMs: 1, failAtBytes: 512 * 1024, sleep }),
+      /injected transport failure/,
+    );
+    // Bitrot inside the landed prefix: resume re-hashes it, so without the
+    // post-copy compare the torn relay copy would ship silently.
+    const landed = readFileSync(dst);
+    landed[100] ^= 0xff;
+    writeFileSync(dst, landed);
+    await assert.rejects(
+      sendChunked(src, dst, state, { blockBytes: 64 * 1024, maxRetries: 0, baseDelayMs: 1, sleep }),
+      /post-copy hash mismatch/,
+    );
   });
 
   it('reserve check refuses photo ship when space low', { timeout: 30_000 }, async () => {

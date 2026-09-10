@@ -137,13 +137,14 @@ export function mergeCold(outDir: string, opts: MergeOpts = {}): MergeResult {
     if (packed.has(e.file)) continue;
     const full = join(warm, e.file);
     let size: number;
+    let st;
     try {
-      const st = statSync(full);
-      if (!st.isFile()) continue; // missing warm file: skip, never fail merge
-      size = st.size;
+      st = statSync(full);
     } catch {
-      continue; // missing warm file: skip, never fail merge
+      throw new Error(`merge refused: warm file missing for ${e.file} (repair or restore before merging)`);
     }
+    if (!st.isFile()) throw new Error(`merge refused: warm file missing for ${e.file} (repair or restore before merging)`);
+    size = st.size;
     // Dict need is flag-gated: header.dictId without DICT_FLAG is an inline
     // content hint, not a trained dict file (decodeChunk ignores it). Only
     // DICT_FLAG chunks name a dicts/dict-<hex>.dict member. decodeHeader

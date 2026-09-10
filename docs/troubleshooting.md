@@ -62,10 +62,10 @@ Both are fail-closed on purpose (rule 7, `docs/contracts.md`):
 
 ## `find` throws: not in warm
 
-`findTrx` searches warm only (`src/find.ts`); cold rows need the
-library-level `findCold`. A `table:device:seq` compound id also matches
-(`matchRowId`), so prefer the plain row id. After `restore-from-cold
---apply`, find caches are cleared automatically.
+`findTrx` searches warm only (`src/find.ts`); merged-to-cold rows need
+`moltarc find-cold` (library `findCold`). A `table:device:seq` compound id
+also matches (`matchRowId`), so prefer the plain row id. After
+`restore-from-cold --apply`, find caches are cleared automatically.
 
 ## `check` exits 1 or 2
 
@@ -81,7 +81,9 @@ Non-empty `allowPeers` rejects token-less peers and wrong tokens; pass the
 matching `--token`. Without `MOLTARC_PSK` both ends silently run
 trusted-LAN-only — fine on a cable, wrong across the internet. Syncs that
 receive nothing but report no failure usually mean the peer holds only
-quarantined entries (never served) or everything is already acked.
+quarantined entries (never served) or everything is already acked. Syncing
+into a pre-v1 archive appends without migrating (no backup): run
+`moltarc migrate <outDir>` first (`docs/cli.md` p2p-sync).
 
 ## Full-suite flakes
 

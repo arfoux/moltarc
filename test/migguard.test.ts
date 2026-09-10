@@ -150,7 +150,7 @@ describe('molt migrate guard (every write path)', () => {
     const outDir = join(dir, 'archive');
     const relayDir = join(dir, 'relay');
     buildV0Archive(outDir);
-    migrate(outDir);
+    migrate(outDir, { dryRun: false });
     assert.equal(needsMigration(outDir), false);
     assert.doesNotThrow(() => mergeCold(outDir));
     assert.doesNotThrow(() => sweepCold(outDir, { dryRun: false }));

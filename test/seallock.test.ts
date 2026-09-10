@@ -81,7 +81,9 @@ describe('seal lockfile two-process contention', () => {
   it('two OS processes sealing at once: exactly one wins, loser errors /locked/, archive verifies', { timeout: 180_000 }, async () => {
     const isRaceFlake = (e: unknown): boolean => {
       const msg = e !== null && typeof e === 'object' && 'message' in e && typeof e.message === 'string' ? e.message : String(e);
-      return /contention|busy|locked|timeout/i.test(msg);
+      // Infra errnos only, plus the internal sequential-schedule marker below:
+      // a lock/timeout/contention product error must fail loud, never retry.
+      return /EADDRINUSE|EBUSY|ENOSPC|EMFILE|EAGAIN|ENOTEMPTY|EPERM|EBADF|ECONN|contention window missed/i.test(msg);
     };
     // Real delay: retries wait out OS scheduling skew between the two child
     // processes; fake timers cannot advance separate OS processes.
@@ -148,13 +150,23 @@ try {
       ];
       const codes = await Promise.all(procs.map((p) => p.exited));
       const errs = await Promise.all(procs.map(async (p) => (await new Response(p.stderr).text()).trim()));
+      const outs = await Promise.all(procs.map(async (p) => (await new Response(p.stdout).text()).trim()));
       const wins = codes.filter((c) => c === 0).length;
-      // Sequential scheduling (second seal starts after the first releases and
-      // seals zero rows cleanly) proves nothing: retry for a real overlap.
-      // Pre-fix this is the steady state (no lock, both write), so the retry
-      // budget exhausts and the test FAILS without the lockfile.
-      if (wins === 2) throw new Error('seal contention window missed (both seals won cleanly): retrying for real overlap (contention)');
-      assert.equal(wins, 1, 'exactly one seal wins: codes=' + JSON.stringify(codes) + ' errs=' + JSON.stringify(errs.map((e) => e.slice(-300))));
+      const sealedRows = outs.map((t) => /sealed (\d+)/.exec(t)?.[1]);
+      if (wins === 2) {
+        // Both seals wrote rows: genuine overlap with no lock held — a missing
+        // lock presents exactly this way, so fail immediately with the reason
+        // instead of burning the retry budget. Sequential scheduling (second
+        // seal starts after the first releases, seals zero rows) proves
+        // nothing: retry for a real overlap.
+        // Pre-fix (no lockfile) both workers seal rows, so this assertion
+        // FAILS without the lock instead of exhausting retries.
+        assert.ok(
+          !(Number(sealedRows[0]) > 0 && Number(sealedRows[1]) > 0),
+          `seal lock missing: both processes sealed rows (${sealedRows}) without contending: codes=${JSON.stringify(codes)}`,
+        );
+        throw new Error('seal contention window missed (sequential schedule, second seal found 0 new rows): retrying for real overlap');
+      }
       const loserErr = codes[0] === 0 ? errs[1] : errs[0];
       assert.match(loserErr, /locked/, 'loser must fail loud with the lock error, got: ' + loserErr.slice(-500));
       const full = verifyFull(outDir);

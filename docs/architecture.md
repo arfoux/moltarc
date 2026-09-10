@@ -10,21 +10,21 @@ below is re-audited for this page; rationale lives in `docs/decisions.md`.
 [hot.db r/w SQLite] --seal--> [warm/*.chk 1-4MB immutable] --merge--> [cold/*.tar] + manifest.json
 ```
 
-CLI over archive dirs — 15 subcommands, full reference in `docs/cli.md`,
-shape in `bin/moltarc.ts:35-53`.
+CLI over archive dirs — 16 subcommands, full reference in `docs/cli.md`,
+shape in `bin/moltarc.ts:35-54`.
 
 ## Hot: plain SQLite or JSONL WAL
 
 - Hot input auto-detects: `hot.db` SQLite (magic `SQLite format 3`, tables
   `tx`/`log` with `device_id,seq,ts,id,table,body` via `bun:sqlite`) or JSONL
-  WAL export, one object per line (`src/seal.ts:95-124`).
+  WAL export, one object per line (`src/seal.ts:133-145`, dispatch `src/seal.ts:392-395`).
 - Per-device `sealed_upto_seq` watermark (`device_id -> max seq`) plus
   keep-last dedupe on (table, device, seq) make re-seal idempotent; a second
-  concurrent seal fails loud on `seal.lock` (`src/seal.ts:1-3`, CLI
-  `docs/cli.md` seal).
+  concurrent seal fails loud on `seal.lock` (watermark `src/seal.ts:279-282`,
+  lock `src/seal.ts:313-343`, CLI `docs/cli.md` seal).
 - Rule: hot stays plain SQLite, no custom header.
 - Rule: never delete unsealed/unacked data; `forget`/`gc` only drop
-  relay-acked chunks (`src/cold.ts:307-324`, `src/gc.ts:83-86`).
+  relay-acked chunks (`src/cold.ts:302-325`, `src/gc.ts:83-91`).
 
 ## Warm: sealed columnar chunks
 
@@ -45,8 +45,8 @@ shape in `bin/moltarc.ts:35-53`.
   (`README.md` Dict SLA).
 - Photo gate: base64 bodies decoding past 256 KB (`PHOTO_INLINE_LIMIT_BYTES`,
   `src/seal.ts:20-22`) land in `photo/<sha>.bin` + thumb companions while the
-  chunk keeps a `photo:sha256:…` hash ref (`src/seal.ts:176-213`,
-  `src/thumb.ts:147-159`). Full contract in `docs/contracts.md`.
+  chunk keeps a `photo:sha256:…` hash ref (`src/seal.ts:221-251`,
+  `src/thumb.ts:126-144`). Full contract in `docs/contracts.md`.
 
 ## Manifest: dual-copy index
 
@@ -62,43 +62,47 @@ shape in `bin/moltarc.ts:35-53`.
   short, or corrupt bitsets fail open to fetch (`src/manifest.ts:8`,
   `src/find.ts:157-195`).
 - Kill mid-batch loses only the unflushed tail: watermark advances per
-  flushed chunk and each save bumps the envelope seq (`src/seal.ts:1-3`).
+  flushed chunk and each save bumps the envelope seq (`src/seal.ts:462-471`, envelope `src/manifest.ts:195-208`).
 - Seal scans only new chunks and merges via `appendEntries` when a manifest
   copy exists; full rebuild stays for first seal (`src/manifest.ts`,
   `src/seal.ts`).
+- Single-writer rule: `seal` (`appendEntries`), `mergeCold`, `sweepCold`
+  `--apply`, p2p apply, `restore-from-cold --apply`, and `migrate` all write
+  `manifest.json` / `manifest.bak.json` with no shared lock — run only one
+  writer at a time or entries go missing (last-save-wins).
 
 ## Ship: delta by hash, text-first lanes
 
 - `laneOf` maps blob/photo/image/thumb tables to lane 1, everything
   else lane 0; `planShipment` skips lane 1 unless `includeBlobs` and sorts
-  lane-then-seq (`src/ship.ts:36-60`).
+  lane-then-seq (`src/ship.ts:36-61`).
 - Text-first because photo bytes compress ~1.05x raw while text hits 26.8x
   beside the photos — blobs would dominate bytes for zero ratio
   (`README.md` Photo SLA).
 - Delta economics come from immutable chunks: the relay index hash hit stays
   valid forever, giving 1791 B delta vs 211 716 B full (`docs/bench.md`,
-  `src/ship.ts:63-67`).
+  `src/ship.ts:50-61`).
 - With `includeBlobs`, `photo/*.bin` sidecars ship in the same call (small
   copy-if-missing, large resumable) — a claim never precedes its painting
-  (`src/ship.ts:218-228`).
+  (`src/ship.ts:218-256`).
 
 ## Find: warm-default, single-chunk fetch
 
-- `findTrx` searches warm only and throws when absent; cold needs `findCold`
-  (`src/find.ts:321-370`).
+- `findTrx` searches warm only and throws when absent; merged-to-cold rows
+  need `moltarc find-cold` (library `findCold`, which warns per scanned segment) (`src/find.ts:324-365`, `src/find.ts:370-376`, CLI `bin/moltarc.ts:172-177`).
 - Shard/sparse jump → min/max prune → scaled-bloom prune → ~1 fetch per lookup; warm
   find is ~13.60 ms p50 over 6 probed ids × 20 iters (11 fetched / 8 pruned total;
-  `docs/bench.md`, `src/find.ts:197-295`).
+  `docs/bench.md`, `src/find.ts:198-296`).
 - Cold scan is O(segments) tar decode over already-zstd members — slower by
-  construction (`src/cold.ts`, `src/find.ts:366-370`).
+  construction (`src/cold.ts`, `src/find.ts:378-432`).
 - Quarantined entries never return; compound `table:device:seq` ids match
-  via `matchRowId` (`src/find.ts:316-319`).
+  via `matchRowId` (`src/find.ts:320-322`).
 
 ## Verify and quarantine
 
 - `verifyFull` walks every chunk (`crc32c + sha256` + manifest binding) and
   checks the per-table seq chain: hard breaks fatal, forward seq skips
-  `GAP` warnings only (`src/verify.ts:319-343`).
+  `GAP` warnings only (`src/verify.ts:319-342`).
 - Corrupt chunks park in `quarantine/` with a manifest flag — exactly one chunk
   of history lost (1/150 in a 150-chunk archive — illustrative size), never the archive. `repairAll` refetches good bytes by
   manifest sha256 from the relay and refills crc/bloom/minmax from the
@@ -111,15 +115,19 @@ shape in `bin/moltarc.ts:35-53`.
 
 - `mergeCold` packs warm chunks plus their dict members into `cold/seg-*.tar`
   (streamed through a 1 MB window, byte-identical output) and records the
-  segment (`src/cold.ts:110-124`).
+  segment (`src/cold.ts:121-203`, streaming copy `src/cold.ts:206-273`).
+  `photo/*.bin` sidecars are not packed — chunks keep hash refs only, so
+  `verify` flags their chunks `CORRUPT` while sidecars are absent
+  (`src/verify.ts:260-284`).
 - `sweepCold` (dry-run default, `--apply` + 50 MB reserve check) repacks
   segments without dead members and rewrites the manifest dual-copy atomic;
   corrupt segments list loud and stay on disk (`src/cold.ts:368-453`).
 - `forgetChunks` is atomic all-or-nothing over relay-acked names only
-  (`src/cold.ts:307-324`); bytes free only after `gc --apply` + `coldg
+  (`src/cold.ts:302-325`); bytes free only after `gc --apply` + `coldg
   --apply`.
-- `restore-from-cold` validates every tar member name before touching disk
-  and rebuilds warm + manifest from cold alone (`bin/moltarc.ts:78-137`).
+- `restore-from-cold` (dry-run by default, `--apply` writes) validates every
+  tar member name before touching disk and rebuilds warm + manifest from
+  cold alone (`bin/moltarc.ts:79-138`).
 
 ## P2P: websocket delta sync
 
@@ -138,7 +146,7 @@ shape in `bin/moltarc.ts:35-53`.
 
 - `queryAsOf({ outDir, seq } | { outDir, ts })` folds latest-row-per-id at
   the target with chunk proof (consulted/pruned/`skippedMissing`)
-  (`src/timetravel.ts:66-104`).
+  (`src/timetravel.ts:66-136`).
 - Fail-closed on corrupt bytes (throws with the filename), explicit-partial
   on missing files (warn + counter — callers must check before treating rows
   as authoritative). Windowed folds (`windowMs`/`windowSeq`) return recent
@@ -167,8 +175,8 @@ shape in `bin/moltarc.ts:35-53`.
 | Concern | Source of truth |
 |---|---|
 | Design rationale for all of the above | `docs/decisions.md` |
-| Pipeline, CLI shapes, rules, measured SLA | `README.md`, `bin/moltarc.ts:35-53` |
-| Full CLI reference (15 subcommands) | `docs/cli.md` |
+| Pipeline, CLI shapes, rules, measured SLA | `README.md`, `bin/moltarc.ts:35-54` |
+| Full CLI reference (16 subcommands) | `docs/cli.md` |
 | Module ownership table | `docs/modules.md` |
 | Numeric contracts and gates | `docs/contracts.md` |
 | Benchmark method behind the ratios | `docs/bench.md` |
