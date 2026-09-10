@@ -13,7 +13,7 @@ below is re-audited for this page; rationale lives in `docs/decisions.md`.
 CLI over archive dirs — 15 subcommands, full reference in `docs/cli.md`,
 shape in `bin/moltarc.ts:35-53`.
 
-## Hot: boring SQLite or JSONL WAL
+## Hot: plain SQLite or JSONL WAL
 
 - Hot input auto-detects: `hot.db` SQLite (magic `SQLite format 3`, tables
   `tx`/`log` with `device_id,seq,ts,id,table,body` via `bun:sqlite`) or JSONL
@@ -22,7 +22,7 @@ shape in `bin/moltarc.ts:35-53`.
   keep-last dedupe on (table, device, seq) make re-seal idempotent; a second
   concurrent seal fails loud on `seal.lock` (`src/seal.ts:1-3`, CLI
   `docs/cli.md` seal).
-- Rule: hot stays SQLite boring, no custom header.
+- Rule: hot stays plain SQLite, no custom header.
 - Rule: never delete unsealed/unacked data; `forget`/`gc` only drop
   relay-acked chunks (`src/cold.ts:307-324`, `src/gc.ts:83-86`).
 

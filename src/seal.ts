@@ -68,7 +68,8 @@ export function normRow(o: Record<string, unknown>, fallbackTable: string): HotR
   if (seq === null || seq <= 0 || seq > SEQ_MAX) return null;
   const ts = toInt(o.ts ?? o.timestamp ?? o.waktu ?? Date.now());
   if (ts === null || ts < 0) return null;
-  const kind = o.type ?? o.event;
+  // `kind` column alias: alt sqlite schemas name the event-kind column `kind`.
+  const kind = o.type ?? o.event ?? o.kind;
   const value = o.value ?? o.total;
   const bodyRaw = o.body ?? o.payload ?? o.msg ?? o.data ?? o.note ?? o.details ?? '';
   const device = String(o.device_id ?? o.device ?? 'dev0');

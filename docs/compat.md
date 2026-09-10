@@ -35,7 +35,7 @@ chunks and asserts current `find`/`verify` read them.
 - `verifyFull` validates entries only on `file` + `sha256` + `crc32c`,
   so entries predating `dictId`/`codec`/`bloom` still verify.
 - `version` is informational: `loadManifest` accepts any numeric version
-  with a sane `chunks` array.
+  with a valid `chunks` array.
 
 ## shard pointers (additive month list)
 
@@ -82,7 +82,7 @@ Rebuild per machine (MinGW gcc 14.2, sqlite amalgamation headers in
 `ext/amalg/`, kept out of git the same way):
 
 ```
-gcc -shared -O2 -I amalg/sqlite-amalgamation-3530400 -DMOLTARC_TS="<abs path>/ext/moltarc.ts" moltarc.c moltarc_hook.c -o moltarc.dll
+gcc -shared -O2 -I ext/amalg/sqlite-amalgamation-3530400 -DMOLTARC_TS="<abs path>/ext/moltarc.ts" ext/moltarc.c ext/moltarc_hook.c -o ext/moltarc.dll
 ```
 
 Proof after rebuilding: `bun test ext/moltarc-dll.test.ts` loads the local

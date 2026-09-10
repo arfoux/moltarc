@@ -20,7 +20,7 @@ Per-line JSON that fails `normRow` (bad/missing `seq`, non-integer `ts`,
 seq outside 1 … 99 999 999) counts as malformed, never crashes the seal
 (`src/seal.ts`). Past the 1 % share the seal aborts loud instead of
 laundering a corrupt feed. Fix the producer (see field aliases in
-`docs/interop.md`), or pass `--table` when rows simply lack a table key.
+`docs/interop.md`), or pass `--table` when rows lack a table key.
 
 ## Second `seal` fails on `seal.lock`
 
