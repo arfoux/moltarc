@@ -216,7 +216,7 @@ export async function ship(opts: ShipOpts): Promise<ShipResult> {
   const absent: string[] = [];
   let bytes = 0;
   // Photo sidecars: opt-in via includeBlobs, lane last (after text), but within the
-  // same ship call photo goes first: a ticket must never precede its painting.
+  // same ship call photo goes first: a claim must never precede its evidence.
   // Small photo (<1MB) copy-if-missing; large photo via resumable sendChunked.
   if (opts.includeBlobs ?? false) {
     const photoSrcDir = join(opts.outDir, 'photo');

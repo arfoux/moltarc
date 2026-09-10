@@ -1,7 +1,7 @@
 # modules
 
 Source map for the whole repo. Library entrypoint is `src/index.ts`
-(re-exports the archive API; sensor/ticket/bundle/readonly/cas/thumb
+(re-exports the archive API; sensor/claim/bundle/readonly/cas/thumb
 stay library-only — no CLI; `alerts.checkUnacked` powers CLI `check`).
 CLI entrypoint is `bin/moltarc.ts`.
 
@@ -37,7 +37,7 @@ CLI entrypoint is `bin/moltarc.ts`.
 | `src/thumb.ts` | Photo previews: 32 px JPEG + hash-link meta beside the full bytes; input/dimension caps |
 | `src/cas.ts` | Content-addressed blob store (`casPut`/`casGet`, owner refcounts, `casGc`) |
 | `src/bundle.ts` | Atomic 1-text + N-refs pack (`packBundle`/`verifyBundle`, hash-linked) |
-| `src/ticket.ts` | Hash-id ticket issuance + redemption (`issueTicket`, double-use guard) |
+| `src/claim.ts` | Hash-id claim issuance + use (`issueClaim`, double-use guard) |
 | `src/sensor.ts` | Numeric-series kit: downsample, anomaly flags, hot/cold/quarantine routing, chunk bridge |
 
 ## Edges

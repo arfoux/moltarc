@@ -21,7 +21,7 @@ export * from './migrate.js';
 export * from './readonly.js';
 export * from './alerts.js';
 export * from './sensor.js';
-export * from './ticket.js';
+export * from './claim.js';
 export * from './bundle.js';
 export * from './thumb.js';
 export * from './cas.js';
