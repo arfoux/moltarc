@@ -36,7 +36,7 @@ Alternative keys are equivalent; first present wins:
 | `ts` | `ts`, `timestamp` (defaults to now) |
 | kind (becomes `table` when no `table` key) | `type`, `event` |
 | value | `value`, `total` |
-| body | `body`, `payload`, `msg`, `data`, `note`, `details`; empty body is composed from kind + `value=` + `actor=` + `ref=` + `reason=` |
+| body | `body`, string `payload`, `msg`, `data`, `note`, `details`; empty body is composed from kind + `value=` + `actor=` + `ref=` + `reason=` + `item=` + `qty=` + `state=` + `hides=` + `shows=` |
 | device | `device_id`, `device` (defaults to `dev0`) |
 | id | `id`, `trxId`, `trx_id`, `trx`, `key`; fallback `table:device:seq` |
 | table | `table`, else kind, else the seal `--table` / fallback |
@@ -44,13 +44,21 @@ Alternative keys are equivalent; first present wins:
 So an `entry` event with `trx: trx-00000003` keeps id `trx-00000003` in table
 `entry` with `value=55000` in the body; an `undo` with `ref` lands in table
 `undo` with the referenced id in the body (`test/interop.test.ts:39-47`).
+When `payload` is an object (raw fielog `ledger.log` lines), it is field
+source, not body text: its `value`/`actor`/`ref`/`reason`/`item`/`qty`/
+`state`/`hides`/`shows`/`event_id`/`reverses`/`note`/`details` backstop the
+missing top-level keys (top-level wins), and `ref` also falls back to
+top-level `event_id`/`reverses`.
 
 ## Related demos
 
 - `bun examples/universal-demo.ts` — 50-row generic event feed, seal → ship →
   find one event, prints the shrink ratio (`examples/universal-demo.ts`).
-- `bun examples/ledger-demo.ts` — 50-row entry-ledger feed, seal → ship →
-  find one entry, prints the shrink ratio (`examples/ledger-demo.ts`).
+- `bun examples/ledger-demo.ts` — 50-row entry-ledger feed (table `events`,
+  file `ledger.jsonl`), seal → ship → find one entry, prints the shrink ratio
+  (`examples/ledger-demo.ts`). The raw entry/undo shape (no `table` key,
+  fields under `payload`) is covered by the interop proof above
+  (`test/interop.test.ts`).
 - `bun examples/e2e.ts` — 1200-row multi-device feed (sensors + operator
   activity across `device-01`/`device-02`), the multi-device watermark path
   (`examples/e2e.ts`).

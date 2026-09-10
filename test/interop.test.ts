@@ -60,4 +60,34 @@ describe('fielog interop', () => {
     assert.ok(found.row.body.includes('value='));
     assert.equal(found.chunksFetched, 1);
   });
+
+  it('tally rows seal and find back with item/qty in body', { timeout: 30_000 }, async () => {
+    const dir = scratch('interop-tally');
+    const base = 1_700_000_000_000;
+    const lines = [
+      JSON.stringify({ device_id: 'device-01', seq: 1, ts: base, type: 'tally.add', id: 'tally-00000001', payload: { item: 'widget', qty: 5 } }),
+      JSON.stringify({ device_id: 'device-01', seq: 2, ts: base + 1000, type: 'tally.add', id: 'tally-00000002', payload: { item: 'gadget', qty: 2 } }),
+    ];
+    const hotDb = join(dir, 'tally.log');
+    writeFileSync(hotDb, `${lines.join('\n')}\n`);
+    const r = await seal({ hotDb, outDir: join(dir, 'archive') });
+    assert.equal(r.rowsSealed, 2);
+    const found = findTrx({ outDir: join(dir, 'archive'), trxId: 'tally-00000001' });
+    assert.equal(found.row.id, 'tally-00000001');
+    assert.ok(found.row.body.includes('item=widget'), `item lost: ${found.row.body}`);
+    assert.ok(found.row.body.includes('qty=5'), `qty lost: ${found.row.body}`);
+  });
+
+  it('nested-payload entry round-trips value/actor into body', { timeout: 30_000 }, async () => {
+    const dir = scratch('interop-nested');
+    const base = 1_700_000_000_000;
+    const hotDb = join(dir, 'ledger.log');
+    writeFileSync(hotDb, `${JSON.stringify({ device_id: 'device-01', seq: 1, ts: base, type: 'entry', id: 'trx-00000001', payload: { value: 55000, actor: 'unit' } })}\n`);
+    const r = await seal({ hotDb, outDir: join(dir, 'archive') });
+    assert.equal(r.rowsSealed, 1);
+    const found = findTrx({ outDir: join(dir, 'archive'), trxId: 'trx-00000001' });
+    assert.equal(found.row.table, 'entry');
+    assert.ok(found.row.body.includes('value=55000'), `value lost: ${found.row.body}`);
+    assert.ok(found.row.body.includes('actor=unit'), `actor lost: ${found.row.body}`);
+  });
 });

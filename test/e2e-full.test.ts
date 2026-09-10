@@ -51,7 +51,7 @@ function writeMixedHot(dir: string): { hotDb: string; ids: string[]; blobBytes: 
     } else if (slot < 0.85) {
       const seq = ++seqByTable.notes;
       const dev = seq % 2 ? 'dev-02' : 'dev-01';
-      lines.push(JSON.stringify({ device_id: dev, seq, ts: base + i * 1000, id, table: 'notes', body: `NOTE seq=${i} stock warehouse thinning ship soon record manual note=${((i * 40503) >>> 0).toString(16)}` }));
+      lines.push(JSON.stringify({ device_id: dev, seq, ts: base + i * 1000, id, table: 'notes', body: `NOTE seq=${i} record memo note=${((i * 40503) >>> 0).toString(16)}` }));
     } else {
       const seq = ++seqByTable.photo;
       const dev = seq % 2 ? 'cam-01' : 'cam-02';
