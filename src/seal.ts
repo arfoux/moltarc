@@ -70,17 +70,39 @@ export function normRow(o: Record<string, unknown>, fallbackTable: string): HotR
   if (ts === null || ts < 0) return null;
   // `kind` column alias: alt sqlite schemas name the event-kind column `kind`.
   const kind = o.type ?? o.event ?? o.kind;
-  const value = o.value ?? o.total;
-  const bodyRaw = o.body ?? o.payload ?? o.msg ?? o.data ?? o.note ?? o.details ?? '';
+  // Nested fielog payload: raw ledger.log lines carry their fields under a
+  // `payload` object. It backstops missing top-level keys only (top-level
+  // wins); a non-object payload keeps the legacy body-alias behavior below.
+  const nested = (typeof o.payload === 'object' && o.payload !== null && !Array.isArray(o.payload))
+    ? (o.payload as Record<string, unknown>)
+    : undefined;
+  const value = o.value ?? o.total ?? nested?.value ?? nested?.total;
+  const actor = o.actor ?? nested?.actor;
+  const ref = o.ref ?? o.event_id ?? o.reverses ?? nested?.ref ?? nested?.event_id ?? nested?.reverses;
+  const reason = o.reason ?? nested?.reason;
+  const item = o.item ?? nested?.item;
+  const qty = o.qty ?? nested?.qty;
+  const state = o.state ?? nested?.state;
+  const hides = o.hides ?? nested?.hides;
+  const shows = o.shows ?? nested?.shows;
+  // An object payload is field source, not body text: it falls through so the
+  // composer below renders its fields as value=/actor=/… tokens. Its note /
+  // details backstop an absent top-level body after every top-level source.
+  const bodyRaw = o.body ?? (nested !== undefined ? undefined : o.payload) ?? o.msg ?? o.data ?? o.note ?? o.details ?? nested?.note ?? nested?.details ?? '';
   const device = String(o.device_id ?? o.device ?? 'dev0');
   const body = bodyRaw !== ''
     ? (typeof bodyRaw === 'string' ? bodyRaw : JSON.stringify(bodyRaw))
     : [
       kind !== undefined ? String(kind) : '',
       value !== undefined ? `value=${String(value)}` : '',
-      o.actor !== undefined ? `actor=${String(o.actor)}` : '',
-      o.ref !== undefined ? `ref=${String(o.ref)}` : '',
-      o.reason !== undefined ? `reason=${String(o.reason)}` : '',
+      actor !== undefined ? `actor=${String(actor)}` : '',
+      ref !== undefined ? `ref=${String(ref)}` : '',
+      reason !== undefined ? `reason=${String(reason)}` : '',
+      item !== undefined ? `item=${String(item)}` : '',
+      qty !== undefined ? `qty=${String(qty)}` : '',
+      state !== undefined ? `state=${String(state)}` : '',
+      hides !== undefined ? `hides=${String(hides)}` : '',
+      shows !== undefined ? `shows=${String(shows)}` : '',
     ].filter((s) => s !== '').join(' ');
   // Fallback id is namespaced with the table: bare device:seq collides across
   // tables sharing one hot log, so find() can mistake one table's row for another's.

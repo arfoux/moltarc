@@ -72,12 +72,12 @@ Searches **warm only** and throws when absent; cold needs the library-level
 ### `asof` — state as of a point in history
 
 ```
-moltarc asof <outDir> <ts> [--seq <n>]
+moltarc asof <outDir> [<ts>] [--seq <n>]
 ```
 
-Folds chunk versions per id at timestamp `ts` (ms) or, with `--seq <n>`,
-at sequence `n`. Latest row per id with seq/ts ≤ target wins; future chunks
-prune without I/O. Prints rows JSON then a proof line (rows, target, chunks
+Folds chunk versions per id at timestamp `ts` (ms) — omittable when
+`--seq <n>` is given — or at sequence `n`. Latest row per id with seq/ts
+≤ target wins; future chunks prune without I/O. Prints rows JSON then a proof line (rows, target, chunks
 consulted, pruned). Damage contract (`src/timetravel.ts`): corrupt bytes in
 a kept chunk **throw** (fail-closed); absent chunk files are skipped with a
 loud warning and counted in `proof.skippedMissing` (partial fold — check it

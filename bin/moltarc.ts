@@ -2,7 +2,7 @@
 // bin/moltarc — seal/ship/find/verify/repair over archive directories.
 //   moltarc seal <hot.jsonl|hot.db> <outDir> [--table <name>]
 //   moltarc ship <outDir> <relayDir> [--blobs]
-//   moltarc find <outDir> <trxId>
+//   moltarc find <outDir> <id>
 //   moltarc verify <outDir>
 //   moltarc repair <outDir> <relayDir>
 //   moltarc restore-from-cold <outDir>
@@ -37,7 +37,7 @@ function usageLines(): string[] {
     'usage: moltarc <seal|ship|find|verify|repair|status|gc|merge|forget|coldg|restore-from-cold|check|p2p-sync|asof|migrate> [--verbose] ...',
     '  moltarc seal <hot.jsonl|hot.db> <outDir> [--table <name>]',
     '  moltarc ship <outDir> <relayDir> [--blobs]',
-    '  moltarc find <outDir> <trxId>',
+    '  moltarc find <outDir> <id>',
     '  moltarc verify <outDir>',
     '  moltarc repair <outDir> <relayDir>',
     '  moltarc status <outDir> [relayDir]',
@@ -48,7 +48,7 @@ function usageLines(): string[] {
     '  moltarc restore-from-cold <outDir> [--apply]',
     '  moltarc check <outDir> <relayDir>',
     '  moltarc p2p-sync <peerUrl> <outDir> [--token <t>]',
-    '  moltarc asof <outDir> <ts> [--seq <n>]',
+    '  moltarc asof <outDir> [<ts>] [--seq <n>]',
     '  moltarc migrate <outDir> [--dry-run]',
   ];
 }
@@ -164,7 +164,7 @@ async function main(): Promise<void> {
     console.log(`shipped ${r.sent.length} chunk(s), skipped ${r.skipped.length}, ${r.bytes}B`);
   } else if (cmd === 'find') {
     const [outDir, trxId] = rest;
-    if (!outDir || !trxId) fail('usage: moltarc find <outDir> <trxId>');
+    if (!outDir || !trxId) fail('usage: moltarc find <outDir> <id>');
     const f = findTrx({ outDir, trxId });
     console.log(JSON.stringify(f.row));
     console.log(`chunk ${f.chunk} fetched ${f.chunksFetched}`);
@@ -273,13 +273,13 @@ async function main(): Promise<void> {
     let seq: number | undefined;
     if (seqIdx >= 0) {
       seq = Number(rest[seqIdx + 1]);
-      if (!Number.isFinite(seq)) fail('usage: moltarc asof <outDir> <ts> [--seq <n>]');
+      if (!Number.isFinite(seq)) fail('usage: moltarc asof <outDir> [<ts>] [--seq <n>]');
     }
     const positional = seqIdx >= 0 ? rest.filter((a, i) => !a.startsWith('--') && i !== seqIdx + 1) : rest.filter((a) => !a.startsWith('--'));
     const [outDir, tsArg] = positional;
-    if (!outDir || (seq === undefined && tsArg === undefined)) fail('usage: moltarc asof <outDir> <ts> [--seq <n>]');
+    if (!outDir || (seq === undefined && tsArg === undefined)) fail('usage: moltarc asof <outDir> [<ts>] [--seq <n>]');
     const ts = seq === undefined ? Number(tsArg) : undefined;
-    if (ts !== undefined && !Number.isFinite(ts)) fail('usage: moltarc asof <outDir> <ts> [--seq <n>]');
+    if (ts !== undefined && !Number.isFinite(ts)) fail('usage: moltarc asof <outDir> [<ts>] [--seq <n>]');
     const r = seq === undefined ? queryAsOf({ outDir: outDir as string, ts }) : queryAsOf({ outDir: outDir as string, seq });
     console.log(JSON.stringify(r.rows));
     const target = seq === undefined ? `ts=${ts}` : `seq=${seq}`;
