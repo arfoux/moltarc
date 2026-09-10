@@ -44,7 +44,7 @@ CLI entrypoint is `bin/moltarc.ts`.
 
 | Path | Owns |
 |---|---|
-| `bin/moltarc.ts` | The CLI: 15 subcommands over archive dirs (full reference in `docs/cli.md`) |
+| `bin/moltarc.ts` | The CLI: 16 subcommands over archive dirs (full reference in `docs/cli.md`) |
 | `ext/moltarc.ts` | SQLite extension reference (TS): read-only `moltarc_find` + `moltarc_seal`, zero format code |
 | `ext/moltarc.c`, `ext/moltarc_hook.c` | Native hook: every SQL call shells out to `bun ext/moltarc.ts` (`MOLTARC_BUN`, default `bun`) |
 | `ext/fetch-sqlite.ts` | Fetches the SQLite amalgamation for extension builds (kept out of git) |

@@ -2,7 +2,7 @@
 
 moltarc seals any append-only feed with no manual conversion step. Game
 events, file versions, device telemetry, and entry-ledger rows all normalize
-through the same aliases (`normRow`, `src/seal.ts:62-93`). Proof:
+through the same aliases (`normRow`, `src/seal.ts:73-131`). Proof:
 `test/interop.test.ts` (90-event `ledger.log` seals; one entry finds back).
 
 ## What seals directly
@@ -26,15 +26,15 @@ bun bin/moltarc.ts seal ledger.log /tmp/moltarc/archive
 bun bin/moltarc.ts find /tmp/moltarc/archive trx-00000003
 ```
 
-## Field aliases (`normRow`, `src/seal.ts:62-93`)
+## Field aliases (`normRow`, `src/seal.ts:73-131`)
 
 Alternative keys are equivalent; first present wins:
 
 | Row field | Aliases |
 |---|---|
-| `seq` | `seq` (integer 1 … 99 999 999, else malformed) |
-| `ts` | `ts`, `timestamp` (defaults to now) |
-| kind (becomes `table` when no `table` key) | `type`, `event` |
+| `seq` | `seq`, `no` (integer 1 … 99 999 999, else malformed) |
+| `ts` | `ts`, `timestamp`, `waktu` (defaults to now) |
+| kind (becomes `table` when no `table` key) | `type`, `event`, `kind` |
 | value | `value`, `total` |
 | body | `body`, string `payload`, `msg`, `data`, `note`, `details`; empty body is composed from kind + `value=` + `actor=` + `ref=` + `reason=` + `item=` + `qty=` + `state=` + `hides=` + `shows=` |
 | device | `device_id`, `device` (defaults to `dev0`) |
@@ -49,6 +49,16 @@ source, not body text: its `value`/`actor`/`ref`/`reason`/`item`/`qty`/
 `state`/`hides`/`shows`/`event_id`/`reverses`/`note`/`details` backstop the
 missing top-level keys (top-level wins), and `ref` also falls back to
 top-level `event_id`/`reverses`.
+
+## Interop limits (lossy, one-way)
+
+Raw fielog `LogEvent` lines are lossy one-way input: `ts_device` is not an
+alias, so event times become seal time (`Date.now()`); signatures,
+countersignatures, hash-chain, `server_time`, and `origin_*` fields are
+dropped (the body keeps `value=`/`actor=`/`ref=` tokens only); `undo`
+events land as inert rows in table `undo` with no void semantics; a missing
+`device_id` becomes `dev0`. Nothing replays sealed rows back into a fielog
+kernel.
 
 ## Related demos
 

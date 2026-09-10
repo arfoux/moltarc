@@ -123,12 +123,18 @@ describe('molt archive migrator', () => {
     assert.equal(manifestBytes(outDir), before);
     assert.equal(existsSync(join(outDir, 'manifest.pre-migrate.json')), false);
     assert.equal(needsMigration(outDir), true);
+    // Bare call dry-runs by default (aligns with sweep/gc): no opts, no writes.
+    const bare = migrate(outDir);
+    assert.equal(bare.dryRun, true);
+    assert.equal(bare.backup, null);
+    assert.equal(manifestBytes(outDir), before);
+    assert.equal(needsMigration(outDir), true);
   });
 
   it('apply migrates old to new, keeps history, stays idempotent', { timeout: 30_000 }, () => {
     const outDir = join(scratch('migrate-apply'), 'archive');
     const { ids, sha } = buildV05Archive(outDir);
-    const res = migrate(outDir);
+    const res = migrate(outDir, { dryRun: false });
     assert.equal(res.dryRun, false);
     assert.equal(res.migrated, 2);
     assert.ok(res.backup !== null && existsSync(res.backup));
@@ -176,7 +182,7 @@ describe('molt archive migrator', () => {
     const relayDir = join(dir, 'relay');
     buildV05Archive(outDir);
     await assert.rejects(ship({ outDir, relayDir, baseDelayMs: 1 }), /needs migration/);
-    migrate(outDir);
+    migrate(outDir, { dryRun: false });
     const r = await ship({ outDir, relayDir, baseDelayMs: 1 });
     assert.equal(r.sent.length, 2);
   });

@@ -23,8 +23,10 @@ export function freeSpaceBytes(dir: string): number {
     const st = statfsSync(dir);
     return Number(st.bfree) * Number(st.bsize);
   } catch {
-    // statfs unavailable (or dir missing): assume space, seal proceeds.
-    return Number.MAX_SAFE_INTEGER;
+    // statfs unavailable (or dir missing): fail closed. Seal/merge/sweep
+    // must refuse rather than half-write a chunk, tar, or manifest copy
+    // on a disk that cannot prove 50MB of headroom (cf. quota guard).
+    return 0;
   }
 }
 

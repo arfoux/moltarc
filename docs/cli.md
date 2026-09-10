@@ -1,7 +1,7 @@
 # CLI reference
 
-Every line below is verified against `bin/moltarc.ts` usage lines (35-53)
-and the dispatch (140-304). If the CLI and this page ever disagree, the CLI
+Every line below is verified against `bin/moltarc.ts` usage lines (35-54)
+and the dispatch (141-311). If the CLI and this page ever disagree, the CLI
 is right — run `bun bin/moltarc.ts help`.
 
 Global: `--verbose` anywhere in argv is silently stripped (filtered before
@@ -27,6 +27,10 @@ sealed), and malformed rows. Input over the 1 % malformed share aborts loud
 (`MALFORMED_ABORT_PCT`, `src/seal.ts`). Refuses to start under 50 MB free
 space (`checkReserve`). Second concurrent seal fails loud on `seal.lock`
 instead of racing the watermark.
+  Scope: the lock serializes seal-vs-seal only — `merge`, `coldg --apply`,
+  `p2p-sync` apply, `restore-from-cold --apply`, and `migrate` rewrite the
+  same manifest without taking it. Single-writer rule: run only one writer
+  at a time (see `docs/architecture.md` Manifest).
 
 ### `ship` — warm → relay, delta by hash
 
@@ -55,6 +59,10 @@ rotation list, primary first) or the trusted-LAN fallback when unset
 (`src/p2p.ts`). Rotation: set `MOLTARC_PSK=<new>,<old>` (primary first) and note the step in `MOLTARC_PSK_ID`;
 promote to `<new>` alone with an updated id once every node has the list. Prints `synced / skipped / failed / bytes` plus one line per
 received/failed chunk.
+`p2p-sync` does not run the migrate guard: syncing into a pre-v1 archive
+appends v1-shaped entries with no pre-migrate backup — run
+`moltarc migrate <outDir>` first on old archives (`src/p2p.ts:88-93`,
+`src/p2p.ts:171-229`).
 
 > **WARNING: serving is LAN-open by default.** An empty `allowPeers` list serves anyone on
 > the LAN who can reach the port. Set `MOLTARC_PSK` and/or a non-empty `allowPeers`
@@ -70,8 +78,22 @@ moltarc find <outDir> <id>
 
 Prunes via manifest min/max + bloom (+ shard/sparse fast path), fetches a
 single warm chunk, prints the row JSON then `chunk <file> fetched <n>`.
-Searches **warm only** and throws when absent; cold needs the library-level
-`findCold`. Quarantined chunks are skipped, never returned.
+Searches **warm only** and throws when absent; merged-to-cold rows need
+`find-cold` below. Quarantined chunks are skipped, never returned.
+
+### `find-cold` — one row from cold segments
+
+```
+moltarc find-cold <outDir> <id>
+```
+
+Narrows by the warm index to the cold segment(s) holding a candidate
+chunk, then tar-scans them (`findCold`, `src/find.ts:370-376`, scan
+`src/find.ts:380-432`). Prints the row JSON then
+`chunk <file> fetched <n>`; warns per scanned segment
+(`findCold: scanning N cold segment(s) …`) because a cold scan is
+O(segments), not one fetch. Throws when absent or fully pruned.
+Quarantined chunks never return (pruned by the warm index first).
 
 ### `asof` — state as of a point in history
 
@@ -146,7 +168,9 @@ moltarc merge <outDir>
 
 Packs warm chunks (plus their dict members) into `cold/seg-*.tar` and records
 the segment in the manifest. Prints `merged N chunk(s) -> cold/<seg> (BB)`
-or `merge: nothing new to pack`. Refuses under 50 MB free space.
+or `merge: nothing new to pack`. Refuses under 50 MB free space. `photo/*.bin`
+sidecars are never packed (chunks + dict members only) — restore sidecars
+alongside warm or `verify` flags the owning chunks `CORRUPT` (`src/verify.ts:260-284`).
 
 ### `forget` — drop named chunks (acked only)
 
@@ -211,7 +235,9 @@ moltarc migrate <outDir> [--dry-run]
 
 Forward-only: rescans warm chunks into a fresh v1 manifest and swaps it
 atomically (backup to `manifest.pre-migrate.json` first). Chunk files are
-never touched. `--dry-run` prints the plan without writing. New binaries
+never touched. Rescans warm only: on a cold-only archive run
+`restore-from-cold --apply` first — `moltarc migrate` throws `no archive`
+with no `warm/` dir (`src/migrate.ts:125`). `--dry-run` prints the plan without writing. New binaries
 refuse to rewrite old manifests in place (7 write paths call
 `assertMigrated()`), so encountering the guard error means: run `migrate`
 once, then retry.

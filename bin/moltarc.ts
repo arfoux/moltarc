@@ -12,7 +12,7 @@ import { seal } from '../src/seal.js';
 import { ship } from '../src/ship.js';
 import { readTar } from '../src/cold.js';
 import { buildManifest, saveManifestAtomic } from '../src/manifest.js';
-import { clearFindCaches, findTrx } from '../src/find.js';
+import { clearFindCaches, findCold, findTrx } from '../src/find.js';
 import { statusInfo, sweep } from '../src/gc.js';
 import { forgetChunks, mergeCold, sweepCold } from '../src/cold.js';
 import { printChainGaps, repairAll, verifyFull } from '../src/verify.js';
@@ -34,10 +34,11 @@ function fail(err: unknown): never {
 
 function usageLines(): string[] {
   return [
-    'usage: moltarc <seal|ship|find|verify|repair|status|gc|merge|forget|coldg|restore-from-cold|check|p2p-sync|asof|migrate> [--verbose] ...',
+    'usage: moltarc <seal|ship|find|find-cold|verify|repair|status|gc|merge|forget|coldg|restore-from-cold|check|p2p-sync|asof|migrate> [--verbose] ...',
     '  moltarc seal <hot.jsonl|hot.db> <outDir> [--table <name>]',
     '  moltarc ship <outDir> <relayDir> [--blobs]',
     '  moltarc find <outDir> <id>',
+    '  moltarc find-cold <outDir> <id>',
     '  moltarc verify <outDir>',
     '  moltarc repair <outDir> <relayDir>',
     '  moltarc status <outDir> [relayDir]',
@@ -166,6 +167,12 @@ async function main(): Promise<void> {
     const [outDir, trxId] = rest;
     if (!outDir || !trxId) fail('usage: moltarc find <outDir> <id>');
     const f = findTrx({ outDir, trxId });
+    console.log(JSON.stringify(f.row));
+    console.log(`chunk ${f.chunk} fetched ${f.chunksFetched}`);
+  } else if (cmd === 'find-cold') {
+    const [outDir, trxId] = rest;
+    if (!outDir || !trxId) fail('usage: moltarc find-cold <outDir> <id>');
+    const f = findCold({ outDir: outDir as string, trxId: trxId as string });
     console.log(JSON.stringify(f.row));
     console.log(`chunk ${f.chunk} fetched ${f.chunksFetched}`);
   } else if (cmd === 'verify') {

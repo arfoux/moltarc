@@ -26,7 +26,7 @@ function isContentionError(e: unknown): boolean {
   } else {
     msg = String(e);
   }
-  return /EADDRINUSE|EBUSY|ENOSPC|EMFILE|EAGAIN|ENOTEMPTY|EPERM|EBADF|ECONN|port|disk|contention|busy|locked|timeout/i.test(msg);
+  return /EADDRINUSE|EBUSY|ENOSPC|EMFILE|EAGAIN|ENOTEMPTY|EPERM|EBADF|ECONN/i.test(msg);
 }
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
@@ -37,7 +37,7 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
     } catch (e) {
       last = e;
       if (attempt === attempts || !isContentionError(e)) throw e;
-      // Real delay: retry backs off against live OS port/disk contention; fake timers cannot advance kernel state.
+      // Real delay: retry backs off against live OS resource pressure (errno-coded only: lock/timeout/product errors fail loud); fake timers cannot advance kernel state.
       await new Promise<void>((r) => setTimeout(r, 200 * attempt));
     }
   }
