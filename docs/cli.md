@@ -52,7 +52,8 @@ with journal resume and idempotent atomic apply). `--token` authenticates
 against the peer's `allowPeers` sha256 allowlist. Chunk bytes are
 HMAC-SHA256 framed; signing key comes from `MOLTARC_PSK` (comma-separated
 rotation list, primary first) or the trusted-LAN fallback when unset
-(`src/p2p.ts`). Prints `synced / skipped / failed / bytes` plus one line per
+(`src/p2p.ts`). Rotation: set `MOLTARC_PSK=<new>,<old>` (primary first) and note the step in `MOLTARC_PSK_ID`;
+promote to `<new>` alone with an updated id once every node has the list. Prints `synced / skipped / failed / bytes` plus one line per
 received/failed chunk.
 
 ## Read path

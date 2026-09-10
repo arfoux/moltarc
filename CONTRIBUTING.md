@@ -8,7 +8,7 @@ stays green.
 ```bash
 git clone https://github.com/arfoux/moltarc.git
 cd moltarc
-bun install          # only dependency: jpeg-js (foto previews)
+bun install          # only dependency: jpeg-js (photo previews)
 bun bin/moltarc.ts help
 ```
 

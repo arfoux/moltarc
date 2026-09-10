@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { appendFileSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { findTrx } from '../src/find.js';
 import { normRow, seal } from '../src/seal.js';
 import { verifyAll } from '../src/verify.js';
 import { scratch, writeHotLog } from './util.js';
@@ -86,6 +87,7 @@ describe('seal validation', () => {
     db.close();
     const r = await seal({ hotDb: dbPath, outDir: join(dir, 'arch'), table: 'tx' });
     assert.equal(r.rowsSealed, 50);
+    assert.equal(findTrx({ outDir: join(dir, 'arch'), trxId: 'trx-00000001' }).row.table, 'events');
     assert.equal(r.rowsMalformed, 0);
   });
 

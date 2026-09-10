@@ -18,7 +18,7 @@ aliases below. First-class shapes:
 
 ```json
 {"device_id":"device-01","seq":3,"ts":1700000000000,"type":"entry","trx":"trx-00000003","value":55000,"actor":"agus"}
-{"device_id":"device-01","seq":9,"ts":1700000000000,"event":"undo","ref":"trx-00000005","reason":"salah input"}
+{"device_id":"device-01","seq":9,"ts":1700000000000,"event":"undo","ref":"trx-00000005","reason":"wrong-input"}
 ```
 
 ```bash
@@ -42,7 +42,7 @@ Alternative keys are equivalent; first present wins:
 | table | `table`, else kind, else the seal `--table` / fallback |
 
 So an `entry` event with `trx: trx-00000003` keeps id `trx-00000003` in table
-`entries` with `value=55000` in the body; an `undo` with `ref` lands in table
+`entry` with `value=55000` in the body; an `undo` with `ref` lands in table
 `undo` with the referenced id in the body (`test/interop.test.ts:39-47`).
 
 ## Related demos

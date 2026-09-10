@@ -87,6 +87,7 @@ pinned in `docs/compat.md`; rationale in `docs/decisions.md`.
 P2P frames are `HMAC-SHA256(json) + '.' + json`, verified on raw bytes
 *before* parse against every listed key (`src/p2p.ts`). Keys come from
 `MOLTARC_PSK` (comma-separated rotation list, primary first) or the per-call
-`psk` option. No PSK means documented trusted-LAN-only fallback — anyone on
-the network can sync. The legacy `token` guards hello only; `allowPeers`
+`psk` option. Rotation: set `MOLTARC_PSK=<new>,<old>` (primary first) and note the step in `MOLTARC_PSK_ID`;
+promote to `<new>` alone with an updated id once every node has the list (`src/p2p.ts`). No PSK means
+documented trusted-LAN-only fallback — anyone on the network can sync. The legacy `token` guards hello only; `allowPeers`
 holds `sha256(token)` strings and an empty list serves anyone.
