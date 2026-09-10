@@ -10,6 +10,7 @@ import { loadDictFor } from './dict.js';
 import { bloomCheck, loadManifest, loadShard, loadSparseIndex, BLOOM_BITS } from './manifest.js';
 import type { ChunkEntry, ColdSegment, Manifest, ManifestShard, ShardPointer, SparseDisk } from './manifest.js';
 import { readTar } from './cold.js';
+import { SYN_ID_SEP } from './seal.js';
 
 export interface FindOpts {
   outDir: string;
@@ -310,12 +311,14 @@ function loadPointersForPrune(outDir: string, sparseSeq: number): ShardPointer[]
   return manifest.pointers;
 }
 
-// Table-namespaced fallback id: seal assigns `${table}:${device}:${seq}` when a
-// hot row carries no explicit id, and older rows may carry an explicit bare id.
-// Exact ids win; the qualified form resolves either shape so a caller can
-// always address one table's row without cross-table ambiguity.
+// Table-namespaced fallback id: seal assigns tableU+001FdeviceU+001Fseq
+// (syntheticId, src/seal.ts) when a hot row carries no explicit id, and older
+// rows may carry an explicit bare id. Exact ids win; the qualified form
+// resolves either shape so a caller can always address one table's row
+// without cross-table ambiguity. U+001F (not ':') keeps device ids carrying
+// ':' or '\' (Windows paths like C:\dev) unambiguous.
 export function matchRowId(r: HotRow, trxId: string): boolean {
-  return r.id === trxId || `${r.table}:${r.device_id}:${r.seq}` === trxId;
+  return r.id === trxId || `${r.table}${SYN_ID_SEP}${r.device_id}${SYN_ID_SEP}${r.seq}` === trxId;
 }
 
 export function findTrx(opts: FindOpts): FindResult {

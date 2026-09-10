@@ -7,7 +7,7 @@ import { randomBytes } from 'crypto';
 import { unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import type { HotRow } from '../src/chunk.js';
-import { normRow, quarantinePhotoBody, readPhotoSidecar, seal } from '../src/seal.js';
+import { normRow, quarantinePhotoBody, readPhotoSidecar, seal, syntheticId } from '../src/seal.js';
 import { findTrx, matchRowId } from '../src/find.js';
 import { scratch } from './util.js';
 
@@ -20,7 +20,7 @@ function bigBody(bytes = 300 * 1024): { raw: Buffer; b64: string } {
 }
 
 describe('seal honesty', () => {
-  it('cross-table same device+seq rows both survive (table:device:seq key)', { timeout: 60_000 }, async () => {
+  it('cross-table same device+seq rows both survive (table-U+001F-device-U+001F-seq key)', { timeout: 60_000 }, async () => {
     const dir = scratch('sealhonest-dedupe');
     const hotDb = join(dir, 'hot.jsonl');
     const lines = [
@@ -123,15 +123,22 @@ describe('seal honesty', () => {
     const row: HotRow = { device_id: 'dev0', seq: 2, ts: BASE, id: 'legacy-9', table: 'photo', body: 'b' };
     // Pre-fix find matches bare ids only: a qualified lookup never resolves.
     assert.equal(matchRowId(row, 'legacy-9'), true);
-    assert.equal(matchRowId(row, 'photo:dev0:2'), true);
-    assert.equal(matchRowId(row, 'events:dev0:2'), false);
+    assert.equal(matchRowId(row, syntheticId('photo', 'dev0', 2)), true);
+    assert.equal(matchRowId(row, syntheticId('events', 'dev0', 2)), false);
     assert.equal(matchRowId(row, 'unrelated'), false);
+  });
+
+  it('fallback ids join on U+001F, never a bare colon', { timeout: 30_000 }, () => {
+    const syn = syntheticId('t', 'd', 1);
+    assert.equal(syn.charCodeAt(1), 0x1f);
+    assert.equal(syn.charCodeAt(3), 0x1f);
+    assert.equal(syn, ['t', 'd', '1'].join(String.fromCharCode(0x1f)));
   });
 
   it('no-id rows across tables seal with distinct namespaced ids, each findable', { timeout: 60_000 }, async () => {
     // Seal-side half of the contract: the fallback id carries the table so
     // same device+seq rows from two tables never share an identity.
-    assert.equal(normRow({ device_id: 'd', seq: 1, ts: BASE, table: 't' }, 'log')?.id, 't:d:1');
+    assert.equal(normRow({ device_id: 'd', seq: 1, ts: BASE, table: 't' }, 'log')?.id, syntheticId('t', 'd', 1));
     const dir = scratch('sealhonest-names');
     const hotDb = join(dir, 'hot.jsonl');
     const lines = [
@@ -142,9 +149,31 @@ describe('seal honesty', () => {
     const outDir = join(dir, 'arch');
     const r = await seal({ hotDb, outDir });
     assert.equal(r.rowsSealed, 2);
-    const a = findTrx({ outDir, trxId: 'events:dev0:1' });
-    const b = findTrx({ outDir, trxId: 'returns:dev0:1' });
+    const a = findTrx({ outDir, trxId: syntheticId('events', 'dev0', 1) });
+    const b = findTrx({ outDir, trxId: syntheticId('returns', 'dev0', 1) });
     assert.equal(a.row.body, 'events body');
     assert.equal(b.row.body, 'returns body');
+  });
+
+  it('backslash/colon device ids round-trip via U+001F fallback ids', { timeout: 60_000 }, async () => {
+    const SEP = String.fromCharCode(0x1f);
+    const device = ['C', ':', String.fromCharCode(92), 'dev', ':', '01'].join('');
+    const syn = syntheticId('t', device, 1);
+    // The composer assigns the U+001F-joined id; the device's own ':' and '\'
+    // survive inside it instead of splitting the triple.
+    assert.equal(normRow({ device_id: device, seq: 1, ts: BASE, table: 't' }, 'log')?.id, syn);
+    assert.ok(syn.includes(device), 'device id embeds verbatim');
+    const row: HotRow = { device_id: device, seq: 1, ts: BASE, id: syn, table: 't', body: 'b' };
+    assert.equal(matchRowId(row, syn), true);
+    assert.equal(matchRowId(row, ['t', device, '1'].join(':')), false);
+    // Full seal -> find round-trip on the synthetic id.
+    const dir = scratch('sealhonest-windev');
+    const hotDb = join(dir, 'hot.jsonl');
+    writeFileSync(hotDb, JSON.stringify({ device_id: device, seq: 1, ts: BASE, table: 't', body: 'win body' }) + '\n');
+    const outDir = join(dir, 'arch');
+    const r = await seal({ hotDb, outDir });
+    assert.equal(r.rowsSealed, 1);
+    assert.equal(findTrx({ outDir, trxId: syn }).row.body, 'win body');
+    assert.ok(!syn.split(SEP).slice(1, -1).some((p) => p.includes(':') && p !== device));
   });
 });

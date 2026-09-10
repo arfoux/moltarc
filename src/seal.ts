@@ -57,6 +57,17 @@ function toInt(n: unknown): number | null {
 // outside 1..99999999 can never link back, so it is malformed at seal time.
 export const SEQ_MAX = 99_999_999;
 
+// Synthetic fallback-id separator: unit separator (U+001F). The old ':'
+// join broke on device ids carrying ':' or '\' (Windows paths like C:\dev),
+// where table:device:seq no longer splits unambiguously. U+001F never
+// appears in table/device names, so the triple stays unambiguous.
+export const SYN_ID_SEP = '\u001f';
+
+// Synthetic fallback id for hot rows carrying no explicit id.
+export function syntheticId(table: string, device: string, seq: number): string {
+  return `${table}${SYN_ID_SEP}${device}${SYN_ID_SEP}${seq}`;
+}
+
 // Fielog interop: raw ledger events (`type`/`event` entry/undo, `value`
 // payload) normalize with no manual conversion step.
 export function normRow(o: Record<string, unknown>, fallbackTable: string): HotRow | null {
@@ -104,14 +115,16 @@ export function normRow(o: Record<string, unknown>, fallbackTable: string): HotR
       hides !== undefined ? `hides=${String(hides)}` : '',
       shows !== undefined ? `shows=${String(shows)}` : '',
     ].filter((s) => s !== '').join(' ');
-  // Fallback id is namespaced with the table: bare device:seq collides across
-  // tables sharing one hot log, so find() can mistake one table's row for another's.
+  // Fallback id is namespaced with the table (U+001F-joined): bare device:seq
+  // collides across tables sharing one hot log, so find() can mistake one
+  // table's row for another's. U+001F keeps the triple unambiguous even when
+  // the device id itself carries ':' or '\' (Windows paths like C:\dev).
   const table = String(o.table ?? kind ?? fallbackTable);
   return {
     device_id: device,
     seq,
     ts,
-    id: String(o.id ?? o.trxId ?? o.trx_id ?? o.trx ?? o.key ?? `${table}:${device}:${seq}`),
+    id: String(o.id ?? o.trxId ?? o.trx_id ?? o.trx ?? o.key ?? syntheticId(table, device, seq)),
     table,
     body,
   };
@@ -395,7 +408,7 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
     // negative that would otherwise count as watermark-skipped) to malformed.
     if (!Number.isInteger(r.seq) || r.seq <= 0 || r.seq > SEQ_MAX) { malformed++; continue; }
     if (r.seq <= Math.max(wm[r.device_id] ?? 0, wm[''] ?? 0)) { skipped++; continue; }
-    const key = `${r.table}:${r.device_id}:${r.seq}`;
+    const key = syntheticId(r.table, r.device_id, r.seq);
     const prev = seen.get(key);
     if (prev !== undefined && prev.body !== r.body) replaced++;
     seen.set(key, r);
