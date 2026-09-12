@@ -5,9 +5,10 @@
 // WITHOUT a toJSON snapshot + fromJSON restore LOSES usage history and
 // spent claims become spendable again (double-spend). There is NO
 // auto-persist: callers own durability. Snapshot after every use() in
-// production; restore before serving. NOTE: claim ids are 12-hex
-// (48-bit); kept for backward compatibility — do not rely on
-// collision-resistance for adversarial issuance, use unique nonces.
+// production; restore before serving. NOTE: claim ids are 20-hex (80-bit);
+// 12-hex (48-bit) ids issued before the widening stay usable (lookup, not
+// length validation) — do not rely on collision-resistance for adversarial
+// issuance, use unique nonces.
 import { sha256hex } from './chunk.js';
 
 export interface Claim {
@@ -55,7 +56,7 @@ export function issueClaim(value: number, issuedAt: number = Date.now(), nonce: 
   if (!Number.isFinite(issuedAt)) throw new Error('issueClaim: issuedAt must be finite');
   if (nonce === '') throw new Error('issueClaim: nonce must be non-empty');
   if (ttlMs !== undefined && ttlMs !== null && (!Number.isFinite(ttlMs) || ttlMs < 0)) throw new Error('issueClaim: ttlMs must be >= 0');
-  const id = `t-${sha256hex(Buffer.from(`${value}:${issuedAt}:${nonce}`, 'utf8')).slice(0, 12)}`;
+  const id = `t-${sha256hex(Buffer.from(`${value}:${issuedAt}:${nonce}`, 'utf8')).slice(0, 20)}`;
   const expiresAt = ttlMs === undefined || ttlMs === null ? undefined : issuedAt + ttlMs;
   return expiresAt === undefined ? { id, value, issuedAt, nonce } : { id, value, issuedAt, nonce, expiresAt };
 }

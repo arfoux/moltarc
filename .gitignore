@@ -18,6 +18,7 @@ examples/universal-out/
 bench/photo-out/
 bench/dict-out/
 bench/perf-out/
+bench/measured.json
 # local-only native builds (absolute MOLTARC_TS path + platform ABI baked in;
 # rebuild per machine per docs/compat.md — never commit, do not un-ignore):
 ext/amalg/

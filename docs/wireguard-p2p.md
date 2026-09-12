@@ -98,7 +98,11 @@ list non-kosong).
 - Verifikasi: `sudo wg show`, `curl -v telnet://10.44.0.1:4171` dari peer
   (harus tersambung), dan ulangi dari IP luar tunnel (harus ditolak/timeout).
 
-## 6. Verifikasi handshake gagal tanpa PSK benar
+## 6. allowedPeersCIDR / requireTunnelCIDR (opt-in fail-closed)
+
+Firewall bisa salah-buka; opsi ini bikin node sendiri yang menolak peer luar tunnel dengan pesan jelas (`peer <ip> outside allowed tunnel subnet (10.44.0.0/24)`). Server: `startNode({ outDir, port, allowedPeersCIDR: '10.44.0.0/24' })` (`requireTunnelCIDR` alias yang sama) — upgrade non-tunnel ditolak HTTP 403, hello lolos-upgrade ditolak frame `error` + tutup. Klien: `syncFromPeer(url, outDir, { allowedPeersCIDR: '10.44.0.0/24' })` menolak dial luar subnet sebelum satu byte pun terkirim (`p2p dial refused: ...`). Keduanya validasi CIDR di depan (`p2p allowedPeersCIDR invalid: ...` untuk `bogus`) — salah ketik tidak pernah diam-diam terbuka. Default OFF (tanpa opsi perilaku lama), jadi nyalakan di semua node tunnel; tanpa ini salah-config firewall bocor diam-diam.
+
+## 7. Verifikasi handshake gagal tanpa PSK benar
 
 1. Kedua node dengan PSK sama: sync berhasil.
 2. Set klien ke PSK salah (atau kosongkan): `unframeWire` return `null` —

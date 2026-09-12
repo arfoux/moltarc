@@ -102,4 +102,27 @@ describe('claim', () => {
     const stale = s.issue(100, now - DEFAULT_TTL_MS - 10_000, 'stale-default');
     assert.deepEqual(s.use(stale.id), { ok: false, reason: 'expired' });
   });
+
+  it('issues 20-hex ids; legacy 12-hex ids stay usable', { timeout: 30_000 }, () => {
+    const v = issueClaim(500, 9, 'x', undefined);
+    assert.match(v.id, /^t-[0-9a-f]{20}$/, 'new ids are 20-hex (80-bit)');
+    assert.equal(issueClaim(500, 9, 'x', 1000).id, v.id, 'ttl stays out of the id hash');
+    const s = new ClaimStore();
+    const fresh = s.issue(500, 9, 'y', undefined);
+    assert.match(fresh.id, /^t-[0-9a-f]{20}$/);
+    assert.equal(s.use(fresh.id).ok, true);
+    // legacy 12-hex id, simulated as issued before the widening.
+    const legacy = { id: 't-deadbeefcafe', value: 500, issuedAt: 9, nonce: 'x' };
+    s.load(legacy);
+    assert.equal(s.use(legacy.id).ok, true);
+    assert.equal(s.use(legacy.id).reason, 'double-use');
+    assert.equal(s.isUsed(legacy.id), true);
+    const restored = ClaimStore.fromJSON(s.toJSON());
+    assert.equal(restored.use(legacy.id).reason, 'double-use', 'snapshot keeps legacy spent spent');
+    const rep = s.reconcile([legacy.id]);
+    assert.deepEqual(rep.doubleUsed, [legacy.id], 'legacy id flows through reconcile');
+    assert.deepEqual(rep.clean, [], 'double-used legacy is not clean');
+    assert.deepEqual(rep.localOnly, [fresh.id], 'unconfirmed fresh id needs push');
+    assert.deepEqual(rep.remoteOnly, [], 'all remote ids are local');
+  });
 });

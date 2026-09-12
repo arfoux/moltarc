@@ -9,7 +9,7 @@ import type { HotRow } from './chunk.js';
 import { trainTableDict, saveDictAtomic } from './dict.js';
 import { checkReserve } from './gc.js';
 import { assertMigrated, requireMigrated } from './migrate.js';
-import { appendEntries, buildManifest, saveManifestAtomic, scanChunk } from './manifest.js';
+import { appendEntries, buildManifest, saveManifestAtomic, scanChunk, shardMonthsFor } from './manifest.js';
 import type { ChunkEntry, ColdSegment } from './manifest.js';
 import { saveThumb } from './thumb.js';
 import { atomicWrite } from './guard.js';
@@ -590,12 +590,14 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
       }
     }
     // Find caches (manifest/sparse/shard) keyed by mtime+size+seq would serve
-    // the pre-seal listing after this write; append first, then drop them
-    // while still holding the writer lock so no concurrent reader
-    // repopulates a stale entry.
+    // the pre-seal listing after this write; append first, then drop this
+    // archive's entries (only its touched shard months) while still holding
+    // the writer lock so no concurrent reader repopulates a stale entry.
+    // Other archives' warm entries stay cached; a missing/unknown scope
+    // falls back to the global clear inside clearFindCaches.
     appendEntries(opts.outDir, entries);
     const { upto, ordered } = advanceWatermark();
-    clearFindCaches();
+    clearFindCaches({ outDir: opts.outDir, months: shardMonthsFor(entries) });
     return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes, photoQuarantined };
   }
 
@@ -614,7 +616,7 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   if (cold !== undefined) manifest.cold = cold;
   saveManifestAtomic(opts.outDir, manifest);
   const { upto: uptoFirst, ordered: orderedFirst } = advanceWatermark();
-  clearFindCaches();
+  clearFindCaches({ outDir: opts.outDir, months: shardMonthsFor(manifest.chunks) });
   return { chunks, sealedUptoSeq: uptoFirst, sealedByDevice: orderedFirst, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes, photoQuarantined };
   } finally { releaseSealLock(); }
 }
