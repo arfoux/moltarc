@@ -24,3 +24,34 @@ jobs:
         continue-on-error: true
       - run: npm install -g npm@latest
       - run: npm publish --provenance --access public
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VER="${TAG#v}"
+          NOTES=$(awk -v tag="$TAG" -v ver="$VER" '
+            /^## / {
+              if (found) exit
+              if ($2 == tag || $2 == ver) { found=1; next }
+              next
+            }
+            found { print }
+          ' CHANGELOG.md)
+          if [ -z "$NOTES" ]; then
+            NOTES=$(awk '
+              /^## Unreleased/ { found=1; next }
+              /^## / { if (found) exit }
+              found { print }
+            ' CHANGELOG.md | head -n 30)
+          fi
+          if [ -z "$NOTES" ]; then
+            NOTES="$TAG"
+          fi
+          printf '%s\n' "$NOTES" | gh release create "$TAG" --title "$TAG" --notes-file -
