@@ -21,7 +21,7 @@ import { checkUnacked } from '../src/alerts.js';
 import { assertChunkName } from '../src/guard.js';
 import { syncFromPeer } from '../src/p2p.js';
 import { queryAsOf } from '../src/timetravel.js';
-import { CURRENT_MANIFEST_VERSION, migrate, planMigration } from '../src/migrate.js';
+import { CURRENT_MANIFEST_VERSION, migrate, planMigration, requireMigrated } from '../src/migrate.js';
 function fail(err: unknown): never {
   if (err instanceof Error) {
     console.error(err.message);
@@ -112,6 +112,9 @@ function restoreFromCold(outDir: string, opts: { dryRun?: boolean } = {}): strin
     console.log(`dry-run: would restore ${n} chunk(s) + ${plan.reduce((a, p) => a + p.dicts.length, 0)} dict(s) from ${plan.length} segment(s)`);
     return [];
   }
+  // Downgrade guard: refuse to rebuild an old manifest in place (dry-run
+  // above stays read-only and skips the guard).
+  requireMigrated(outDir);
   const warm = join(outDir, 'warm');
   const dicts = join(outDir, 'dicts');
   mkdirSync(warm, { recursive: true });
@@ -291,6 +294,10 @@ async function main(): Promise<void> {
     console.log(JSON.stringify(r.rows));
     const target = seq === undefined ? `ts=${ts}` : `seq=${seq}`;
     console.log(`asof ${r.rows.length} row(s) (${target}) from ${r.proof.chunksConsulted.length} chunk(s), pruned ${r.proof.chunksPruned}`);
+    if (r.proof.skippedMissing > 0) {
+      console.error(`asof PARTIAL: ${r.proof.skippedMissing} chunk(s) missing, result incomplete — refusing silent success`);
+      process.exit(2);
+    }
   } else if (cmd === 'migrate') {
     const flags = rest.filter((a) => a.startsWith('--'));
     const positional = rest.filter((a) => !a.startsWith('--'));

@@ -99,3 +99,10 @@ holds `sha256(token)` strings and an empty list serves anyone.
 > **WARNING: serving is LAN-open by default.** An empty `allowPeers` list serves anyone on
 > the LAN who can reach the port. Set `MOLTARC_PSK` and/or a non-empty `allowPeers`
 > allowlist before exposing a node past trusted LAN.
+
+## Claim TTL
+
+Claims expire `DEFAULT_TTL_MS` (15 min, `src/claim.ts`) after `issuedAt` when
+the caller omits `ttlMs`; pass explicit `undefined`/`null` for a never-expiring
+permit (backward compatible) or a numeric `ttlMs` for a custom window. Expired
+claims fail `use()` with `expired` and are never marked spent.

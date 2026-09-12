@@ -1,6 +1,6 @@
 // moltarc manifest — atomic tmp+fsync+rename, dual copy, min/max+bloom, rebuild-from-filenames,
 // monthly shards (manifest-YYYY-MM.json + root pointer), persisted sparse index (sparse.json).
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync, writeSync } from 'fs';
 import { join } from 'path';
 import { crc32c, decodeChunk, decodeHeader, fnv1a32, HEADER_SIZE, sha256hex, DICT_FLAG } from './chunk.js';
 import { loadDictFor } from './dict.js';
@@ -545,8 +545,112 @@ export function rebuildFromFilenames(outDir: string): Manifest {
   return buildManifest(outDir);
 }
 
-export function saveManifestAtomic(outDir: string, m: Manifest): void {
+// Shared manifest-writer lock (same seal.lock file + protocol as seal()).
+// Single-writer rule: every manifest mutation — seal, mergeCold, sweepCold
+// --apply, forget, p2p-sync apply, migrate, quarantine/repair, and the two
+// primitives below — must hold this lock while reading-modifying-writing.
+// Ordering: mkdir outDir -> acquire -> load -> mutate -> save -> release.
+// Fail-loud: a second writer while held throws (callers surface it cleanly,
+// never half-write). Same-process re-entry is a no-op: saveManifestAtomic
+// self-locks, so outer holders (seal, migrate, cold, p2p via appendEntries)
+// simply proceed. Stale locks (dead holder pid, ESRCH) are reclaimed once
+// with a re-read fence before unlinking; release only unlinks our own pid.
+export function acquireManifestLock(outDir: string): () => void {
   mkdirSync(outDir, { recursive: true });
+  const lockPath = join(outDir, 'seal.lock');
+  if (readManifestLockPid(outDir) === process.pid) return () => {};
+  const readPid = (): number | null => {
+    let text: string;
+    try {
+      text = readFileSync(lockPath, 'utf8');
+    } catch {
+      return null;
+    }
+    const pid = Number(text.trim().split(/\s+/)[0]);
+    return Number.isInteger(pid) && pid > 0 ? pid : NaN;
+  };
+  const removeIfStale = (): boolean => {
+    const pid = readPid();
+    if (pid === null) return true;
+    if (!Number.isInteger(pid) || pid === process.pid) return false;
+    try {
+      process.kill(pid, 0);
+      return false;
+    } catch (e) {
+      let code: unknown;
+      if (e !== null && typeof e === 'object' && 'code' in e) code = e.code;
+      if (code !== 'ESRCH') return false;
+    }
+    const fresh = readPid();
+    if (fresh === null) return true;
+    if (fresh !== pid) return false;
+    try {
+      unlinkSync(lockPath);
+    } catch {
+      return false;
+    }
+    return true;
+  };
+  const lockedError = (): Error => {
+    let holder = 'unknown';
+    try {
+      holder = readFileSync(lockPath, 'utf8').trim().split(/\s+/)[0] || holder;
+    } catch { /* keep unknown */ }
+    return new Error(`manifest locked: ${lockPath} held by pid ${holder}; refusing concurrent manifest write (remove seal.lock only if the holder is dead)`);
+  };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let fd: number;
+    try {
+      fd = openSync(lockPath, 'wx', 0o644);
+    } catch {
+      if (attempt === 0 && removeIfStale()) continue;
+      throw lockedError();
+    }
+    try {
+      writeSync(fd, `${process.pid}\n`);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    if (attempt === 1 && readPid() !== process.pid) throw lockedError();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      try {
+        if (readPid() !== process.pid) return;
+        unlinkSync(lockPath);
+      } catch { /* raced release: ignore */ }
+    };
+  }
+  throw lockedError();
+}
+
+/** Reader for lock-holder diagnostics (null = unlocked, NaN = unparsable). */
+export function readManifestLockPid(outDir: string): number | null {
+  let text: string;
+  try {
+    text = readFileSync(join(outDir, 'seal.lock'), 'utf8');
+  } catch {
+    return null;
+  }
+  const pid = Number(text.trim().split(/\s+/)[0]);
+  return Number.isInteger(pid) && pid > 0 ? pid : NaN;
+}
+
+/** Run fn while holding the manifest lock (re-entrant, always released). */
+export function withManifestLock<T>(outDir: string, fn: () => T): T {
+  const release = acquireManifestLock(outDir);
+  try {
+    return fn();
+  } finally {
+    release();
+  }
+}
+
+export function saveManifestAtomic(outDir: string, m: Manifest): void {
+  const release = acquireManifestLock(outDir);
+  try {
   stampEnvelope(m, prevValidSeq(outDir));
   const payload = `${JSON.stringify(m, null, 1)}\n`;
   for (const name of ['manifest.json', 'manifest.bak.json']) {
@@ -563,6 +667,9 @@ export function saveManifestAtomic(outDir: string, m: Manifest): void {
     saveShardSidecars(outDir, m);
   } catch { /* sidecars are a pure speedup: root copies already durable */ }
   fsyncDir(outDir);
+  } finally {
+    release();
+  }
 }
 
 export function loadManifest(outDir: string): { manifest: Manifest; source: 'primary' | 'backup' | 'rebuilt' } {
@@ -600,10 +707,8 @@ export function loadManifest(outDir: string): { manifest: Manifest; source: 'pri
   return { manifest: rebuilt, source: 'rebuilt' };
 }
 
-// Append-only fast path for seal: merge caller-scanned entries into the best
-// crc-valid manifest without a full warm rescan. Dedupe by filename; existing
-// entries win so a retry never duplicates. Bumps seq+crc via the atomic save.
 export function appendEntries(outDir: string, entries: ChunkEntry[]): Manifest {
+  return withManifestLock(outDir, () => {
   const { manifest } = loadManifest(outDir);
   const known = new Set(manifest.chunks.map((e) => e.file));
   for (const e of entries) {
@@ -614,4 +719,5 @@ export function appendEntries(outDir: string, entries: ChunkEntry[]): Manifest {
   manifest.chunks.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
   saveManifestAtomic(outDir, manifest);
   return manifest;
+  });
 }

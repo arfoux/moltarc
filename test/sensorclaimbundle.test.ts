@@ -25,7 +25,7 @@ describe('sensor+claim+bundle', () => {
     assert.equal(unpackSensor(chunk).rows.length, buckets.length);
 
     const store = new ClaimStore();
-    const claim = store.issue(50000, base, 'event-1');
+    const claim = store.issue(50000, base, 'event-1', undefined);
     assert.equal(store.use(claim.id).ok, true);
     const rep = store.reconcile([claim.id]);
     assert.deepEqual(rep.clean, [claim.id]);

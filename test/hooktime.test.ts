@@ -105,13 +105,14 @@ describe('hooktime: moltarc_hook.c surfaces bun stderr', () => {
   });
 
   it('captures bun stderr out of the stdout pipe', { timeout: 30_000 }, () => {
-    assert.ok(src.includes('2>'), 'hook must redirect bun stderr (2>) into a per-call capture, not the JSON pipe');
+    assert.ok(src.includes('CreatePipe') || src.includes('CreateProcess'), 'hook must spawn bun via exec-vector (CreateProcess) with stdout/stderr on anonymous pipes, no shell');
+    assert.ok(src.includes('hStdError') || src.includes('stderr_text'), 'hook must capture bun stderr per call into a separate buffer, not the JSON pipe');
+    assert.ok(!src.includes('system(') && !src.includes('popen('), 'hook must not use a shell (no system/popen): argv goes straight to CreateProcess');
     assert.ok(
       (src.match(/if \(err\) \*err = 0;/g) ?? []).length >= 2,
       'both find and seal entry points must init *err before running bun',
     );
   });
-
   it('find miss stays distinguishable from find error', { timeout: 30_000 }, () => {
     const findFn = src.slice(src.indexOf('moltarc_chunk_find'));
     const sealAt = findFn.indexOf('moltarc_chunk_seal');

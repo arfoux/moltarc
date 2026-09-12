@@ -13,6 +13,9 @@ import { appendEntries, buildManifest, saveManifestAtomic, scanChunk } from './m
 import type { ChunkEntry, ColdSegment } from './manifest.js';
 import { saveThumb } from './thumb.js';
 import { atomicWrite } from './guard.js';
+// Cycle-safe: find.ts uses seal.js (SYN_ID_SEP) only inside functions, and
+// seal uses clearFindCaches only inside seal(), so module-eval order is safe.
+import { clearFindCaches } from './find.js';
 
 export const TARGET_BYTES = 2 * 1024 * 1024;
 export const MIN_BYTES = 1 * 1024 * 1024;
@@ -310,10 +313,11 @@ function readWatermark(wmPath: string): Record<string, number> {
 // clearly instead of watermark-racing. A lock whose pid is dead (ESRCH) is
 // stale (crashed holder) and is removed once before retrying; any other case
 // (live pid, EPERM, unparsable content, same-process re-entry) stays locked.
-// Scope: this guards seal() only. mergeCold/sweepCold --apply and p2p receive
-// rewrite the same manifest WITHOUT taking it, so only one writer (seal,
-// merge, coldg --apply, p2p-sync apply, restore --apply, migrate) may run at
-// a time — see docs/architecture.md single-writer rule.
+// Scope: this is the same seal.lock file + protocol as acquireManifestLock in
+// manifest.ts. Every manifest writer (seal, mergeCold, sweepCold --apply,
+// forget, p2p-sync apply via appendEntries, migrate, quarantine/repair, and
+// saveManifestAtomic itself which self-locks) holds it across
+// read-modify-write — see docs/architecture.md single-writer rule.
 // Reclaim fencing: the stale check re-reads the file immediately before
 // unlinking, so a waiter never deletes a successor's fresh lock (a vanished
 // file retries the create, changed content stays locked). The reclaiming
@@ -459,9 +463,11 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   }
   const photoQuarantined = [...photoSet];
 
-  // Per-chunk watermark: every flush fsyncs its chunk, then persists the
-  // per-device advance. A kill between flushes loses only the unflushed tail,
-  // which still sits below the watermark and reseals on the next call.
+  // Watermark last: chunk files flush first, the manifest append makes them
+  // visible, and only then does the per-device watermark advance past the
+  // sealed rows. A throw anywhere before that (scan, lock, manifest write)
+  // leaves the rows below the watermark so the next seal repeats them
+  // idempotently (chunk rewrite skipped by name, manifest deduped by file).
   const advanced: Record<string, number> = {};
   for (const [k, v] of Object.entries(wm)) if (k !== '') advanced[k] = v;
   const persistWatermark = (): void => {
@@ -515,8 +521,6 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
         fsyncFile(dest);
       }
       chunks.push(dest);
-      for (const r of batch) advanced[r.device_id] = Math.max(advanced[r.device_id] ?? 0, r.seq);
-      persistWatermark();
       batch = [];
       batchRaw = 0;
       recalAt = 0;
@@ -552,12 +556,17 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   // Manifest once at the end: append-only fast path merges caller-scanned
   // entries into the best crc-valid copy, no full warm rescan. ordering,
   // fsync, and dual-copy behavior stay identical: appendEntries sorts by
-  // filename and saves via the same atomic dual-copy path. the watermark
-  // already covers each chunk; a kill before this point only repeats
-  // manifest work on the next seal.
-  const upto = Math.max(0, ...Object.values(advanced));
-  const ordered: Record<string, number> = {};
-  for (const k of Object.keys(advanced).sort()) ordered[k] = advanced[k];
+  // filename and saves via the same atomic dual-copy path. The watermark
+  // advances only after the manifest write lands (see advanceWatermark),
+  // so a kill before this point repeats chunk+manifest work idempotently.
+  const advanceWatermark = (): { upto: number; ordered: Record<string, number> } => {
+    for (const r of pending) advanced[r.device_id] = Math.max(advanced[r.device_id] ?? 0, r.seq);
+    persistWatermark();
+    const upto = Math.max(0, ...Object.values(advanced));
+    const ordered: Record<string, number> = {};
+    for (const k of Object.keys(advanced).sort()) ordered[k] = advanced[k];
+    return { upto, ordered };
+  };
 
   const hasManifest =
     existsSync(join(opts.outDir, 'manifest.json')) || existsSync(join(opts.outDir, 'manifest.bak.json'));
@@ -580,7 +589,13 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
         });
       }
     }
+    // Find caches (manifest/sparse/shard) keyed by mtime+size+seq would serve
+    // the pre-seal listing after this write; append first, then drop them
+    // while still holding the writer lock so no concurrent reader
+    // repopulates a stale entry.
     appendEntries(opts.outDir, entries);
+    const { upto, ordered } = advanceWatermark();
+    clearFindCaches();
     return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes, photoQuarantined };
   }
 
@@ -598,6 +613,8 @@ export async function seal(opts: SealOpts): Promise<SealResult> {
   const manifest = buildManifest(opts.outDir);
   if (cold !== undefined) manifest.cold = cold;
   saveManifestAtomic(opts.outDir, manifest);
-  return { chunks, sealedUptoSeq: upto, sealedByDevice: ordered, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes, photoQuarantined };
+  const { upto: uptoFirst, ordered: orderedFirst } = advanceWatermark();
+  clearFindCaches();
+  return { chunks, sealedUptoSeq: uptoFirst, sealedByDevice: orderedFirst, rowsSealed: pending.length, rowsSkipped: skipped, rowsMalformed: malformed, rowsReplaced: replaced, probeEncodes, photoQuarantined };
   } finally { releaseSealLock(); }
 }

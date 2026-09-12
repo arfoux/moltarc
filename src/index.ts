@@ -1,7 +1,7 @@
 // moltarc v0.1 — tiered SQLite archive: hot WAL -> warm chunks -> cold relay + manifest.
 export { seal, readHotRows, readSqliteRows, isSqliteFile, normRow, chunkName, TARGET_BYTES, MIN_BYTES, MAX_BYTES } from './seal.js';
 export type { SealOpts, SealResult } from './seal.js';
-export { buildManifest, saveManifestAtomic, loadManifest, rebuildFromFilenames, buildBloom, bloomCheck } from './manifest.js';
+export { buildManifest, saveManifestAtomic, loadManifest, rebuildFromFilenames, buildBloom, bloomCheck, acquireManifestLock, withManifestLock, readManifestLockPid } from './manifest.js';
 export type { ChunkEntry, ColdSegment, Manifest } from './manifest.js';
 export { ship, planShipment, sendChunked, readRelayIndex, laneOf } from './ship.js';
 export type { ShipOpts, ShipResult, RelayIndex } from './ship.js';

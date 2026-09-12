@@ -16,7 +16,7 @@
 // so a full disk never leaves a torn tar or a half-rewritten manifest.
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync, unlinkSync, writeSync } from 'fs';
 import { join } from 'path';
-import { loadManifest, saveManifestAtomic } from './manifest.js';
+import { acquireManifestLock, loadManifest, saveManifestAtomic } from './manifest.js';
 import { readRelayIndex } from './ship.js';
 import { checkReserve } from './gc.js';
 import { HEADER_SIZE, decodeHeader, DICT_FLAG } from './chunk.js';
@@ -263,8 +263,17 @@ export function mergeCold(outDir: string, opts: MergeOpts = {}): MergeResult {
     const dfd = openSync(cold, 'r+');
     try { fsyncSync(dfd); } finally { closeSync(dfd); }
   } catch { /* Windows: dir fsync unsupported, rename is enough */ }
-  manifest.cold.push({ file: segment, chunks: pending.map((m) => m.name), bytes: total });
-  saveManifestAtomic(outDir, manifest);
+  // Manifest tail under the shared writer lock: re-load fresh so a seal that
+  // landed while the tar streamed is not clobbered; the save self-locks.
+  const releaseMerge = acquireManifestLock(outDir);
+  try {
+    const current = loadManifest(outDir).manifest;
+    current.cold ??= [];
+    if (!current.cold.some((s) => s.file === segment)) current.cold.push({ file: segment, chunks: pending.map((m) => m.name), bytes: total });
+    saveManifestAtomic(outDir, current);
+  } finally {
+    releaseMerge();
+  }
   return { segment, chunks: pending.map((m) => m.name), dicts: dictMembers.map((m) => m.name), bytes: total };
 }
 // Streaming tariff: mergeCold above never holds more than one copy window
@@ -309,19 +318,26 @@ function readHeaderPrefix(full: string): { ok: boolean; flags: number; dictId: n
 export function forgetChunks(outDir: string, files: string[], relayDir: string): { removed: string[]; note: string } {
   if (!relayDir) throw new Error('forget needs the relayDir ship wrote to (refusing silent unacked delete)');
   requireMigrated(outDir);
-  const { manifest } = loadManifest(outDir);
-  const drop = new Set(files);
-  const targets = manifest.chunks.filter((e) => drop.has(e.file));
   const remote = readRelayIndex(relayDir);
   const have = new Set(Object.keys(remote.chunks));
-  const unacked = targets.filter((e) => !have.has(e.sha256)).map((e) => e.file);
-  if (unacked.length > 0) {
-    throw new Error(`refusing to forget unacked chunk(s): ${unacked.join(', ')} (ship first)`);
+  // Read-modify-write under the shared writer lock: the ack check and the
+  // prune both run on the fresh copy, so a concurrent seal is never lost.
+  const releaseForget = acquireManifestLock(outDir);
+  try {
+    const { manifest: current } = loadManifest(outDir);
+    const drop = new Set(files);
+    const targets = current.chunks.filter((e) => drop.has(e.file));
+    const unacked = targets.filter((e) => !have.has(e.sha256)).map((e) => e.file);
+    if (unacked.length > 0) {
+      throw new Error(`refusing to forget unacked chunk(s): ${unacked.join(', ')} (ship first)`);
+    }
+    const removed = targets.map((e) => e.file);
+    current.chunks = current.chunks.filter((e) => !drop.has(e.file));
+    saveManifestAtomic(outDir, current);
+    return { removed, note: 'bytes remain until gc --apply + coldg --apply' };
+  } finally {
+    releaseForget();
   }
-  const removed = targets.map((e) => e.file);
-  manifest.chunks = manifest.chunks.filter((e) => !drop.has(e.file));
-  saveManifestAtomic(outDir, manifest);
-  return { removed, note: 'bytes remain until gc --apply + coldg --apply' };
 }
 
 export interface ColdSweepOpts {
@@ -447,7 +463,16 @@ export function sweepCold(outDir: string, opts: ColdSweepOpts = {}): ColdSweepRe
   }
   const bytesReclaimed = bytesBefore - bytesAfter;
   if (!dryRun && (pruned.length > 0 || repacked.length > 0)) {
-    saveManifestAtomic(outDir, manifest);
+    // Carry only the cold[] delta onto the fresh copy: chunks[] may have
+    // grown (seal) while segments repacked; clobbering it would lose data.
+    const releaseSweep = acquireManifestLock(outDir);
+    try {
+      const current = loadManifest(outDir).manifest;
+      current.cold = manifest.cold;
+      saveManifestAtomic(outDir, current);
+    } finally {
+      releaseSweep();
+    }
   }
   const photo = photoDiskBytes(outDir);
   return { segments, pruned, repacked, corrupt, bytesBefore, bytesAfter, bytesReclaimed, bytesCorrupt, photoFiles: photo.files, photoBytes: photo.bytes, dryRun };
