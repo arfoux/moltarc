@@ -1,12 +1,12 @@
 // claim single-spend permit: offline double-use + sync reconcile report.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { issueClaim, ClaimStore } from '../src/claim.js';
+import { issueClaim, ClaimStore, DEFAULT_TTL_MS } from '../src/claim.js';
 
 describe('claim', () => {
   it('uses once, then detects offline double-use', { timeout: 30_000 }, () => {
     const s = new ClaimStore();
-    const v = s.issue(15000, 1_700_000_000_000, 'n1');
+    const v = s.issue(15000, 1_700_000_000_000, 'n1', undefined);
     assert.equal(s.use(v.id).ok, true);
     const again = s.use(v.id);
     assert.equal(again.ok, false);
@@ -17,7 +17,7 @@ describe('claim', () => {
   it('rejects unknown ids and round-trips offline state', { timeout: 30_000 }, () => {
     const s = new ClaimStore();
     assert.deepEqual(s.use('t-deadbeefcafe'), { ok: false, reason: 'unknown' });
-    const v = s.issue(25000, 1_700_000_000_000, 'n2');
+    const v = s.issue(25000, 1_700_000_000_000, 'n2', undefined);
     s.use(v.id);
     const copy = ClaimStore.fromJSON(s.toJSON());
     assert.equal(copy.isUsed(v.id), true);
@@ -26,9 +26,9 @@ describe('claim', () => {
 
   it('reconcile splits clean / double-used / local-only / remote-only', { timeout: 30_000 }, () => {
     const s = new ClaimStore();
-    const a = s.issue(1000, 1, 'a');
-    const b = s.issue(2000, 1, 'b');
-    const c = s.issue(3000, 1, 'c');
+    const a = s.issue(1000, 1, 'a', undefined);
+    const b = s.issue(2000, 1, 'b', undefined);
+    const c = s.issue(3000, 1, 'c', undefined);
     s.use(a.id);
     s.use(b.id);
     s.use(b.id); // double-use offline
@@ -41,7 +41,7 @@ describe('claim', () => {
   });
 
   it('issue is deterministic and validates input', { timeout: 30_000 }, () => {
-    assert.equal(issueClaim(500, 9, 'x').id, issueClaim(500, 9, 'x').id);
+    assert.equal(issueClaim(500, 9, 'x', undefined).id, issueClaim(500, 9, 'x', undefined).id);
     assert.throws(() => issueClaim(0), /> 0/);
     assert.throws(() => issueClaim(5, 1, ''), /nonce/);
   });
@@ -68,10 +68,12 @@ describe('claim', () => {
     const fresh = s.issue(100, Date.now(), 'fresh', 60_000);
     assert.equal(s.use(fresh.id).ok, true);
 
-    // No ttl = never expires, even with an ancient issuedAt.
-    const timeless = s.issue(100, 1, 'timeless');
+    // Explicit undefined/null = never expires, even with an ancient issuedAt.
+    const timeless = s.issue(100, 1, 'timeless', undefined);
     assert.equal(timeless.expiresAt, undefined);
     assert.equal(s.use(timeless.id).ok, true);
+    const timelessNull = issueClaim(100, 1, 'timeless-null', null);
+    assert.equal(timelessNull.expiresAt, undefined);
   });
 
   it('ttl validates, never enters the id hash, and survives snapshots', { timeout: 30_000 }, () => {
@@ -87,5 +89,17 @@ describe('claim', () => {
       () => ClaimStore.fromJSON({ issued: [{ id: 'x', value: 1, issuedAt: 1, nonce: 'n', expiresAt: NaN }], used: [], tries: [] }),
       /invalid claim/,
     );
+  });
+
+  it('omitted ttlMs defaults to DEFAULT_TTL_MS; explicit never stays spendable', { timeout: 30_000 }, () => {
+    const now = Date.now();
+    const d = issueClaim(500, now, 'def');
+    assert.equal(d.expiresAt, now + DEFAULT_TTL_MS);
+    const s = new ClaimStore();
+    const sd = s.issue(500, now, 'def-store');
+    assert.equal(sd.expiresAt, now + DEFAULT_TTL_MS);
+    assert.equal(s.use(sd.id).ok, true);
+    const stale = s.issue(100, now - DEFAULT_TTL_MS - 10_000, 'stale-default');
+    assert.deepEqual(s.use(stale.id), { ok: false, reason: 'expired' });
   });
 });

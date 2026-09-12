@@ -6,7 +6,7 @@
 // are never touched, so history semantics (rows, seq, ts, sha) survive.
 import { copyFileSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { buildManifest, loadManifest, manifestCrc, saveManifestAtomic, stripBom } from './manifest.js';
+import { acquireManifestLock, buildManifest, loadManifest, manifestCrc, saveManifestAtomic, stripBom } from './manifest.js';
 import type { ChunkEntry, ColdSegment, Manifest } from './manifest.js';
 
 export const CURRENT_MANIFEST_VERSION = 1;
@@ -123,12 +123,13 @@ export function migrate(outDir: string, opts?: { dryRun?: boolean }): MigrationR
   if (!plan.needs) return idle;
   if (dryRun) return idle;
   if (!existsSync(join(outDir, 'warm'))) throw new Error(`no archive at ${outDir}`);
-  // Backup first: raw primary bytes so a human can roll back even if the
-  // rescan below fails. Writes the backup copy only; originals untouched.
+  // Mutating run holds the shared manifest-writer lock throughout, so a
+  // concurrent seal/cold/p2p writer fails loud instead of interleaving.
+  const release = acquireManifestLock(outDir);
+  try {
   const primary = join(outDir, 'manifest.json');
   const backupPath = join(outDir, BACKUP_NAME);
   if (!existsSync(backupPath) && existsSync(primary)) copyFileSync(primary, backupPath);
-  // Preserve cold listing: buildManifest scans warm only (tars stay on disk).
   let cold: ColdSegment[] | undefined;
   try {
     const { manifest } = loadManifest(outDir);
@@ -136,9 +137,11 @@ export function migrate(outDir: string, opts?: { dryRun?: boolean }): MigrationR
   } catch { /* no prior manifest readable: fresh cold[] */ }
   const fresh = buildManifest(outDir);
   fresh.version = CURRENT_MANIFEST_VERSION;
-  // Keep the original seal timestamp when the old copy carries one.
   const prev = rawManifest(outDir)?.raw as { createdAt?: unknown } | null;
   if (prev && typeof prev.createdAt === 'string' && prev.createdAt.length > 0) fresh.createdAt = prev.createdAt;
   saveManifestAtomic(outDir, fresh);
   return { ...planMigration(outDir), dryRun, backup: backupPath, migrated: plan.stale.length };
+  } finally {
+    release();
+  }
 }

@@ -7,7 +7,7 @@ import { join } from 'path';
 import { decodeChunk, decodeHeader, fnv1a32, DICT_FLAG } from './chunk.js';
 import type { HotRow } from './chunk.js';
 import { loadDictFor } from './dict.js';
-import { bloomCheck, loadManifest, loadShard, loadSparseIndex, BLOOM_BITS } from './manifest.js';
+import { bloomCheck, loadManifest, loadShard, loadSparseIndex, stripBom, BLOOM_BITS } from './manifest.js';
 import type { ChunkEntry, ColdSegment, Manifest, ManifestShard, ShardPointer, SparseDisk } from './manifest.js';
 import { readTar } from './cold.js';
 import { SYN_ID_SEP } from './seal.js';
@@ -63,8 +63,20 @@ export function clearFindCaches(): void {
   shardCache.clear();
 }
 
-// File stat for cache validation: missing files hash as (-1, -1) so the
-// absent-sidecar entry stays cached instead of re-statting every query.
+// Cheap content-seq probe: stat alone aliases a rewrite that preserves
+// mtime+size, so a stat hit still compares the on-disk seq before trusting
+// memory. Unparseable/missing seq forces a miss (fail fresh, never stale).
+function diskSeq(p: string): number | null {
+  try {
+    const raw = stripBom(readFileSync(p, 'utf8'));
+    const m = /"seq"\s*:\s*(-?\d+)/.exec(raw);
+    if (!m) return null;
+    const n = Number(m[1]);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
 function statKey(p: string): { mtimeMs: number; size: number } {
   try {
     const st = statSync(p);
@@ -73,17 +85,23 @@ function statKey(p: string): { mtimeMs: number; size: number } {
     return { mtimeMs: -1, size: -1 };
   }
 }
-
 function loadSparseCached(outDir: string): { sparse: SparseDisk | null; cold: ColdSegment[]; total: number; quarantined: number } {
   const primary = join(outDir, 'sparse.json');
   const { mtimeMs, size } = statKey(primary);
   const hit = sparseCache.get(outDir);
-  if (hit && hit.mtimeMs === mtimeMs && hit.size === size) return hit;
+  if (hit && hit.mtimeMs === mtimeMs && hit.size === size) {
+    // Absent-sidecar entries (sparse null, stat -1/-1) need no probe.
+    if (hit.sparse === null && mtimeMs === -1) return hit;
+    const onDisk = diskSeq(primary);
+    if (onDisk !== null && onDisk === hit.seq) return hit;
+    if (onDisk === null && hit.sparse === null) return hit;
+  }
   const loaded = loadSparseIndex(outDir);
   const seq = loaded ? loaded.sparse.seq : 0;
   const entry = loaded
     ? { mtimeMs, size, seq, sparse: loaded.sparse, cold: loaded.sparse.cold ?? [], total: loaded.sparse.total, quarantined: loaded.sparse.quarantined }
     : { mtimeMs, size, seq, sparse: null, cold: [], total: 0, quarantined: 0 };
+  sparseCache.set(outDir, entry);
   return entry;
 }
 
@@ -92,9 +110,14 @@ function loadShardCached(outDir: string, month: string): ManifestShard | null {
   const { mtimeMs, size } = statKey(file);
   const cacheId = `${outDir}\n${month}`;
   const hit = shardCache.get(cacheId);
-  if (hit && hit.mtimeMs === mtimeMs && hit.size === size) return hit.shard;
+  if (hit && hit.mtimeMs === mtimeMs && hit.size === size) {
+    if (hit.shard === null && mtimeMs === -1) return hit.shard;
+    const onDisk = diskSeq(file);
+    if (onDisk !== null && onDisk === hit.seq) return hit.shard;
+    if (onDisk === null && hit.shard === null) return hit.shard;
+  }
   const shard = loadShard(outDir, month);
-  const seq = shard?.seq ?? 0;
+  const seq = shard && typeof shard.seq === 'number' && Number.isFinite(shard.seq) ? Math.floor(shard.seq) : (diskSeq(file) ?? 0);
   shardCache.set(cacheId, { mtimeMs, size, seq, shard });
   return shard;
 }
@@ -131,7 +154,11 @@ function loadManifestCached(outDir: string): { manifest: Manifest; source: 'prim
   const primary = join(outDir, 'manifest.json');
   const pre = statKey(primary);
   const hit = manifestCache.get(outDir);
-  if (hit && hit.mtimeMs === pre.mtimeMs && hit.size === pre.size) return hit;
+  if (hit && hit.mtimeMs === pre.mtimeMs && hit.size === pre.size) {
+    const onDisk = diskSeq(primary);
+    if (onDisk !== null && onDisk === hit.seq) return hit;
+    if (onDisk === null) return hit;
+  }
   const loaded = loadManifest(outDir);
   // Re-stat: the rebuilt path may have rewritten the primary underneath us.
   const cur = statKey(primary);

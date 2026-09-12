@@ -1,6 +1,13 @@
 // moltarc claim — single-spend permit: offline double-use detection via an
 // exact used set, with a reconcile report on sync. hash primitives are
 // import-only reuse.
+// WARNING: ClaimStore is explicitly EPHEMERAL (in-memory only). A restart
+// WITHOUT a toJSON snapshot + fromJSON restore LOSES usage history and
+// spent claims become spendable again (double-spend). There is NO
+// auto-persist: callers own durability. Snapshot after every use() in
+// production; restore before serving. NOTE: claim ids are 12-hex
+// (48-bit); kept for backward compatibility — do not rely on
+// collision-resistance for adversarial issuance, use unique nonces.
 import { sha256hex } from './chunk.js';
 
 export interface Claim {
@@ -31,16 +38,25 @@ function randNonce(): string {
   return Buffer.from(bytes).toString('hex');
 }
 
-// deterministic id: same (value, issuedAt, nonce) reissues the same claim
-// (ttl never enters the hash). ttlMs is a lifetime from issuedAt: the claim
-// carries expiresAt = issuedAt + ttlMs. Omitted ttlMs = never expires.
-export function issueClaim(value: number, issuedAt: number = Date.now(), nonce: string = randNonce(), ttlMs?: number): Claim {
+// Default claim lifetime (15 min). Rationale: claims are offline single-spend
+// permits — a bounded window limits double-spend exposure from a lost snapshot
+// restore, while 15 min comfortably covers issue→use→sync on foot patrol
+// without forcing reissue. Shorter (1–5 min) would churn on slow links;
+// longer (hours) keeps a stolen claim spendable all day.
+export const DEFAULT_TTL_MS = 15 * 60 * 1000;
+
+// ttlMs resolution: argument OMITTED (3 args or fewer) → DEFAULT_TTL_MS;
+// explicit undefined/null → never expires (backward compatible escape hatch
+// for timeless permits); numeric → issuedAt + ttlMs. ttl never enters the id
+// hash, so reissues stay deterministic.
+export function issueClaim(value: number, issuedAt: number = Date.now(), nonce: string = randNonce(), ttlMs?: number | null): Claim {
+  if (arguments.length < 4) ttlMs = DEFAULT_TTL_MS;
   if (!Number.isFinite(value) || value <= 0) throw new Error('issueClaim: value must be > 0');
   if (!Number.isFinite(issuedAt)) throw new Error('issueClaim: issuedAt must be finite');
   if (nonce === '') throw new Error('issueClaim: nonce must be non-empty');
-  if (ttlMs !== undefined && (!Number.isFinite(ttlMs) || ttlMs < 0)) throw new Error('issueClaim: ttlMs must be >= 0');
+  if (ttlMs !== undefined && ttlMs !== null && (!Number.isFinite(ttlMs) || ttlMs < 0)) throw new Error('issueClaim: ttlMs must be >= 0');
   const id = `t-${sha256hex(Buffer.from(`${value}:${issuedAt}:${nonce}`, 'utf8')).slice(0, 12)}`;
-  const expiresAt = ttlMs === undefined ? undefined : issuedAt + ttlMs;
+  const expiresAt = ttlMs === undefined || ttlMs === null ? undefined : issuedAt + ttlMs;
   return expiresAt === undefined ? { id, value, issuedAt, nonce } : { id, value, issuedAt, nonce, expiresAt };
 }
 
@@ -52,8 +68,10 @@ export class ClaimStore {
   private used = new Set<string>();
   private tries = new Map<string, number>();
 
-  issue(value: number, issuedAt?: number, nonce?: string, ttlMs?: number): Claim {
-    const v = issueClaim(value, issuedAt, nonce, ttlMs);
+  issue(value: number, issuedAt?: number, nonce?: string, ttlMs?: number | null): Claim {
+    const v = arguments.length < 4
+      ? issueClaim(value, issuedAt, nonce)
+      : issueClaim(value, issuedAt, nonce, ttlMs);
     this.issued.set(v.id, v);
     return v;
   }
@@ -74,8 +92,8 @@ export class ClaimStore {
   // rebuild. unknown ids are rejected before any try is recorded, so
   // unissued ids never pollute the tries map. second use of the
   // same id reports double-use; unissued ids report unknown. claims past
-  // expiresAt report expired and are never marked used (no default expiry:
-  // claims without expiresAt never expire).
+  // expiresAt report expired and are never marked used (omitted ttlMs gets
+  // DEFAULT_TTL_MS; explicit undefined/null stays never-expire).
   use(id: string): UseResult {
     const claim = this.issued.get(id);
     if (!claim) return { ok: false, reason: 'unknown' };

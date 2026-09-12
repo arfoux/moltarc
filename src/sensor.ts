@@ -1,4 +1,4 @@
-// moltarc sensor — lossy log for numeric series: downsample + anomaly flag +
+// moltarc sensor â lossy log for numeric series: downsample + anomaly flag +
 // quarantine-cold routing. pure in-memory math; chunk/manifest primitives are
 // import-only reuse (hash + bloom + chunk bridge), never a second copy.
 import { encodeChunk, decodeChunk, sha256hex } from './chunk.js';
@@ -122,7 +122,7 @@ export function flagAnomalies(points: SensorPoint[], opts: FlagOpts = {}): boole
 // the anomalous subset of cold for the cold-relay path.
 //
 // hot-anomaly note: with anomalyToCold: false, flagged fresh points stay hot
-// and are NOT quarantined — quarantined mirrors only anomalies already routed
+// and are NOT quarantined â quarantined mirrors only anomalies already routed
 // to cold. callers that need every anomaly quarantined must keep
 // anomalyToCold true (default) or collect flagged hot points separately.
 export function routeQuarantine(points: SensorPoint[], flags: boolean[], opts: RouteOpts = {}): RouteResult {
@@ -157,15 +157,33 @@ export function anomalyBloomCheck(bloomB64: string, id: string): boolean {
 
 // bridge downsampled buckets into the chunk codec: one HotRow per bucket,
 // body carries the lossy summary; decode round-trips via decodeChunk.
-export function bucketsToRows(buckets: SensorBucket[], table = 'sensor', device = 'sensor-01'): HotRow[] {
-  return buckets.map((b, i) => ({
+//
+// seq is globally monotonic per (table, device): a module-level counter
+// persists across calls so batch N+1 continues after batch N instead of
+// restarting at 1 (which would collide on syntheticId(table,device,seq) and
+// let the seal-time dedupe in src/seal.ts:432-435 silently overwrite batch N
+// with batch N+1). pass startAfter to seed from an externally observed max
+// seq (e.g. watermark after restart); the counter takes max(counter, startAfter).
+const seqCounters = new Map<string, number>();
+export function bucketsToRows(buckets: SensorBucket[], table = 'sensor', device = 'sensor-01', startAfter?: number): HotRow[] {
+  const key = `${table}|${device}`;
+  let next = seqCounters.get(key) ?? 0;
+  if (startAfter !== undefined && Number.isFinite(startAfter)) next = Math.max(next, Math.floor(startAfter));
+  const rows = buckets.map((b, i) => ({
     device_id: device,
-    seq: i + 1,
+    seq: next + i + 1,
     ts: b.t0,
     id: `sensor-${b.t0}`,
     table,
     body: JSON.stringify({ t0: b.t0, count: b.count, min: b.min, max: b.max, avg: b.avg, first: b.first, last: b.last, anomalous: b.anomalous }),
   }));
+  if (rows.length > 0) seqCounters.set(key, next + rows.length);
+  return rows;
+}
+
+/** Test hook: clear the per-device seq counters (isolates regression tests). */
+export function resetSensorSeqCounters(): void {
+  seqCounters.clear();
 }
 
 export function packSensor(table: string, rows: HotRow[]): Buffer {

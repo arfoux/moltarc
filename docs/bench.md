@@ -26,11 +26,11 @@ Sources: `bun bench/mixed-corpus.ts`, `bun bench/photo-bench.ts`,
 
 | what | measured |
 |---|---|
-| seal throughput | **6.9MB/s** — 2518925B input sealed in 350ms into 3 warm chunks (246723B) |
+| seal throughput | **8.0MB/s** — 2518925B input sealed in 299ms into 3 warm chunks (246733B) |
 | ship full | **211716B in 2 chunks** (default lanes; blob table chunk ships only with `includeBlobs`) |
 | ship delta (600 new rows after full ship) | **1791B in 1 chunk** |
 | ship delta vs full ratio | **0.008** (1791 / 211716) |
-| find warm latency (6 ids × 20 iters, `trx-00002571` representative) | **13.60ms p50 / 22.05ms p99** (cold-median first lookup 17.17ms; 11 fetched / 8 pruned total) |
+| find warm latency (6 ids × 20 iters, `trx-00002571` representative) | **16.93ms p50 / 25.69ms p99** (cold-median first lookup 21.40ms; 11 fetched / 8 pruned total) |
 
 Method: seal once, ship full to an empty relay, append 600 rows (10%,
 new seqs/ids), reseal, ship again to the same relay — the second ship

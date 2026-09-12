@@ -4,8 +4,9 @@ import { dirname, join } from 'path';
 import { crc32c, decodeChunk, decodeHeader, DICT_FLAG, HEADER_SIZE, sha256hex } from './chunk.js';
 import type { ChunkHeader } from './chunk.js';
 import { loadDictFor } from './dict.js';
-import { loadManifest, saveManifestAtomic, scanChunk } from './manifest.js';
+import { acquireManifestLock, loadManifest, saveManifestAtomic, scanChunk } from './manifest.js';
 import type { ChunkEntry, Manifest } from './manifest.js';
+import { requireMigrated } from './migrate.js';
 import { readRelayIndex } from './ship.js';
 import { assertChunkName, assertSha } from './guard.js';
 export interface VerifyItem {
@@ -92,6 +93,8 @@ function loadManifestStrict(outDir: string): Manifest {
 // Rename is atomic (same-filesystem move): crash lands on old or new path.
 export function quarantine(outDir: string, file: string): void {
   assertChunkName(file);
+  const release = acquireManifestLock(outDir);
+  try {
   const manifest = loadManifestStrict(outDir);
   const warm = join(outDir, 'warm');
   const qdir = join(outDir, 'quarantine');
@@ -102,6 +105,9 @@ export function quarantine(outDir: string, file: string): void {
   if (entry) {
     entry.quarantined = true;
     saveManifestAtomic(outDir, manifest);
+  }
+  } finally {
+    release();
   }
 }
 
@@ -125,6 +131,8 @@ function fetchRelayBytes(relayDir: string, entry: ChunkEntry): Buffer {
 
 export function repairByHash(outDir: string, relayDir: string, file: string): void {
   assertChunkName(file);
+  const release = acquireManifestLock(outDir);
+  try {
   const manifest = loadManifestStrict(outDir);
   const entry = manifest.chunks.find((e) => e.file === file);
   if (!entry) throw new Error(`unknown chunk ${file}`);
@@ -145,6 +153,9 @@ export function repairByHash(outDir: string, relayDir: string, file: string): vo
   Object.assign(entry, fresh);
   delete entry.quarantined;
   saveManifestAtomic(outDir, manifest);
+  } finally {
+    release();
+  }
 }
 
 export type ChunkStatus = 'OK' | 'CORRUPT' | 'MISSING' | 'QUARANTINED';
@@ -343,11 +354,15 @@ export function verifyFull(outDir: string): VerifyFullResult {
 
 // Re-fetch every bad chunk by hash from the relay, then re-verify clean.
 export function repairAll(outDir: string, relayDir: string): RepairResult {
+  // Downgrade guard: refuse to rewrite an old manifest in place (tolerant
+  // when no manifest exists yet — nothing to migrate).
+  requireMigrated(outDir);
   const first = verifyFull(outDir);
   const repaired: string[] = [];
   const failed: RepairFailure[] = [];
   if (!first.ok && first.manifest.source !== 'none') {
     const manifest = loadManifestStrict(outDir);
+    const fixed: { file: string; fresh: ChunkEntry }[] = [];
     for (const item of first.items) {
       if (item.status === 'OK') continue;
       try {
@@ -364,14 +379,29 @@ export function repairAll(outDir: string, relayDir: string): RepairResult {
         // before the entry is re-scanned onto these bytes below.
         if (check.sha256 !== entry.sha256) throw new Error('repaired chunk sha differs from manifest');
         const fresh = scanChunk(dest, entry.file, join(outDir, 'dicts'));
-        Object.assign(entry, fresh);
-        delete entry.quarantined;
+        fixed.push({ file: item.file, fresh });
         repaired.push(item.file);
       } catch (err) {
         failed.push({ file: item.file, error: (err as Error).message });
       }
     }
-    if (repaired.length > 0) saveManifestAtomic(outDir, manifest);
+    // Apply onto the fresh copy under the shared writer lock: chunk bytes
+    // above landed while unlocked, so a concurrent seal is never clobbered.
+    if (fixed.length > 0) {
+      const release = acquireManifestLock(outDir);
+      try {
+        const current = loadManifestStrict(outDir);
+        for (const { file, fresh } of fixed) {
+          const entry = current.chunks.find((e) => e.file === file);
+          if (!entry) continue;
+          Object.assign(entry, fresh);
+          delete entry.quarantined;
+        }
+        saveManifestAtomic(outDir, current);
+      } finally {
+        release();
+      }
+    }
   }
   const verify = verifyFull(outDir);
   return { ok: verify.ok && failed.length === 0, repaired, failed, verify };

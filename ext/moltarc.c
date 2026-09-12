@@ -7,6 +7,11 @@
  *
  * Build (MinGW gcc 14.2, sqlite amalgamation headers in amalg/):
  *   gcc -shared -O2 -I amalg/sqlite-amalgamation-3530400 -DMOLTARC_TS="<abs path>/ext/moltarc.ts" moltarc.c moltarc_hook.c -o moltarc.dll
+ * Relative-path rebuild (preferred: no absolute path baked in; hook
+ * resolves it against the DLL directory, else cwd):
+ *   gcc -shared -O2 -I amalg/sqlite-amalgamation-3530400 -DMOLTARC_TS="ext/moltarc.ts" moltarc.c moltarc_hook.c -o moltarc.dll
+ * Spawn path: exec-vector via CreateProcess (no shell, no cmd.exe, no
+ * _popen); each argv element MSVCRT-quoted, stdout/stderr on pipes.
  *
  * SQL contract (both scalar, both TEXT in / TEXT out):
  *   moltarc_find(outDir TEXT, trxId TEXT) -> TEXT | NULL   -- read-only
@@ -38,7 +43,7 @@ SQLITE_EXTENSION_INIT1
 #include <stdlib.h>
 #include <string.h>
 
-/* Canonical-reader hook (provided by libmoltarcchunk, option (a)).
+/* Canonical-reader hook (provided by moltarc_hook.c subprocess-path).
  * Returns malloc'd row JSON (caller frees), or NULL on miss.
  * rc: 0 = row, 1 = miss, <0 = error with sqlite3-style message in *err. */
 extern int moltarc_chunk_find(const char *outdir, const char *trxid,

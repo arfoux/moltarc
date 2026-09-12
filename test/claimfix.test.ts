@@ -40,7 +40,7 @@ describe('claimfix', () => {
     const N = 5000;
     const s = new ClaimStore();
     const ids: string[] = [];
-    for (let i = 0; i < N; i++) ids.push(s.issue(1000, 1_700_000_000_000, `fix-${i}`).id);
+    for (let i = 0; i < N; i++) ids.push(s.issue(1000, 1_700_000_000_000, `fix-${i}`, undefined).id);
     const t0 = performance.now();
     for (const id of ids) assert.equal(s.use(id).ok, true);
     const dt = performance.now() - t0;
@@ -56,7 +56,7 @@ describe('claimfix', () => {
 
   it('usage history is persist-or-lose across restarts', { timeout: 30_000 }, () => {
     const s = new ClaimStore();
-    const v = s.issue(1000, 1_700_000_000_000, 'persist-1');
+    const v = s.issue(1000, 1_700_000_000_000, 'persist-1', undefined);
     assert.equal(s.use(v.id).ok, true);
     const amnesiac = new ClaimStore();
     amnesiac.load(v);
