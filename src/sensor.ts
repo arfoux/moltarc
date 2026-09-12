@@ -1,4 +1,4 @@
-// moltarc sensor â lossy log for numeric series: downsample + anomaly flag +
+// moltarc sensor — lossy log for numeric series: downsample + anomaly flag +
 // quarantine-cold routing. pure in-memory math; chunk/manifest primitives are
 // import-only reuse (hash + bloom + chunk bridge), never a second copy.
 import { encodeChunk, decodeChunk, sha256hex } from './chunk.js';
@@ -122,7 +122,7 @@ export function flagAnomalies(points: SensorPoint[], opts: FlagOpts = {}): boole
 // the anomalous subset of cold for the cold-relay path.
 //
 // hot-anomaly note: with anomalyToCold: false, flagged fresh points stay hot
-// and are NOT quarantined â quarantined mirrors only anomalies already routed
+// and are NOT quarantined — quarantined mirrors only anomalies already routed
 // to cold. callers that need every anomaly quarantined must keep
 // anomalyToCold true (default) or collect flagged hot points separately.
 export function routeQuarantine(points: SensorPoint[], flags: boolean[], opts: RouteOpts = {}): RouteResult {
