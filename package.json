@@ -1,7 +1,7 @@
 {
   "name": "moltarc",
   "type": "module",
-  "version": "0.21.2",
+  "version": "0.21.3",
   "description": "Moltarc — universal append-only pipeline: hot feed, warm chunks, cold archive.",
   "keywords": ["sqlite", "database", "archive", "zstd", "offline-first", "embedded", "edge", "iot", "tiered-storage", "typescript", "data-sync", "backup", "event-log", "telemetry", "append-only"],
   "homepage": "https://github.com/arfoux/moltarc#readme",

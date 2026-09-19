@@ -44,7 +44,7 @@ Alternative keys are equivalent; first present wins:
 So an `entry` event with `trx: trx-00000003` keeps id `trx-00000003` in table
 `entry` with `value=55000` in the body; an `undo` with `ref` lands in table
 `undo` with the referenced id in the body (`test/interop.test.ts:39-47`).
-When `payload` is an object (raw fielog `ledger.log` lines), it is field
+When `payload` is an object (raw fieldlog `ledger.log` lines), it is field
 source, not body text: its `value`/`actor`/`ref`/`reason`/`item`/`qty`/
 `state`/`hides`/`shows`/`event_id`/`reverses`/`note`/`details` backstop the
 missing top-level keys (top-level wins), and `ref` also falls back to
@@ -52,12 +52,12 @@ top-level `event_id`/`reverses`.
 
 ## Interop limits (lossy, one-way)
 
-Raw fielog `LogEvent` lines are lossy one-way input: `ts_device` is not an
+Raw fieldlog `LogEvent` lines are lossy one-way input: `ts_device` is not an
 alias, so event times become seal time (`Date.now()`); signatures,
 countersignatures, hash-chain, `server_time`, and `origin_*` fields are
 dropped (the body keeps `value=`/`actor=`/`ref=` tokens only); `undo`
 events land as inert rows in table `undo` with no void semantics; a missing
-`device_id` becomes `dev0`. Nothing replays sealed rows back into a fielog
+`device_id` becomes `dev0`. Nothing replays sealed rows back into a fieldlog
 kernel.
 
 ## Related demos
