@@ -6,9 +6,12 @@
 #
 # Floor: STABLE_FLOOR pins the last green total (173 pass, 0 fail,
 # `bun run test:stable` on main 2026-09-13); EXT_FLOOR pins the ext total
-# (7 pass, 0 fail, `bun test ext/` on main 2026-09-13).
+# (7 tests, 0 fail, `bun test ext/` on main 2026-09-13).
+# Totals count pass+skip: env-skipped tests (e.g. Windows-only DLL tests
+# skipping on Linux CI) still count as present, so deleting a test still
+# trips the floor while a skip no longer fails loud.
 # Update only on intentional add/remove: re-run that suite, read the
-# "N pass" line, set the constant below to N.
+# "N pass" / "N skip" lines, set the constant below to pass+skip.
 set -u
 set -o pipefail
 
@@ -19,12 +22,14 @@ FAILURES=0
 check() { # $1 = name, $2 = suite output, $3 = floor
   PASS_N="$(printf '%s' "$2" | grep -oE '[0-9]+ pass' | grep -oE '[0-9]+' | tail -1)"
   FAIL_N="$(printf '%s' "$2" | grep -oE '[0-9]+ fail' | grep -oE '[0-9]+' | tail -1)"
+  SKIP_N="$(printf '%s' "$2" | grep -oE '[0-9]+ skip' | grep -oE '[0-9]+' | tail -1)"
   PASS_N="${PASS_N:-?}"
   FAIL_N="${FAIL_N:-?}"
-  if [ "$FAIL_N" = "0" ] && [ "$PASS_N" != "?" ] && [ "$PASS_N" -ge "$3" ]; then
-    echo "PASS: $1 (${PASS_N}/${FAIL_N}, floor $3)"
+  SKIP_N="${SKIP_N:-0}"
+  if [ "$FAIL_N" = "0" ] && [ "$PASS_N" != "?" ] && [ "$((PASS_N + SKIP_N))" -ge "$3" ]; then
+    echo "PASS: $1 (${PASS_N}/${FAIL_N}/${SKIP_N}skip, floor $3)"
   else
-    echo "FAIL: $1 (${PASS_N}/${FAIL_N}, floor $3)"
+    echo "FAIL: $1 (${PASS_N}/${FAIL_N}/${SKIP_N}skip, floor $3)"
     FAILURES=$((FAILURES + 1))
   fi
 }
