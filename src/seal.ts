@@ -71,7 +71,7 @@ export function syntheticId(table: string, device: string, seq: number): string 
   return `${table}${SYN_ID_SEP}${device}${SYN_ID_SEP}${seq}`;
 }
 
-// Fielog interop: raw ledger events (`type`/`event` entry/undo, `value`
+// Fieldlog interop: raw ledger events (`type`/`event` entry/undo, `value`
 // payload) normalize with no manual conversion step.
 export function normRow(o: Record<string, unknown>, fallbackTable: string): HotRow | null {
   // Structural numeric aliases (no/waktu): foreign sqlite schemas name their
@@ -84,7 +84,7 @@ export function normRow(o: Record<string, unknown>, fallbackTable: string): HotR
   if (ts === null || ts < 0) return null;
   // `kind` column alias: alt sqlite schemas name the event-kind column `kind`.
   const kind = o.type ?? o.event ?? o.kind;
-  // Nested fielog payload: raw ledger.log lines carry their fields under a
+  // Nested fieldlog payload: raw ledger.log lines carry their fields under a
   // `payload` object. It backstops missing top-level keys only (top-level
   // wins); a non-object payload keeps the legacy body-alias behavior below.
   const nested = (typeof o.payload === 'object' && o.payload !== null && !Array.isArray(o.payload))

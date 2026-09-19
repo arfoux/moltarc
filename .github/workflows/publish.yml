@@ -24,6 +24,35 @@ jobs:
         continue-on-error: true
       - run: npm install -g npm@latest
       - run: npm publish --provenance --access public
+  publish-gpr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install
+      - run: bun run build
+      - run: bun test test/interop.test.ts test/e2e.test.ts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+          scope: '@arfoux'
+      - run: npm install -g npm@latest
+      - name: Publish to GitHub Packages as scoped package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp package.json /tmp/package.json.bak
+          npm pkg set name=@arfoux/moltarc
+          npm publish --registry=https://npm.pkg.github.com --access public
+          cp /tmp/package.json.bak package.json
   release:
     runs-on: ubuntu-latest
     permissions:

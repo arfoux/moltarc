@@ -5,13 +5,17 @@ behavior change is marked as such.
 
 ## Unreleased
 
-- Naming, no behavior change: fielog sales events seal as `entry`/`undo`
+- Naming, no behavior change: fieldlog sales events seal as `entry`/`undo`
   with a `value` payload (`total` still accepted; derived table `entries`);
   the large-image quarantine is renamed `foto` → `photo` (`photo/`
   sidecars, `photo:sha256:…` refs, `--deep-photo`, `PHOTO_INLINE_LIMIT_BYTES`).
 - Docs only, no behavior change: `README.md` and `docs/` lead with the
   universal pipeline (game events, file versions, device telemetry first;
   entry-ledger as one domain among many) with neutral example captions.
+
+## v0.21.3
+
+- Publish: also ships `@arfoux/moltarc` to GitHub Packages (npmjs `moltarc` unchanged).
 
 ## v0.21.2
 
@@ -191,7 +195,7 @@ behavior change is marked as such.
 
 ## v0.5.0
 
-- Fielog interop: raw `kasir.log` cashier events (`bayar`/`undo` +
+- Fieldlog interop: raw `kasir.log` cashier events (`bayar`/`undo` +
   `nominal`) seal with no manual conversion.
 - Adds dict on/off delta bench proving the trained-dict saving.
 - CLI gains resume: interrupted `ship` continues from the offset journal.
