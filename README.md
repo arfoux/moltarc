@@ -172,7 +172,7 @@ _Measured by `bun bench/dict-bench.ts --write-readme`; same corpus both sides, o
 - [docs/cli.md](docs/cli.md) — every subcommand, flags verified against `bin/moltarc.ts`
 - [docs/modules.md](docs/modules.md) — module ownership table
 - [docs/contracts.md](docs/contracts.md) — numeric contracts and gates
-- [docs/interop.md](docs/interop.md) — fielog `ledger.log` interop + field aliases
+- [docs/interop.md](docs/interop.md) — fieldlog `ledger.log` interop + field aliases
 - [docs/troubleshooting.md](docs/troubleshooting.md) — symptoms, exact errors, fixes
 - [docs/bench.md](docs/bench.md) — how SLA numbers are measured + flake policy
 - [docs/compat.md](docs/compat.md) — N-2 codec rule, manifest tolerance, native binary note

@@ -1,4 +1,4 @@
-// Interop: raw fielog ledger.log (entry/undo events, value payload)
+// Interop: raw fieldlog ledger.log (entry/undo events, value payload)
 // seals with no manual conversion; one entry reads back intact.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -35,7 +35,7 @@ function writeLedgerLog(dir: string, events: number): { hotDb: string; ids: stri
   return { hotDb, ids };
 }
 
-describe('fielog interop', () => {
+describe('fieldlog interop', () => {
   it('normRow handles entry/undo events with value payload', { timeout: 30_000 }, () => {
     const entry = normRow({ device_id: 'device-01', seq: 3, type: 'entry', trx: 'trx-00000003', value: 55000, actor: 'agus' }, 'log');
     assert.equal(entry?.table, 'entry');
