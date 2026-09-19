@@ -4,11 +4,14 @@
 interface BunServer {
   port: number;
   stop(): void;
-  upgrade(req: Request): boolean;
+  upgrade(req: Request, opts?: { data?: Record<string, unknown> }): boolean;
+  requestIP?(req: Request): { address: string; family: string; port: number } | null;
 }
 interface BunWs {
   send(data: string | Buffer | Uint8Array): void;
   close(): void;
+  data?: Record<string, unknown>;
+  remoteAddress?: string;
 }
 interface BunServeOptions {
   port?: number;

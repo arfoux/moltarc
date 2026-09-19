@@ -56,11 +56,34 @@ const dictCache = new Map<string, Buffer>();
 // repeat finds hit memory.
 const sparseCache = new Map<string, { mtimeMs: number; size: number; seq: number; sparse: SparseDisk | null; cold: ColdSegment[]; total: number; quarantined: number }>();
 const shardCache = new Map<string, { mtimeMs: number; size: number; seq: number; shard: ManifestShard | null }>();
-export function clearFindCaches(): void {
-  manifestCache.clear();
-  dictCache.clear();
-  sparseCache.clear();
-  shardCache.clear();
+export interface FindCacheScope {
+  /** Archive whose entries drop; omit the scope (or outDir) for a global clear. */
+  outDir?: string;
+  /** Shard months (manifest-<month>.json) to drop; omit drops every month of outDir. */
+  months?: string[];
+}
+export function clearFindCaches(scope?: FindCacheScope): void {
+  if (scope?.outDir === undefined) {
+    manifestCache.clear();
+    dictCache.clear();
+    sparseCache.clear();
+    shardCache.clear();
+    return;
+  }
+  const { outDir, months } = scope;
+  manifestCache.delete(outDir);
+  sparseCache.delete(outDir);
+  if (months === undefined) {
+    for (const key of [...shardCache.keys()]) {
+      if (key.startsWith(`${outDir}\n`)) shardCache.delete(key);
+    }
+  } else {
+    for (const m of months) shardCache.delete(`${outDir}\n${m}`);
+  }
+  // dictCache kept: dict files are content-hash addressed and immutable, so
+  // entries for this outDir stay valid across seals. Every dropped entry
+  // would also self-invalidate via the on-disk seq probe; the scoped delete
+  // just frees memory without touching other archives' warm entries.
 }
 
 // Cheap content-seq probe: stat alone aliases a rewrite that preserves

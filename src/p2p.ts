@@ -43,6 +43,15 @@ export interface P2PNodeOpts {
   token?: string;
   /** sha256(token) strings allowed to pull from this node; empty = serve anyone (lan default). */
   allowPeers?: string[];
+  /**
+   * Opt-in tunnel gate: source-IP allowlist in CIDR form (e.g. 10.44.0.0/24).
+   * When set, upgrades/hellos from outside every listed subnet are refused
+   * (HTTP 403 + error frame, fail-closed: unknown IP or bad CIDR never
+   * serves). Unset = previous behavior (serve anyone on the network).
+   */
+  allowedPeersCIDR?: string | string[];
+  /** Single-CIDR alias combined with allowedPeersCIDR (same gate). */
+  requireTunnelCIDR?: string | string[];
 }
 export interface P2PSyncOpts {
   blockBytes?: number;
@@ -63,6 +72,13 @@ export interface P2PSyncOpts {
   nodeId?: string;
   /** legacy shared secret: signs every outbound message when talking to a guarded peer. */
   token?: string;
+  /**
+   * Opt-in dial gate: refuse outbound sync unless the peer URL hostname sits
+   * inside one of these subnets (e.g. 10.44.0.0/24). Fail-closed: hostname
+   * outside every subnet (or an unparsable CIDR/host) rejects before any
+   * byte is exchanged. Unset = previous behavior (dial any URL).
+   */
+  allowedPeersCIDR?: string | string[];
 }
 
 export interface P2PSyncResult {
@@ -273,6 +289,61 @@ export function peerAllowed(allowPeers: string[] | undefined, token: string | un
   if (!allowPeers || allowPeers.length === 0) return true;
   if (!token) return false;
   return allowPeers.includes(sha256hex(Buffer.from(token, 'utf8')));
+}
+
+/** Fail-closed IPv4 subnet check for the opt-in tunnel gate. */
+type Cidr4 = { net: number; mask: number };
+function parseIpv4(ip: string): number | null {
+  const parts = ip.trim().split('.');
+  if (parts.length !== 4) return null;
+  let out = 0;
+  for (const p of parts) {
+    if (!/^\d{1,3}$/.test(p)) return null;
+    const n = Number(p);
+    if (n < 0 || n > 255) return null;
+    out = (out * 256 + n) >>> 0;
+  }
+  return out >>> 0;
+}
+/** Normalize IPv4-mapped IPv6 (::ffff:10.0.0.1) to dotted quad; other forms stay. */
+export function normTunnelIp(ip: string): string {
+  const t = ip.trim();
+  const m = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(t);
+  return m ? m[1] : t;
+}
+function parseCidr4(cidr: string): Cidr4 | null {
+  const t = cidr.trim();
+  const slash = t.lastIndexOf('/');
+  if (slash < 0) return null;
+  const bits = Number(t.slice(slash + 1));
+  if (!Number.isInteger(bits) || bits < 0 || bits > 32) return null;
+  const net = parseIpv4(t.slice(0, slash));
+  if (net === null) return null;
+  const mask = bits === 0 ? 0 : bits === 32 ? 0xffffffff : ((0xffffffff << (32 - bits)) >>> 0);
+  return { net: (net & mask) >>> 0, mask };
+}
+function tunnelNetsOf(v: string | string[] | undefined): string[] {
+  if (v === undefined) return [];
+  const list = Array.isArray(v) ? v : [v];
+  return list.flatMap((s) => (typeof s === 'string' && s.trim() !== '' ? [s.trim()] : []));
+}
+/** True when the IP sits inside at least one listed IPv4 subnet. Fail-closed. */
+export function ipInTunnelCidrs(ip: string, cidrs: string | string[] | undefined): boolean {
+  const nets = tunnelNetsOf(cidrs);
+  if (nets.length === 0) return true;
+  const addr = parseIpv4(normTunnelIp(ip));
+  if (addr === null) return false;
+  for (const c of nets) {
+    const n = parseCidr4(c);
+    if (n === null) return false;
+    if (((addr & n.mask) >>> 0) === n.net) return true;
+  }
+  return false;
+}
+/** True when the value is a usable IPv4 CIDR (or a list where every entry is). */
+export function tunnelCidrValid(v: string | string[] | undefined): boolean {
+  const nets = tunnelNetsOf(v);
+  return nets.length === 0 || nets.every((c) => parseCidr4(c) !== null);
 }
 /** Env var holding the 32-byte pre-shared key (64 hex chars or 32 raw bytes). */
 export const PSK_ENV = 'MOLTARC_PSK';
@@ -566,25 +637,44 @@ export function startNode(opts: P2PNodeOpts): { port: number; url: string; stop:
   if (!guarded) console.warn(`[p2p] ${nodeId}: no PSK (MOLTARC_PSK empty) — trusted-LAN-only mode: anyone on the network can sync and push chunks`);
   const blockBytes = opts.blockBytes ?? 16 * 1024;
   const failState: { armed: number | undefined } = { armed: opts.failAtBytes };
+  const tunnelCidrs = [...tunnelNetsOf(opts.allowedPeersCIDR), ...tunnelNetsOf(opts.requireTunnelCIDR)];
+  if (tunnelCidrs.length > 0 && !tunnelCidrValid(tunnelCidrs)) throw new Error(`p2p allowedPeersCIDR invalid: ${tunnelCidrs.join(', ')} (want IPv4 CIDR like 10.44.0.0/24)`);
+  const peerIpByConn = new WeakMap<object, string>();
+  const tunnelDeny = (ws: object): string | null => {
+    if (tunnelCidrs.length === 0) return null;
+    const ip = peerIpByConn.get(ws);
+    if (ip === undefined || !ipInTunnelCidrs(ip, tunnelCidrs)) return `peer ${ip ?? 'unknown-ip'} outside allowed tunnel subnet (${tunnelCidrs.join(', ')})`;
+    return null;
+  };
   let server: { port: number; stop(): void } | undefined;
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       server = Bun.serve({
         port: opts.port,
-    fetch(req: Request, server: { upgrade(req: Request): boolean }) {
+    fetch(req: Request, server: BunServer) {
+      if (tunnelCidrs.length > 0) {
+        let ip: string | undefined;
+        try { ip = server.requestIP?.(req)?.address; } catch { ip = undefined; }
+        if (ip === undefined || !ipInTunnelCidrs(ip, tunnelCidrs)) return new Response(`peer ${ip ?? 'unknown-ip'} outside allowed tunnel subnet (${tunnelCidrs.join(', ')})`, { status: 403 });
+        if (server.upgrade(req, { data: { peerIp: ip } })) return;
+        return new Response('molt p2p', { status: 426 });
+      }
       if (server.upgrade(req)) return;
       return new Response('molt p2p', { status: 426 });
     },
     websocket: {
-      open() {
-        /* hello drives */
+      open(ws: BunWs) {
+        const viaData = ws.data !== undefined && typeof ws.data['peerIp'] === 'string' ? (ws.data['peerIp'] as string) : '';
+        if (viaData !== '') peerIpByConn.set(ws, viaData);
+        else if (typeof ws.remoteAddress === 'string' && ws.remoteAddress !== '') peerIpByConn.set(ws, ws.remoteAddress);
       },
       close(ws: object) {
         pendingByConn.delete(ws);
         tokenByConn.delete(ws);
         peerIdByConn.delete(ws);
+        peerIpByConn.delete(ws);
       },
-      async message(ws: { send(data: string): void; close(): void }, raw: unknown) {
+      async message(ws: BunWs, raw: unknown) {
         const send = (msg: WireMsg) => {
           try {
             ws.send(frameWire(psk, msg));
@@ -603,6 +693,8 @@ export function startNode(opts: P2PNodeOpts): { port: number; url: string; stop:
         }
         const conn: Conn = { send, close: () => { try { ws.close(); } catch { /* gone */ } } };
         const peer = peerLabel(ws);
+        const gated = tunnelDeny(ws);
+        if (gated) { send({ t: 'error', message: gated }); conn.close(); return; }
         const pendingAcks = pendingFor(ws);
         if (msg.t === 'hello') {
           if (guarded && !authOk(verifyKeys, msg)) { conn.close(); return; }
@@ -614,7 +706,6 @@ export function startNode(opts: P2PNodeOpts): { port: number; url: string; stop:
           // delta this node still needs from the dialer.
           const need: P2PWantItem[] = [];
           const have = Array.isArray(msg.have) ? msg.have.slice(0, MAX_HAVE + 1) : [];
-          if (msg.have.length > MAX_HAVE) { send({ t: 'error', message: 'have list too large' }); return; }
           for (const h of have) {
             if (!validHave(h)) continue;
             if (!localShas.has(h.sha256) && !existsSync(join(outDir, 'warm', h.file))) need.push({ sha256: h.sha256, offset: 0 });
@@ -727,6 +818,13 @@ export function startNode(opts: P2PNodeOpts): { port: number; url: string; stop:
 
 export function syncFromPeer(peerUrl: string, outDir: string, opts: P2PSyncOpts = {}): Promise<P2PSyncResult> {
   ensureArchive(outDir);
+  const dialCidrs = tunnelNetsOf(opts.allowedPeersCIDR);
+  if (dialCidrs.length > 0) {
+    if (!tunnelCidrValid(dialCidrs)) return Promise.reject(new Error(`p2p allowedPeersCIDR invalid: ${dialCidrs.join(', ')} (want IPv4 CIDR like 10.44.0.0/24)`));
+    let host = '';
+    try { host = new URL(peerUrl).hostname; } catch { host = ''; }
+    if (host === '' || !ipInTunnelCidrs(host, dialCidrs)) return Promise.reject(new Error(`p2p dial refused: peer ${host === '' ? peerUrl : host} outside allowed tunnel subnet (${dialCidrs.join(', ')})`));
+  }
   const timeoutMs = opts.timeoutMs ?? 30_000;
   const blockBytes = opts.blockBytes ?? 16 * 1024;
   const psks = resolvePsks(opts.psk);

@@ -15,3 +15,4 @@ jobs:
       - run: node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
       - run: bun run test:stable
       - run: bun test ext/
+      - run: bash scripts/test-floor.sh
