@@ -17,7 +17,7 @@ timings move, ratios should not.
 | mixed text+notes+refs (blob bytes excluded, 6000 rows, seed 7) | 2.40MB | 241.0KB | **10.2x** |
 | photo blobs (3.23MB sidecar, lazy/on-demand) | excluded | excluded | n/a (incompressible) |
 | real jpeg bytes, raw zstd (50 jpeg 128x128 q85, seed 11) | 577KB raw | zstd | **1.05x** |
-| trained 32KB dict on repetitive text (12000 rows, seed 7) | — | 2.0KB saved | **1.8%** smaller warm |
+| trained 32KB dict on repetitive text, 16KB chunks (12000 rows, seed 7) | — | 2.0KB saved | **1.8%** smaller warm (−0.2% at the 2MB production target) |
 
 Sources: `bun bench/mixed-corpus.ts`, `bun bench/photo-bench.ts`,
 `bun bench/dict-bench.ts` (each with `--write-readme` for the README tables).

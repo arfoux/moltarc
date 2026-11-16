@@ -17,7 +17,7 @@ An entry-ledger feed is one domain among many, not the model.
 |---|---|
 | ![hot rows flow](docs/gifs/part1-hot.png)<br>**1. Hot stays plain** — 6000 rows land in plain SQLite, counter climbs, nothing custom. (`src/seal.ts` reads WAL) | ![seal funnels rows](docs/gifs/part2-seal.png)<br>**2. Seal** — rows funnel into immutable chunks, 10.2x smaller on mixed text (34.5x on its repetitive-text slice), crc+sha per chunk. (`moltarc seal`) |
 | ![delta ships once](docs/gifs/part3-ship.png)<br>**3. Ship** — relay compares hashes, only missing bytes fly, resume survives drops. (`moltarc ship`) | ![find fetches one chunk](docs/gifs/part4-find.png)<br>**4. Find** — bloom prunes the candidates to a single-chunk fetch, which returns the matching record. (`moltarc find`) |
-| ![big photo gated to photo/ sidecar + thumb](docs/gifs/part5-photo.png)<br>**5. Photo gate** — bodies ≥256KB skip the chunk path into `photo/` + thumb sidecars. (gate: [docs/contracts.md](docs/contracts.md)) | ![verify proves chain](docs/gifs/part6-verify.png)<br>**6. Verify** — every chunk re-hashed, manifest chain checked, quarantine on mismatch. (`moltarc verify`) |
+| ![big photo gated to photo/ sidecar + thumb](docs/gifs/part5-photo.png)<br>**5. Photo gate** — bodies over 256KB skip the chunk path into `photo/` + thumb sidecars. (gate: [docs/contracts.md](docs/contracts.md)) | ![verify proves chain](docs/gifs/part6-verify.png)<br>**6. Verify** — every chunk re-hashed, manifest chain checked, quarantine on mismatch. (`moltarc verify`) |
 | ![warm merges to cold](docs/gifs/part7-cold.png)<br>**7. Cold** — warm merges to `cold/*.tar`, prune/repack sweep, restore-from-cold drill. (`moltarc merge`) | ![p2p delta sync](docs/gifs/part8-p2p.png)<br>**8. P2P** — WebSocket delta sync with journal resume, HMAC-SHA256 PSK frames. (`moltarc p2p-sync`) |
 | ![as-of query over history](docs/gifs/part9-timetravel.png)<br>**9. Timetravel** — read-only as-of query (seq or ts) with chunk proof. (`moltarc asof`) | ![hot to cold lifecycle](docs/gifs/part10-lifecycle.png)<br>**10. Lifecycle** — hot→warm→cold end to end, acked-only forget, nothing lost. (`moltarc seal` → `ship` → `merge`) |
 
@@ -107,7 +107,7 @@ is one supported domain among many. Key table in [docs/interop.md](docs/interop.
 - Repetitive tx text, 60% tx slice of `bun bench/mixed-corpus.ts` (6000 rows, seed 7) → **34.5x**
 - Mixed text+notes+refs, full mixed corpus of `bun bench/mixed-corpus.ts` (6000 rows, seed 7, blob bytes excluded) → **10.2x**
 - Real jpeg bytes, raw zstd over the 50 real jpeg of `bun bench/photo-bench.ts` (128x128 blurred noise, q85, 600 text rows, seed 11) → **1.05x** (details in [Photo SLA](#photo-sla))
-- Trained 32KB dict on repetitive text, `bun bench/dict-bench.ts` (12000 rows, seed 7, same corpus both sides) → **1.8%** smaller warm (2003B measured, seed 7; details in [Dict SLA](#dict-sla))
+- Trained 32KB dict on repetitive text, `bun bench/dict-bench.ts` (12000 rows, seed 7, same corpus both sides) → **1.8%** smaller warm at 16KB chunks (−0.2% at the 2MB production target; details in [Dict SLA](#dict-sla))
 
 Details in [Measured SLA](#measured-sla) below. Older micro-benchmark (5-template repetitive log, 3.45MB → 10.7KB = 323x)
 is retired: too repetitive to plan from.
@@ -177,6 +177,7 @@ _Measured by `bun bench/dict-bench.ts --write-readme`; same corpus both sides, o
 - [docs/bench.md](docs/bench.md) — how SLA numbers are measured + flake policy
 - [docs/compat.md](docs/compat.md) — N-2 codec rule, manifest tolerance, native binary note
 - [docs/decisions.md](docs/decisions.md) — why each load-bearing choice
+- [docs/wireguard-p2p.md](docs/wireguard-p2p.md) — P2P over WireGuard: PSK framing, key rotation, peer allowlist, firewall checks
 - [docs/comparison.md](docs/comparison.md) — 13-system comparison matrix
 - [CHANGELOG.md](CHANGELOG.md) — user-visible changes per tag, from `git log`
 

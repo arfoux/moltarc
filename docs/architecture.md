@@ -91,7 +91,7 @@ shape in `bin/moltarc.ts:35-54`.
 - `findTrx` searches warm only and throws when absent; merged-to-cold rows
   need `moltarc find-cold` (library `findCold`, which warns per scanned segment) (`src/find.ts:324-365`, `src/find.ts:370-376`, CLI `bin/moltarc.ts:172-177`).
 - Shard/sparse jump → min/max prune → scaled-bloom prune → ~1 fetch per lookup; warm
-  find is ~13.60 ms p50 over 6 probed ids × 20 iters (11 fetched / 8 pruned total;
+  find is ~16.93 ms p50 over 6 probed ids × 20 iters (11 fetched / 8 pruned total;
   `docs/bench.md`, `src/find.ts:198-296`).
 - Cold scan is O(segments) tar decode over already-zstd members — slower by
   construction (`src/cold.ts`, `src/find.ts:378-432`).

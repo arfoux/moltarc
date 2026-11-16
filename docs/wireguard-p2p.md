@@ -1,27 +1,27 @@
 # WireGuard P2P runbook (moltarc)
 
-## 1. Kenapa tanpa enkripsi di kode
+## 1. Why encryption lives outside the code
 
-`src/p2p.ts` tidak mengenkripsi isi chunk: dengan `MOLTARC_PSK` setiap pesan
-wire di-frame sebagai `HMAC-SHA256(json) + '.' + json` dan diverifikasi pada
-raw bytes **sebelum** `JSON.parse` (`frameWire`/`unframeWire`); field `auth`
-per pesan (`wireAuth`/`authOk`) menambah lapis kedua. HMAC memberi
-**integritas + autentikasi** (data tidak bisa dipalsukan/diubah tanpa kunci),
-tapi **bukan kerahasiaan** — siapa pun yang bisa sniff TCP melihat isi JSON
-chunk. Untuk kerahasiaan antar site / lewat internet, bungkus TCP P2P di
-WireGuard. Tanpa PSK sama sekali node berjalan dalam fallback
-trusted-LAN-only: siapa pun di jaringan bisa sync DAN push chunk — jangan
-ekspos melampaui LAN yang dipercaya.
+`src/p2p.ts` does not encrypt chunk payloads. With `MOLTARC_PSK` set, every
+wire message is framed as `HMAC-SHA256(json) + '.' + json` and verified on the
+raw bytes **before** `JSON.parse` (`frameWire`/`unframeWire`); the per-message
+`auth` field (`wireAuth`/`authOk`) adds a second layer. HMAC provides
+**integrity + authentication** — data cannot be forged or modified without the
+key — but **not confidentiality**: anyone who can sniff TCP can read the JSON
+chunk payload. For confidentiality across sites or over the internet, wrap the
+P2P TCP connection in WireGuard. With no PSK at all, a node falls back to
+trusted-LAN-only mode: anyone on the network can sync **and push** chunks — do
+not expose it beyond a trusted LAN.
 
-## 2. Pasang WireGuard 2 peer
+## 2. Set up two WireGuard peers
 
-Buat keypair di tiap host:
+Generate a keypair on each host:
 
 ```sh
 wg genkey | tee privatekey | wg pubkey > publickey
 ```
 
-`peer-A` (`10.44.0.1/24`, moltarc port `4171`), `wg0.conf` minimal:
+For `peer-A` (`10.44.0.1/24`, moltarc port `4171`), a minimal `wg0.conf`:
 
 ```ini
 [Interface]
@@ -33,82 +33,97 @@ ListenPort = 51820
 PublicKey = <PUB_B>
 AllowedIPs = 10.44.0.2/32
 Endpoint = <IP_B>:51820
-# PreSharedKey opsional (lapis quantum-resistance / defense-in-depth WireGuard):
-# PreSharedKey = <PSK_WG_OPSIONAL>
+# Optional PreSharedKey (WireGuard defense-in-depth / post-quantum layer):
+# PreSharedKey = <OPTIONAL_WG_PSK>
 PersistentKeepalive = 25
 ```
 
-`peer-B` cerminnya (`Address = 10.44.0.2/24`, `AllowedIPs = 10.44.0.1/32`,
-`Endpoint = <IP_A>:51820`). Aktifkan:
+`peer-B` is the mirror image (`Address = 10.44.0.2/24`,
+`AllowedIPs = 10.44.0.1/32`, `Endpoint = <IP_A>:51820`). Bring it up:
 
 ```sh
 sudo wg-quick up wg0
-sudo wg show   # cari "latest handshake"
+sudo wg show   # look for "latest handshake"
 ```
 
-Arahkan moltarc hanya lewat tunnel: bind/listen `10.44.0.x`, dan set
-`AllowedIPs` sempit seperti di atas (jangan `0.0.0.0/0` kecuali memang mau
-full-tunnel).
+Bind/listen moltarc only on the tunnel address (`10.44.0.x`) and keep
+`AllowedIPs` narrow as above (avoid `0.0.0.0/0` unless you intentionally want a
+full tunnel).
 
-## 3. Rotasi MOLTARC_PSK tanpa downtime
+## 3. Rotate MOLTARC_PSK without downtime
 
-Format kunci: 64 hex chars, atau 32 bytes base64 (`parsePsk`); jangan pakai
-raw 32-byte yang mengandung koma karena koma = pemisah list. Generate:
+Key format: 64 hex characters, or 32 bytes in base64 (`parsePsk`); do not use a
+raw 32-byte value containing a comma, because commas separate keys in the list.
+Generate one with:
 
 ```sh
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-Two-phase (kontrak di `PSK_ID_ENV`, `docs/contracts.md` → Sync auth):
+Two-phase rotation (contract in `PSK_ID_ENV`, `docs/contracts.md` → Sync auth):
 
-1. Set **semua** node ke `MOLTARC_PSK=<new>,<old>` (primary dulu) dan catat
-   langkah di `MOLTARC_PSK_ID` (mis. `rot-2026-09`). Outbound di-sign/frame
-   dengan primary (`<new>`), inbound diverifikasi terhadap **semua** kunci
-   list (`resolvePsks`/`unframeWire`/`authOk`) — peer campuran tetap sync.
-2. Setelah semua node pegang list, promosikan ke `MOLTARC_PSK=<new>` saja dan
-   update `MOLTARC_PSK_ID`. Peer yang masih kunci-lama saja ditolak sejak
-   titik ini.
+1. Set **every** node to `MOLTARC_PSK=<new>,<old>` (primary first) and record
+   the step in `MOLTARC_PSK_ID` (e.g. `rot-2026-09`). Outbound frames are
+   signed/framed with the primary key (`<new>`), while inbound frames are
+   verified against **all** keys in the list (`resolvePsks`/`unframeWire`/
+   `authOk`) — peers on either key keep syncing.
+2. Once every node holds the list, promote to `MOLTARC_PSK=<new>` alone and
+   update `MOLTARC_PSK_ID`. From that point on, peers still on `<old>` only are
+   rejected.
 
-Restart per node satu-satu (rolling); tidak perlu stop cluster karena fase 1
-menerima kedua kunci. `MOLTARC_PSK_ID` murni label informasional — tidak
-pernah dibaca sebagai materi kunci / dikirim di wire.
+Restart nodes one at a time (rolling restart); the cluster does not need to
+stop because phase 1 accepts both keys. `MOLTARC_PSK_ID` is an informational
+label only — it is never read as key material or sent on the wire.
 
-## 4. allowPeers (token sha256)
+## 4. allowPeers (token SHA-256 allowlist)
 
-Token legacy hanya menjaga `hello` (PSK tetap yang utama). Server menyimpan
-`allowPeers: sha256(token)`; list kosong = layani siapa saja (default LAN).
-Hash satu token:
+The legacy token guards `hello` only (the PSK remains the primary control).
+The server stores `allowPeers: sha256(token)`; an empty list serves anyone
+(the LAN default). Hash a token with:
 
 ```sh
-node -e "console.log(require('crypto').createHash('sha256').update('TOKEN_ANDA','utf8').digest('hex'))"
+node -e "console.log(require('crypto').createHash('sha256').update('YOUR_TOKEN','utf8').digest('hex'))"
 ```
 
-Pasang hex itu di `allowPeers` server, dan set `token: 'TOKEN_ANDA'` di
-opsi `syncFromPeer` klien (`peerAllowed` menolak token kosong/salah saat
-list non-kosong).
+Install that hex value in the server's `allowPeers`, and set
+`token: 'YOUR_TOKEN'` in the client's `syncFromPeer` options (`peerAllowed`
+rejects an empty or wrong token whenever the list is non-empty).
 
-## 5. Port / firewall
+## 5. Ports and firewall
 
-> moltarc tidak punya default port (`startNode({port})` wajib diisi —
-> tidak ada `DEFAULT_PORT` di `src/p2p.ts`). Pilih sendiri, contoh `4171`.
+> moltarc has no default port (`startNode({port})` is required — there is no
+> `DEFAULT_PORT` in `src/p2p.ts`). Pick one; `4171` is used in this runbook.
 
-- moltarc P2P: TCP port pilihanmu (contoh `4171`) — buka **hanya** untuk
-  `10.44.0.0/24` (atau IP peer), bukan `0.0.0.0/0`.
-- WireGuard: UDP `51820` antar endpoint publik kedua peer.
-- Verifikasi: `sudo wg show`, `curl -v telnet://10.44.0.1:4171` dari peer
-  (harus tersambung), dan ulangi dari IP luar tunnel (harus ditolak/timeout).
+- moltarc P2P: your chosen TCP port (e.g. `4171`) — open it **only** to
+  `10.44.0.0/24` (or the peer IP), not to `0.0.0.0/0`.
+- WireGuard: UDP `51820` between the two peers' public endpoints.
+- Verify with `sudo wg show`, `curl -v telnet://10.44.0.1:4171` from the peer
+  (must connect), and again from an address outside the tunnel (must be
+  refused or time out).
 
-## 6. allowedPeersCIDR / requireTunnelCIDR (opt-in fail-closed)
+## 6. allowedPeersCIDR / requireTunnelCIDR (opt-in, fail-closed)
 
-Firewall bisa salah-buka; opsi ini bikin node sendiri yang menolak peer luar tunnel dengan pesan jelas (`peer <ip> outside allowed tunnel subnet (10.44.0.0/24)`). Server: `startNode({ outDir, port, allowedPeersCIDR: '10.44.0.0/24' })` (`requireTunnelCIDR` alias yang sama) — upgrade non-tunnel ditolak HTTP 403, hello lolos-upgrade ditolak frame `error` + tutup. Klien: `syncFromPeer(url, outDir, { allowedPeersCIDR: '10.44.0.0/24' })` menolak dial luar subnet sebelum satu byte pun terkirim (`p2p dial refused: ...`). Keduanya validasi CIDR di depan (`p2p allowedPeersCIDR invalid: ...` untuk `bogus`) — salah ketik tidak pernah diam-diam terbuka. Default OFF (tanpa opsi perilaku lama), jadi nyalakan di semua node tunnel; tanpa ini salah-config firewall bocor diam-diam.
+A firewall can be misconfigured to over-permit; these options make the node
+itself reject off-tunnel peers with an explicit message
+(`peer <ip> outside allowed tunnel subnet (10.44.0.0/24)`). Server:
+`startNode({ outDir, port, allowedPeersCIDR: '10.44.0.0/24' })`
+(`requireTunnelCIDR` is the same alias) — an off-tunnel upgrade gets HTTP 403,
+and a `hello` that clears the upgrade is rejected with an `error` frame and the
+connection is closed. Client:
+`syncFromPeer(url, outDir, { allowedPeersCIDR: '10.44.0.0/24' })` refuses to
+dial outside the subnet before a single byte is sent
+(`p2p dial refused: ...`). Both validate the CIDR up front
+(`p2p allowedPeersCIDR invalid: ...` for `bogus`), so a typo never silently
+opens access. Off by default (the old behavior applies when omitted), so enable
+it on every tunneled node; without it, a firewall mistake leaks silently.
 
-## 7. Verifikasi handshake gagal tanpa PSK benar
+## 7. Verify that the handshake fails without the correct PSK
 
-1. Kedua node dengan PSK sama: sync berhasil.
-2. Set klien ke PSK salah (atau kosongkan): `unframeWire` return `null` —
-   frame di-drop dan koneksi ditutup **sebelum parse**; sync gagal, tidak ada
-   chunk teraplikasi (`MAX_CHUNK_BYTES` 4 MB / `MAX_SESSION_BYTES` 256 MB /
-   `MAX_HAVE` 50000 tetap ditegakkan).
-3. Selama rotasi (`<new>,<old>` di kedua sisi, primary `<new>`): sync
-   berhasil dua arah; setelah promosi ke `<new>` saja, peer `<old>`-saja
-   gagal seperti poin 2.
+1. Both nodes with the same PSK: sync succeeds.
+2. Set the client to a wrong PSK (or leave it empty): `unframeWire` returns
+   `null` — the frame is dropped and the connection closed **before parsing**;
+   sync fails and no chunks are applied (`MAX_CHUNK_BYTES` 4 MB /
+   `MAX_SESSION_BYTES` 256 MB / `MAX_HAVE` 50000 still enforced).
+3. During rotation (`<new>,<old>` on both sides, primary `<new>`): sync works
+   in both directions; after promotion to `<new>` alone, an `<old>`-only peer
+   fails as in step 2.
