@@ -1,7 +1,7 @@
 // readonly auditor proof: mutations refuse loud, reads work fully.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync } from 'fs';
+import { readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { seal } from '../src/seal.js';
 import { openArchiveReadOnly } from '../src/readonly.js';
@@ -44,5 +44,33 @@ describe('readonly auditor mode', () => {
     assert.deepEqual(readdirSync(join(outDir, 'warm')).sort(), warmBefore);
     assert.equal(ro.verify().ok, true);
     assert.equal(ro.find(ids[ids.length - 1]).row.id, ids[ids.length - 1]);
+  });
+
+  it('find/status never self-heal a broken manifest on a read-only handle', { timeout: 30_000 }, async () => {
+    const root = scratch('readonly-nowrite');
+    const outDir = join(root, 'arc');
+    const { hotDb, ids } = writeHotLog(root, { rows: 60 });
+    await seal({ hotDb, outDir });
+
+    // Force the root-manifest path: drop the sidecars (no shard/sparse
+    // shortcut) and corrupt both copies. A normal find/status self-heals by
+    // rebuilding and writing; a read-only handle must fail loud instead.
+    for (const f of readdirSync(outDir)) {
+      if (f === 'sparse.json' || /^manifest-\d{4}-\d{2}\.json$/.test(f)) rmSync(join(outDir, f), { force: true });
+    }
+    const primary = join(outDir, 'manifest.json');
+    const backup = join(outDir, 'manifest.bak.json');
+    writeFileSync(primary, 'not json');
+    writeFileSync(backup, 'not json');
+    const before = [primary, backup].map((p) => readFileSync(p).toString('hex'));
+
+    const ro = openArchiveReadOnly(outDir);
+    assert.throws(() => ro.find(ids[0]), /no readable manifest copy/);
+    assert.throws(() => ro.status(), /no readable manifest copy/);
+    assert.deepEqual(
+      [primary, backup].map((p) => readFileSync(p).toString('hex')),
+      before,
+      'read-only find/status must leave both manifest copies untouched',
+    );
   });
 });

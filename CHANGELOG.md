@@ -6,6 +6,11 @@ behavior change is marked as such.
 > Historical entries below use pre-v0.21 names (`kasir`/`foto`); current names are `entry`/`photo`.
 
 ## Unreleased
+- Correctness: `migrate()` preserves prior cold-segment references instead of rebuilding an empty list (cold data was silently stranded); `encodeChunk()` derives `tsMin`/`tsMax` from all rows, so backfills and clock corrections no longer produce chunks that fail their own decode.
+- Read-only handles no longer self-heal the manifest by writing to disk; on an unreadable manifest `find`/`status` fail loudly. The npm `bin` now points at the `bin/moltarc.js` Bun shim (friendly missing-Bun error) instead of the TypeScript entry.
+- Windows hook: child stderr is redirected to a per-call temp file instead of a pipe that could deadlock a child filling the stderr buffer; `--verbose` is no longer advertised as a global flag.
+- Tests/CI: 22 previously unscheduled deterministic tests added to `test:stable`, 5 timing/multi-process tests moved to a new `test:extended` job, and suite floors raised; `test-floor.sh` is the single full-suite gate in both CI and publish.
+- Packaging/docs: the npm tarball now ships `CONTRIBUTING.md`, `SECURITY.md`, and `CODE_OF_CONDUCT.md`; a network-free published-surface check runs in CI and both publish jobs. Stale source anchors, install prerequisites, and CLI docs corrected.
 
 - Naming, no behavior change: fieldlog sales events seal as `entry`/`undo`
   with a `value` payload (`total` still accepted); fieldlog's read-model table is

@@ -8,9 +8,9 @@ is source plus one npm package for the photo preview path.
 - `bun` on `PATH` (`bun --version` works). Ratios in this repo were measured
   with bun 1.4.0 on Windows x64 (`docs/bench.md`); any recent bun works.
 - `git`, to clone the repo.
-- Optional, native extension only: MinGW `gcc` + the SQLite amalgamation
-  (fetched by `bun ext/fetch-sqlite.ts`, kept out of git). Skip this unless
-  you touch `ext/`.
+- Optional, native extension only: MinGW `gcc` on `PATH` and the SQLite
+  amalgamation in `ext/amalg/` (git-ignored). Run `bun run fetch-sqlite`
+  before `bun run build:ext`; skip both unless you touch `ext/`.
 
 ## Steps
 
@@ -36,11 +36,21 @@ That script writes a 1200-row hot feed, seals, ships to a relay dir, and
 finds one id back (`examples/e2e.ts`). If it prints `e2e ok`, seal/ship/find
 all work on your machine.
 
+## Native extension (optional)
+
+A fresh checkout has no amalgamation headers (`ext/amalg/` is git-ignored),
+so fetch them before every fresh build:
+
+```bash
+bun run fetch-sqlite   # downloads + hash-verifies into ext/amalg/ (idempotent)
+bun run build:ext      # needs MinGW gcc on PATH
+```
+
 ## What gets installed where
 
 - Nothing global. The CLI is `bin/moltarc.ts` (package `bin` maps `moltarc`
-  to it for npm publishes; `package.json` `files` ships only
-  `src`/`bin`/`README.md`/`CHANGELOG.md`/`LICENSE`).
+  to it for npm publishes; `package.json` `files` ships
+  `src`/`bin`/`docs/*.md`/`README.md`/`CHANGELOG.md`/`LICENSE`).
 - Archives live in plain directories you choose (`<outDir>` with
   `warm/` + `manifest.json`); the relay is another directory. No daemon,
   no port, no background service — except `p2p-sync`, which dials a peer URL

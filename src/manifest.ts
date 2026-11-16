@@ -672,7 +672,7 @@ export function saveManifestAtomic(outDir: string, m: Manifest): void {
   }
 }
 
-export function loadManifest(outDir: string): { manifest: Manifest; source: 'primary' | 'backup' | 'rebuilt' } {
+export function loadManifest(outDir: string, opts?: { allowRepair?: boolean }): { manifest: Manifest; source: 'primary' | 'backup' | 'rebuilt' } {
   const primary = parseManifestCopy(join(outDir, 'manifest.json'));
   const backup = parseManifestCopy(join(outDir, 'manifest.bak.json'));
   // Best crc-valid copy wins: higher seq first, primary breaks ties. A torn
@@ -697,7 +697,9 @@ export function loadManifest(outDir: string): { manifest: Manifest; source: 'pri
     if (!Array.isArray(best.cold)) best.cold = [];
     return { manifest: best, source: bestSource };
   }
-  if (!existsSync(join(outDir, 'warm'))) throw new Error(`no archive at ${outDir}`);
+  // Read-only handles must never self-heal: with no valid copy, fail loud
+  // instead of rebuilding and writing into a read-only mount.
+  if (opts?.allowRepair === false) throw new Error(`no readable manifest copy in ${outDir}`);
   // Rebuilt path owns cold[] preservation now: salvage the listing from either
   // torn copy before the rescan, so seal no longer needs its own reattach.
   const cold = salvageCold(outDir);

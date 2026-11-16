@@ -15,6 +15,7 @@ import { SYN_ID_SEP } from './seal.js';
 export interface FindOpts {
   outDir: string;
   trxId: string;
+  readonly?: boolean; // read-only handle: never trigger manifest self-heal writes
   chunkDir?: string; // default <outDir>/warm
 }
 
@@ -173,7 +174,7 @@ export function sparseCandidateFiles(
   return { files, pruned };
 }
 
-function loadManifestCached(outDir: string): { manifest: Manifest; source: 'primary' | 'backup' | 'rebuilt' } {
+function loadManifestCached(outDir: string, readonly = false): { manifest: Manifest; source: 'primary' | 'backup' | 'rebuilt' } {
   const primary = join(outDir, 'manifest.json');
   const pre = statKey(primary);
   const hit = manifestCache.get(outDir);
@@ -182,7 +183,7 @@ function loadManifestCached(outDir: string): { manifest: Manifest; source: 'prim
     if (onDisk !== null && onDisk === hit.seq) return hit;
     if (onDisk === null) return hit;
   }
-  const loaded = loadManifest(outDir);
+  const loaded = loadManifest(outDir, { allowRepair: !readonly });
   // Re-stat: the rebuilt path may have rewritten the primary underneath us.
   const cur = statKey(primary);
   const seq = typeof loaded.manifest.seq === 'number' && Number.isFinite(loaded.manifest.seq) ? loaded.manifest.seq : 0;
@@ -291,7 +292,7 @@ export function candidates(entries: ChunkEntry[], trxId: string): { hit: ChunkEn
 // pointers prune whole months by minKey/maxKey BEFORE any manifest-<month>.json
 // sidecar loads. Null on any absent/stale sidecar or pointer so the caller
 // keeps root behavior.
-function tryShardIndex(outDir: string, trxId: string): {
+function tryShardIndex(outDir: string, trxId: string, readonly = false): {
   hit: ChunkEntry[]; pruned: number; shardsLoaded: number; shardsPruned: number; cold: ColdSegment[];
 } | null {
   const { sparse, cold, total, quarantined } = loadSparseCached(outDir);
@@ -313,7 +314,7 @@ function tryShardIndex(outDir: string, trxId: string): {
   // Pointer-first prune: drop months whose stamped range misses the key, so
   // only surviving months pay a shard-file load. Unknown-range or unlisted
   // months stay candidates; absent/stale pointers keep the old behavior.
-  const pointers = loadPointersForPrune(outDir, sparse.seq);
+  const pointers = loadPointersForPrune(outDir, sparse.seq, readonly);
   const byPointer = new Map((pointers ?? []).map((p) => [p.name, p]));
   if (pointers) {
     for (const month of months) {
@@ -348,10 +349,10 @@ function tryShardIndex(outDir: string, trxId: string): {
 // Root pointers for the prune above: null when the manifest has none (old
 // archives), is unreadable, or raced the sparse sidecar seq. Null restores
 // the pre-pointer path (load every candidate month).
-function loadPointersForPrune(outDir: string, sparseSeq: number): ShardPointer[] | null {
+function loadPointersForPrune(outDir: string, sparseSeq: number, readonly = false): ShardPointer[] | null {
   let manifest: Manifest;
   try {
-    manifest = loadManifestCached(outDir).manifest;
+    manifest = loadManifestCached(outDir, readonly).manifest;
   } catch {
     return null;
   }
@@ -374,7 +375,7 @@ export function matchRowId(r: HotRow, trxId: string): boolean {
 export function findTrx(opts: FindOpts): FindResult {
   const dir = opts.chunkDir ?? join(opts.outDir, 'warm');
   const dictDir = join(dir, '..', 'dicts');
-  const fast = tryShardIndex(opts.outDir, opts.trxId);
+  const fast = tryShardIndex(opts.outDir, opts.trxId, opts.readonly);
   if (fast) {
     let fetched = 0;
     let skippedMissing = 0;
@@ -396,7 +397,7 @@ export function findTrx(opts: FindOpts): FindResult {
     }
     throw new Error(`trx ${opts.trxId} not found (${fetched} chunk(s) fetched, ${fast.pruned} pruned, ${skippedMissing} missing)`);
   }
-  const { manifest } = loadManifestCached(opts.outDir);
+  const { manifest } = loadManifestCached(opts.outDir, opts.readonly);
   const { hit, pruned } = candidates(manifest.chunks, opts.trxId);
   let fetched = 0;
   let skippedMissing = 0;
@@ -418,9 +419,9 @@ export function findTrx(opts: FindOpts): FindResult {
 // and deliberately loud about it. Narrows to segments holding a candidate
 // chunk when the warm index yields one; fully-pruned keys skip the scan.
 export function findCold(opts: FindColdOpts): FindResult {
-  const fast = tryShardIndex(opts.outDir, opts.trxId);
+  const fast = tryShardIndex(opts.outDir, opts.trxId, opts.readonly);
   if (fast) return scanCold(opts, fast.hit, fast.pruned, fast.cold, fast.shardsLoaded, fast.shardsPruned);
-  const { manifest } = loadManifestCached(opts.outDir);
+  const { manifest } = loadManifestCached(opts.outDir, opts.readonly);
   const { hit, pruned } = candidates(manifest.chunks, opts.trxId);
   return scanCold(opts, hit, pruned, manifest.cold ?? []);
 }

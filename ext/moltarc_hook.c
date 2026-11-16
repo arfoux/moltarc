@@ -149,18 +149,21 @@ static void resolve_ts(char *dst, size_t n) {
 }
 
 /* exec-vector spawn: CreateProcess on argv (bun, ts, cmd, a, b, [c]) with
- * stdout/stderr on anonymous pipes. No shell, no metachar interpretation:
- * outDir like 'x" & evil' arrives as one argv element. Returns malloc'd
- * stdout (*rc = exit code); bun stderr lands malloc'd in *stderr_text. */
+ * stdout on an anonymous pipe and stderr in a per-call temp file. No shell,
+ * no metachar interpretation: outDir like 'x" & evil' arrives as one argv
+ * element. Returns malloc'd stdout (*rc = exit code); bun stderr is slurped
+ * from the temp file into *stderr_text. A pipe for stderr would deadlock
+ * whenever the child fills it while we are still draining stdout. */
 static char *run_bun(int *rc, char **stderr_text, const char *cmd, const char *a,
                      const char *b, const char *c) {
   char ts[8192]; char qa[6][8192]; char line[32768 + 8192];
 #ifdef _WIN32
-  SECURITY_ATTRIBUTES sa; HANDLE so_r = 0, so_w = 0, se_r = 0, se_w = 0;
+  SECURITY_ATTRIBUTES sa; HANDLE so_r = 0, so_w = 0, se_w = 0;
   STARTUPINFOA si; PROCESS_INFORMATION pi; DWORD exitcode = 1;
-  char *buf = 0; size_t len = 0, cap = 1 << 16; char *serr = 0; size_t slen = 0, scap = 1 << 12;
+  char *buf = 0; size_t len = 0, cap = 1 << 16; char *serr = 0;
   const char *parts[7]; int nparts = 0, i;
   BOOL ok;
+  char errpath[1024];
   resolve_ts(ts, sizeof ts);
   parts[nparts++] = MOLTARC_BUN; parts[nparts++] = ts; parts[nparts++] = cmd;
   parts[nparts++] = a; parts[nparts++] = b; if (c) parts[nparts++] = c;
@@ -172,12 +175,19 @@ static char *run_bun(int *rc, char **stderr_text, const char *cmd, const char *a
     strcat(line, qa[i]);
   }
   memset(&sa, 0, sizeof sa); sa.nLength = sizeof sa; sa.bInheritHandle = TRUE;
-  if (!CreatePipe(&so_r, &so_w, &sa, 0) || !CreatePipe(&se_r, &se_w, &sa, 0)) {
-    if (so_r) CloseHandle(so_r); if (so_w) CloseHandle(so_w);
+  if (!CreatePipe(&so_r, &so_w, &sa, 0)) {
+    *rc = -1; *stderr_text = empty_str(); return 0;
+  }
+  /* stderr to a temp file, not a pipe: draining stdout first would deadlock
+   * whenever the child fills the stderr pipe. Matches the header contract. */
+  err_tmp_path(errpath, sizeof errpath);
+  se_w = CreateFileA(errpath, GENERIC_WRITE, FILE_SHARE_READ, &sa,
+                     CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+  if (se_w == INVALID_HANDLE_VALUE) {
+    CloseHandle(so_r); CloseHandle(so_w);
     *rc = -1; *stderr_text = empty_str(); return 0;
   }
   SetHandleInformation(so_r, HANDLE_FLAG_INHERIT, 0);
-  SetHandleInformation(se_r, HANDLE_FLAG_INHERIT, 0);
   memset(&si, 0, sizeof si); si.cb = sizeof si;
   si.hStdOutput = so_w; si.hStdError = se_w; si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
   si.dwFlags = STARTF_USESTDHANDLES;
@@ -186,30 +196,28 @@ static char *run_bun(int *rc, char **stderr_text, const char *cmd, const char *a
   ok = CreateProcessA(NULL, line, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
   CloseHandle(so_w); CloseHandle(se_w); so_w = se_w = 0;
   if (!ok) {
-    CloseHandle(so_r); CloseHandle(se_r);
+    CloseHandle(so_r);
+    DeleteFileA(errpath);
     *rc = -1; *stderr_text = empty_str(); return 0;
   }
-  buf = (char *)malloc(cap); serr = (char *)malloc(scap);
-  if (!buf || !serr) {
-    free(buf); free(serr); CloseHandle(so_r); CloseHandle(se_r);
+  buf = (char *)malloc(cap);
+  if (!buf) {
+    CloseHandle(so_r);
     CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+    DeleteFileA(errpath);
     *rc = -1; *stderr_text = empty_str(); return 0;
   }
   for (;;) { DWORD got = 0; if (!ReadFile(so_r, buf + len, (DWORD)(cap - len - 1), &got, NULL) || !got) break; len += got;
     if (len + 1 >= cap && cap < OUT_CAP + 16) { size_t nc = cap * 2; char *nb; if (nc > OUT_CAP + 16) nc = OUT_CAP + 16;
       nb = (char *)realloc(buf, nc); if (!nb) break; buf = nb; cap = nc; }
     if (len + 1 >= cap) break; }
-  for (;;) { DWORD got = 0; if (!ReadFile(se_r, serr + slen, (DWORD)(scap - slen - 1), &got, NULL) || !got) break; slen += got;
-    if (slen + 1 >= scap && scap < ERR_CAP + 16) { size_t nc = scap * 2; char *nb; if (nc > ERR_CAP + 16) nc = ERR_CAP + 16;
-      nb = (char *)realloc(serr, nc); if (!nb) break; serr = nb; scap = nc; }
-    if (slen + 1 >= scap) break; }
-  CloseHandle(so_r); CloseHandle(se_r);
+  CloseHandle(so_r);
   WaitForSingleObject(pi.hProcess, INFINITE);
   GetExitCodeProcess(pi.hProcess, &exitcode);
   CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
   buf[len < cap ? len : cap - 1] = 0;
-  while (slen > 0 && (serr[slen-1]=='\n'||serr[slen-1]=='\r'||serr[slen-1]==' '||serr[slen-1]=='\t')) slen--;
-  serr[slen] = 0;
+  serr = slurp_capped(errpath, ERR_CAP);
+  DeleteFileA(errpath);
   *rc = (int)exitcode; *stderr_text = serr; return buf;
 #else
   (void)ts; (void)qa; (void)line;

@@ -29,8 +29,9 @@ public spaces when representing the project.
 
 ## Enforcement
 
-Violations may be reported through a private GitHub security advisory or an
-issue on the repo (`https://github.com/arfoux/moltarc/issues`). Maintainers
+Violations may be reported through a private GitHub security advisory
+(https://github.com/arfoux/moltarc/security/advisories/new) or an issue on
+the repo (`https://github.com/arfoux/moltarc/issues`). Maintainers
 will review, may warn, temporarily ban, or permanently remove contributors
 who behave unacceptably, and are not obligated to explain moderation
 decisions beyond what keeps the project safe. This is a small team: expect

@@ -40,10 +40,10 @@ export interface ReadOnlyArchive {
 export function openArchiveReadOnly(dir: string): ReadOnlyArchive {
   const ro: ReadOnlyArchive = {
     dir,
-    find: (trxId: string): FindResult => findTrx({ outDir: dir, trxId }),
+    find: (trxId: string): FindResult => findTrx({ outDir: dir, trxId, readonly: true }),
     verify: (): VerifyResult => verifyAll(dir),
     verifyFull: (): VerifyFullResult => verifyFull(dir),
-    status: (relayDir?: string): StatusInfo => statusInfo(dir, relayDir),
+    status: (relayDir?: string): StatusInfo => statusInfo(dir, relayDir, true),
     seal: (..._args: unknown[]): never => { throw refused('seal', dir); },
     ship: (..._args: unknown[]): never => { throw refused('ship', dir); },
     forget: (..._args: unknown[]): never => { throw refused('forget', dir); },

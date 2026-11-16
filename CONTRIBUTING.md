@@ -22,6 +22,9 @@ bun test test/<area>.test.ts   # scoped: the file for the area you touched
 bun run test:stable            # everything except timing-sensitive files
 bun run test:heavy             # soak/concurrent/worker-safety/p2p — needs the machine to itself
 bun test ext/                  # native-extension reference tests
+bun run test:extended          # extended suite (also gated in publish)
+bash scripts/test-floor.sh     # CI's single suite gate: stable + ext + count floors
+bun run check:surface          # checks the published npm surface
 node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit   # typecheck (CI runs this)
 ```
 
@@ -30,6 +33,10 @@ Rules:
 - Touch one area → run its scoped file first. A failure that reproduces only
   in the full-suite run is load contention until proven otherwise
   (`docs/bench.md` "flakes"); re-run the single file before opening an issue.
+
+- `bash scripts/test-floor.sh` is the single suite gate in CI and publish: it
+  runs `test:stable` + `bun test ext/` with count floors. Don't add duplicate
+  explicit suite steps to those workflows.
 - No new test for the sake of coverage. A test earns its place only where a
   plausible bug would fail it (behavior, boundaries, real errors — never
   wiring, forwarding, or source-text assertions).
@@ -63,9 +70,19 @@ resolve to a file that exists in git.
   message — `CHANGELOG.md` marks those entries the same way.
 - One concern per commit; docs and code for the same change go together.
 - Push or open a PR against `main`: CI runs the typecheck +
-  `bun run test:stable` + `bun test ext/` on every push and PR
-  (`.github/workflows/ci.yml`). The heavy suite runs nightly, not on PRs
-  (`.github/workflows/heavy.yml`).
+  `bash scripts/test-floor.sh` (stable + ext with count floors) +
+  `bun run check:surface` on every push and PR, plus a separate `extended`
+  job running `bun run test:extended` (`.github/workflows/ci.yml`). The heavy
+  suite runs nightly, not on PRs (`.github/workflows/heavy.yml`). Publishing
+  runs the same gates before either registry push.
 - `CHANGELOG.md` entries are per tag, user-visible changes only, sourced
   from `git log`. Add an `Unreleased` section at the top while you work;
   maintainers fold it into the version section at release time.
+
+## Release setup
+
+npm publishes use npmjs **trusted publishing (OIDC)** from
+`.github/workflows/publish.yml`; no npm token is configured or expected.
+GitHub Packages uses the workflow `GITHUB_TOKEN`. A release tag must match
+`package.json`'s version, and `CHANGELOG.md` needs a `## vX.Y.Z` section for
+that tag or the release job fails loudly instead of publishing wrong notes.

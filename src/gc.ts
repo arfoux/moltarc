@@ -316,10 +316,10 @@ export interface StatusInfo {
   coldBytes: number;
 }
 
-export function statusInfo(outDir: string, relayDir?: string): StatusInfo {
+export function statusInfo(outDir: string, relayDir?: string, readonly = false): StatusInfo {
   const warm = join(outDir, 'warm');
-  mkdirSync(warm, { recursive: true });
-  const { manifest } = loadManifest(outDir);
+  if (!readonly) mkdirSync(warm, { recursive: true });
+  const { manifest } = loadManifest(outDir, { allowRepair: !readonly });
   const refs = new Set(manifest.chunks.map((e) => e.file));
   let bytes = 0;
   for (const e of manifest.chunks) bytes += e.bytes;
