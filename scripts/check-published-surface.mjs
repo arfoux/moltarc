@@ -14,6 +14,12 @@ const problems = [];
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
 if (!pkg.engines?.bun) problems.push('package.json: engines.bun missing');
 
+const binEntries = Object.entries(pkg.bin ?? {});
+if (binEntries.length === 0) problems.push('package.json: bin missing');
+for (const [name, target] of binEntries) {
+  if (!existsSync(target)) problems.push(`package.json: bin.${name} target missing: ${target}`);
+}
+
 const readme = readFileSync('README.md', 'utf8');
 const images = [
   ...readme.matchAll(/!\[[^\]]*\]\(([^)]+)\)|<img\s+[^>]*src=["']([^"']+)["']/g),
@@ -60,6 +66,9 @@ if (packed) {
   if (assets.length) problems.push(`tarball ships image assets: ${assets.join(', ')}`);
   for (const required of ['README.md', 'CHANGELOG.md', 'LICENSE', ...rootDocs]) {
     if (!files.includes(required)) problems.push(`tarball missing ${required}`);
+  }
+  for (const [name, target] of binEntries) {
+    if (!files.includes(target)) problems.push(`tarball missing bin.${name} target ${target}`);
   }
   if (!files.some((f) => f.startsWith('docs/') && f.endsWith('.md'))) {
     problems.push('tarball missing docs/*.md');

@@ -60,10 +60,10 @@ reminder: bytes remain until `gc --apply` + `coldg --apply`.
 - Re-seal is idempotent: per-device `sealed_upto_seq` watermark plus
   keep-last dedupe on (table, device, seq) — a second seal skips sealed rows,
   a concurrent second seal fails loud on `seal.lock`.
-- Single-writer rule: `seal.lock` serializes seal-vs-seal only. `merge`,
-  `coldg --apply`, `p2p-sync` apply, `restore-from-cold --apply`, and
-  `migrate` rewrite the same manifest without taking it, so only one writer
-  may run at a time.
+- Single-writer rule: every manifest writer takes `seal.lock` — `seal`,
+  `merge`, `coldg --apply`, p2p-sync apply, `restore-from-cold --apply`,
+  `migrate`, and self-locking `saveManifestAtomic`. A second concurrent
+  writer fails loud (`manifest locked`), not last-save-wins.
 - Chunk filenames carry the seq in exactly 8 digits; out-of-range seqs are
   malformed at the gate.
 

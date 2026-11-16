@@ -6,10 +6,9 @@
 #
 # Floor: STABLE_FLOOR pins the last green total (249 pass, 0 fail,
 # `bun run test:stable` on repo/completion-sweep 2026-11-17); EXT_FLOOR pins
-# the ext total (7 tests incl. 1 env skip, `bun test ext/`, same date).
-# Totals count pass+skip: env-skipped tests (e.g. Windows-only DLL tests
-# skipping on Linux CI) still count as present, so deleting a test still
-# trips the floor while a skip no longer fails loud.
+# the ext total (7 tests; Windows-only DLL tests skip on Linux CI). Totals
+# count pass+skip: env-skipped tests still count as present, so deleting a
+# test still trips the floor while a skip no longer fails loud.
 # Update only on intentional add/remove: re-run that suite, read the
 # "N pass" / "N skip" lines, set the constant below to pass+skip.
 set -u

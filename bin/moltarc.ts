@@ -59,6 +59,14 @@ function usage(): never {
   process.exit(1);
 }
 
+function parseApplyArgs(args: string[], help: string): { outDir: string; apply: boolean } {
+  const flags = args.filter((a) => a.startsWith('--'));
+  const positional = args.filter((a) => !a.startsWith('--'));
+  const [outDir] = positional;
+  if (!outDir || positional.length > 1 || flags.length > 1 || flags.some((f) => f !== '--apply')) fail(help);
+  return { outDir, apply: flags.includes('--apply') };
+}
+
 function printVerify(v: VerifyFullResult): void {
   console.log(`manifest: ${v.manifest.ok ? 'OK' : 'CORRUPT'} (${v.manifest.detail})`);
   for (const item of v.items) {
@@ -208,9 +216,8 @@ async function main(): Promise<void> {
     for (const f of r.removed) console.log(`forgot ${f}`);
     console.log('note: bytes remain until gc --apply + coldg --apply');
   } else if (cmd === 'coldg') {
-    const [outDir, flag] = rest;
-    if (!outDir) fail('usage: moltarc coldg <outDir> [--apply]');
-    const r = sweepCold(outDir, { dryRun: flag !== '--apply' });
+    const { outDir, apply } = parseApplyArgs(rest, 'usage: moltarc coldg <outDir> [--apply]');
+    const r = sweepCold(outDir, { dryRun: !apply });
     if (r.dryRun) console.log(`dry-run: ${r.pruned.length} pruned, ${r.repacked.length} repacked, ${r.bytesReclaimed}B reclaimable`);
     else console.log(`swept cold: pruned ${r.pruned.length}, repacked ${r.repacked.length}, reclaimed ${r.bytesReclaimed}B`);
     for (const f of r.pruned) console.log(`pruned ${f}`);
@@ -245,9 +252,7 @@ async function main(): Promise<void> {
     console.log(`repair: ${r.repaired.length} repaired, ${r.failed.length} failed — ${r.ok ? 'OK' : 'FAIL'}`);
     if (!r.ok) process.exitCode = 1;
   } else if (cmd === 'restore-from-cold') {
-    const [outDir, flag] = rest;
-    if (!outDir) fail('usage: moltarc restore-from-cold <outDir> [--apply]');
-    const apply = flag === '--apply';
+    const { outDir, apply } = parseApplyArgs(rest, 'usage: moltarc restore-from-cold <outDir> [--apply]');
     if (!apply) {
       restoreFromCold(outDir, { dryRun: true });
       return;

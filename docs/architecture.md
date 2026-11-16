@@ -67,9 +67,10 @@ shape in `bin/moltarc.ts:35-54`.
   copy exists; full rebuild stays for first seal (`src/manifest.ts`,
   `src/seal.ts`).
 - Single-writer rule: `seal` (`appendEntries`), `mergeCold`, `sweepCold`
-  `--apply`, p2p apply, `restore-from-cold --apply`, and `migrate` all write
-  `manifest.json` / `manifest.bak.json` with no shared lock — run only one
-  writer at a time or entries go missing (last-save-wins).
+  `--apply`, p2p apply, `restore-from-cold --apply`, and `migrate` all hold
+  `seal.lock` (`acquireManifestLock` / self-locking `saveManifestAtomic`)
+  across the read-modify-write. A second concurrent writer fails loud
+  (`manifest locked`), not last-save-wins.
 
 ## Ship: delta by hash, text-first lanes
 
