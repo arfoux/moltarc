@@ -1,6 +1,6 @@
 # moltarc — shrink + ship + find
 
-![off-white archive document icon on dark navy](./logo.jpg)
+![off-white archive document icon on dark navy](https://raw.githubusercontent.com/arfoux/moltarc/main/logo.jpg)
 
 Universal append-only pipeline for game events, file versions, device
 telemetry, and entry-ledgers alike: the hot feed stays small and fast,
@@ -15,11 +15,11 @@ An entry-ledger feed is one domain among many, not the model.
 
 | | |
 |---|---|
-| ![hot rows flow](docs/gifs/part1-hot.png)<br>**1. Hot stays plain** — 6000 rows land in plain SQLite, counter climbs, nothing custom. (`src/seal.ts` reads WAL) | ![seal funnels rows](docs/gifs/part2-seal.png)<br>**2. Seal** — rows funnel into immutable chunks, 10.2x smaller on mixed text (34.5x on its repetitive-text slice), crc+sha per chunk. (`moltarc seal`) |
-| ![delta ships once](docs/gifs/part3-ship.png)<br>**3. Ship** — relay compares hashes, only missing bytes fly, resume survives drops. (`moltarc ship`) | ![find fetches one chunk](docs/gifs/part4-find.png)<br>**4. Find** — bloom prunes the candidates to a single-chunk fetch, which returns the matching record. (`moltarc find`) |
-| ![big photo gated to photo/ sidecar + thumb](docs/gifs/part5-photo.png)<br>**5. Photo gate** — bodies over 256KB skip the chunk path into `photo/` + thumb sidecars. (gate: [docs/contracts.md](docs/contracts.md)) | ![verify proves chain](docs/gifs/part6-verify.png)<br>**6. Verify** — every chunk re-hashed, manifest chain checked, quarantine on mismatch. (`moltarc verify`) |
-| ![warm merges to cold](docs/gifs/part7-cold.png)<br>**7. Cold** — warm merges to `cold/*.tar`, prune/repack sweep, restore-from-cold drill. (`moltarc merge`) | ![p2p delta sync](docs/gifs/part8-p2p.png)<br>**8. P2P** — WebSocket delta sync with journal resume, HMAC-SHA256 PSK frames. (`moltarc p2p-sync`) |
-| ![as-of query over history](docs/gifs/part9-timetravel.png)<br>**9. Timetravel** — read-only as-of query (seq or ts) with chunk proof. (`moltarc asof`) | ![hot to cold lifecycle](docs/gifs/part10-lifecycle.png)<br>**10. Lifecycle** — hot→warm→cold end to end, acked-only forget, nothing lost. (`moltarc seal` → `ship` → `merge`) |
+| ![hot rows flow](https://raw.githubusercontent.com/arfoux/moltarc/main/docs/gifs/part1-hot.png)<br>**1. Hot stays plain** — 6000 rows land in plain SQLite, counter climbs, nothing custom. (`src/seal.ts` reads WAL) | ![seal funnels rows](https://raw.githubusercontent.com/arfoux/moltarc/main/docs/gifs/part2-seal.png)<br>**2. Seal** — rows funnel into immutable chunks, 10.2x smaller on mixed text (34.5x on its repetitive-text slice), crc+sha per chunk. (`moltarc seal`) |
+| ![delta ships once](https://raw.githubusercontent.com/arfoux/moltarc/main/docs/gifs/part3-ship.png)<br>**3. Ship** — relay compares hashes, only missing bytes fly, resume survives drops. (`moltarc ship`) | ![find fetches one chunk](https://raw.githubusercontent.com/arfoux/moltarc/main/docs/gifs/part4-find.png)<br>**4. Find** — bloom prunes the candidates to a single-chunk fetch, which returns the matching record. (`moltarc find`) |
+| ![big photo gated to photo/ sidecar + thumb](https://raw.githubusercontent.com/arfoux/moltarc/main/docs/gifs/part5-photo.png)<br>**5. Photo gate** — bodies over 256KB skip the chunk path into `photo/` + thumb sidecars. (gate: [docs/contracts.md](docs/contracts.md)) | ![verify proves chain](https://raw.githubusercontent.com/arfoux/moltarc/main/docs/gifs/part6-verify.png)<br>**6. Verify** — every chunk re-hashed, manifest chain checked, quarantine on mismatch. (`moltarc verify`) |
+| ![warm merges to cold](https://raw.githubusercontent.com/arfoux/moltarc/main/docs/gifs/part7-cold.png)<br>**7. Cold** — warm merges to `cold/*.tar`, prune/repack sweep, restore-from-cold drill. (`moltarc merge`) | ![p2p delta sync](https://raw.githubusercontent.com/arfoux/moltarc/main/docs/gifs/part8-p2p.png)<br>**8. P2P** — WebSocket delta sync with journal resume, HMAC-SHA256 PSK frames. (`moltarc p2p-sync`) |
+| ![as-of query over history](https://raw.githubusercontent.com/arfoux/moltarc/main/docs/gifs/part9-timetravel.png)<br>**9. Timetravel** — read-only as-of query (seq or ts) with chunk proof. (`moltarc asof`) | ![hot to cold lifecycle](https://raw.githubusercontent.com/arfoux/moltarc/main/docs/gifs/part10-lifecycle.png)<br>**10. Lifecycle** — hot→warm→cold end to end, acked-only forget, nothing lost. (`moltarc seal` → `ship` → `merge`) |
 
 ## Install
 
@@ -172,7 +172,7 @@ _Measured by `bun bench/dict-bench.ts --write-readme`; same corpus both sides, o
 - [docs/cli.md](docs/cli.md) — every subcommand, flags verified against `bin/moltarc.ts`
 - [docs/modules.md](docs/modules.md) — module ownership table
 - [docs/contracts.md](docs/contracts.md) — numeric contracts and gates
-- [docs/interop.md](docs/interop.md) — fieldlog `ledger.log` interop + field aliases
+- [docs/interop.md](docs/interop.md) — entry-ledger `ledger.log` interop + field aliases
 - [docs/troubleshooting.md](docs/troubleshooting.md) — symptoms, exact errors, fixes
 - [docs/bench.md](docs/bench.md) — how SLA numbers are measured + flake policy
 - [docs/compat.md](docs/compat.md) — N-2 codec rule, manifest tolerance, native binary note

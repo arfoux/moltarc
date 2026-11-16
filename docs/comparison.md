@@ -1,9 +1,9 @@
 # moltarc comparison matrix — 13 systems × 10 dimensions
 
 **Selection-bias disclaimer.** This matrix was written by the moltarc authors to position
-moltarc (content-addressed SQLite chunking + S3 tiers + optional cold archive) against
+moltarc (content-addressed SQLite chunking + local warm/cold archive tiers) against
 systems we studied while building it. Dimension choice, YES/NO thresholds, and wording
-favor problems moltarc was designed for (offline-first edge SQLite, cheap S3 durability,
+favor problems moltarc was designed for (offline-first edge SQLite, cheap operator-supplied storage,
 file-granular dedup restore). We are not neutral: we have not run every system at scale,
 managed-service SLOs/pricing change without notice, and several competitors beat moltarc
 decisively outside its niche — see "Where moltarc loses" below. Verify critical cells
@@ -18,11 +18,16 @@ restore latency measured in minutes–hours, distinct from merely cheap Infreque
 storage. "Snapshot as-of" = restore the dataset to an arbitrary timestamp/TXN, not just
 "latest replica".
 
+**Storage scope.** S3/Glacier/bucket in this matrix means operator-supplied object storage for
+the local archive; moltarc has no in-product S3 backend, no bucket/IAM code, and no
+presigned-URL support. YES in moltarc's cold/fetch columns describes local archive behavior,
+not a managed object tier.
+
 ## Matrix
 
 | System / Dim | (1) Cold archival tier | (2) Lazy on-demand fetch | (3) Snapshot as-of restore | (4) Multi-writer | (5) Offline-first local reads | (6) Delta / incremental sync | (7) S3-native backup | (8) SQL analytics / pushdown | (9) IAM / ACLs | (10) Self-hostable, no lock-in |
 |---|---|---|---|---|---|---|---|---|---|---|
-| **moltarc** | YES | YES | YES | NO | YES | YES | YES | PARTIAL [m1] | PARTIAL [m2] | YES |
+| **moltarc** | YES | YES | YES | NO | YES | YES | NO [m3] | PARTIAL [m1] | NO [m2] | YES |
 | **Litestream** | PARTIAL [a] | PARTIAL [b] | YES | NO | YES | YES | YES | YES | PARTIAL [c] | YES |
 | **LiteFS** | NO | PARTIAL [d] | PARTIAL [e] | PARTIAL [f] | YES | YES | PARTIAL [g] | YES | PARTIAL [c] | YES |
 | **rqlite** | NO | NO | PARTIAL [h] | PARTIAL [i] | YES | PARTIAL [j] | PARTIAL [k] | PARTIAL [l] | PARTIAL [m] | YES |
@@ -36,12 +41,16 @@ storage. "Snapshot as-of" = restore the dataset to an arbitrary timestamp/TXN, n
 | **S3 tiers (+ Select)** | YES | NO | PARTIAL [ah] | NO | NO | PARTIAL [ai] | YES | PARTIAL [aj] | YES | NO |
 | **Ditto** | NO | PARTIAL [ak] | PARTIAL [al] | YES | YES | PARTIAL [am] | PARTIAL [an] | PARTIAL [ao] | YES | PARTIAL [ap] |
 
-## Footnotes (one per PARTIAL cell)
+## Footnotes (one per PARTIAL cell, plus moltarc S3/IAM scope qualifiers)
 
 - [m1] moltarc SQL analytics is PARTIAL: full SQLite locally, but no columnar engine,
-  no query pushdown into S3/cold; large scans must rehydrate first.
-- [m2] moltarc IAM is PARTIAL: presigned-URL / bucket-policy based; no per-row ACLs,
-  no managed identity provider.
+  no query pushdown into the archive/cold tier; large scans must rehydrate first.
+- [m2] moltarc IAM/ACLs is NO: there is no in-product auth layer — no users, roles,
+  tokens, presigned URLs, or bucket-policy code. Access control is entirely the
+  operator's responsibility in the surrounding deployment/storage layer.
+- [m3] moltarc S3-native backup is NO: no S3/AWS/Glacier/bucket backend exists in the
+  repo. `ship` writes to a local relay directory; durable object storage, if used, is
+  supplied and operated externally.
 - [a] Litestream cold is PARTIAL, not native: cold YES-equivalent only via a Glacier
   lifecycle policy on the replica bucket (S3 → Glacier transition + restore), not a
   Litestream-managed cold tier with rehydration.
@@ -144,14 +153,15 @@ storage. "Snapshot as-of" = restore the dataset to an arbitrary timestamp/TXN, n
   conflict). rqlite, CR-SQLite, CouchDB, and Ditto all accept concurrent writers with a
   real conflict story; moltarc has none.
 - **SLO / managed durability.** Turso, D1, S3, and Ditto Cloud ship multi-nine SLOs,
-  on-call teams, and status pages. moltarc is self-operated code over your bucket —
-  its uptime is your uptime.
+  on-call teams, and status pages. moltarc is self-operated code with no managed
+  durability of its own — its uptime is your uptime, and any object storage is
+  operator-supplied.
 - **Analytics.** Turso/D1 answer SQL without rehydrating the world; S3 Select and
   Parquet tooling query cold data in place. moltarc must restore chunks to a local
   SQLite file before any query runs.
 - **IAM.** D1/Turso/S3/CouchDB/Ditto have users, roles, tokens, and audit paths.
-  moltarc has bucket policies and presigned URLs — nothing row-level, nothing auditable
-  per user.
+  moltarc has no in-product auth layer at all — no users, roles, tokens, bucket policies,
+  or presigned URLs; access control is entirely external to the tool.
 - **Lifecycle.** S3 Lifecycle, restic forget policies, and kopia retention rules are
   declarative and battle-tested. moltarc GC/cold-transition is newer, hand-rolled, and
   easier to misconfigure into data loss or cost blowups.

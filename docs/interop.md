@@ -5,6 +5,8 @@ events, file versions, device telemetry, and entry-ledger rows all normalize
 through the same aliases (`normRow`, `src/seal.ts:73-131`). Proof:
 `test/interop.test.ts` (90-event `ledger.log` seals; one entry finds back).
 
+Upstream feed: [fieldlog](https://github.com/arfoux/fieldlog/blob/main/README.md) is the append-only entry-ledger that produces the raw `ledger.log` events used below; moltarc consumes that feed read-only and never writes back into it.
+
 ## What seals directly
 
 Any JSONL row carrying `device_id,seq,ts,id,table,body` — or one of the
