@@ -12,6 +12,12 @@ behavior change is marked as such.
 - Docs only, no behavior change: `README.md` and `docs/` lead with the
   universal pipeline (game events, file versions, device telemetry first;
   entry-ledger as one domain among many) with neutral example captions.
+- Docs only, no behavior change: the WireGuard P2P runbook is now in standard
+  English (integrity vs confidentiality, PSK rotation, allowlist, fail-closed)
+  and linked from the docs index; stale perf figures in `docs/architecture.md`
+  and `docs/decisions.md` match `bench/measured.json` again; the photo gate is
+  stated as over 256KB and the dict saving is qualified by chunk size; `files`
+  ships `docs/*.md` so README links resolve from the published tarball.
 
 ## v0.21.3
 

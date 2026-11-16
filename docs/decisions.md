@@ -6,9 +6,9 @@ Reversed-consequence states what breaks, not opinion.
 ## 1. Chunk 1–4MB bounds, ~2MB target
 
 - Decision: seal packs per-table batches to `TARGET_BYTES` (2MB); flush gates on target, hard tail rule at `MAX_BYTES` (4MB); `MIN_BYTES` (1MB) documents the small-chunk floor. `src/seal.ts:17-19`, packing/probe loop `src/seal.ts:485-549`.
-- Context: mixed corpus (6000 rows, seed 7) seals 2.52MB input (decimal; 2.40MiB as displayed in `docs/bench.md`) into 3 warm chunks, 246723B (`bench/measured.json` perf; `docs/bench.md` seal 6.9MB/s in 350ms; warm bytes jitter ±~30B run to run, ratio steady at 10.2x). ~0.8MB compressed per chunk keeps find to ~1 chunk fetch per lookup (`findFetched: 11` over 6 probed ids).
+- Context: mixed corpus (6000 rows, seed 7) seals 2.52MB input (decimal; 2.40MiB as displayed in `docs/bench.md`) into 3 warm chunks, 246723B (`bench/measured.json` perf; `docs/bench.md` seal 8.0MB/s in 299ms; warm bytes jitter ±~30B run to run, ratio steady at 10.2x). ~0.8MB compressed per chunk keeps find to ~1 chunk fetch per lookup (`findFetched: 11` over 6 probed ids).
 - Alternatives rejected: 64KB chunks (manifest with thousands of entries, shard/sparse index bloat, ship delta fans out); 64MB chunks (find pays full read+crc+decode per lookup; a corrupt chunk quarantines 64MB instead of ~1MB, cf. `src/verify.ts:93-106` quarantine-one design).
-- If reversed: tiny chunks → manifest/shard/sparse growth + N-fetch finds; huge chunks → warm p50 find (~13.60ms in `bench/measured.json`) regresses linearly with chunk bytes, quarantine blast radius grows with chunk size.
+- If reversed: tiny chunks → manifest/shard/sparse growth + N-fetch finds; huge chunks → warm p50 find (~16.93ms in `bench/measured.json`) regresses linearly with chunk bytes, quarantine blast radius grows with chunk size.
 
 ## 2. zstd only, no LZ4
 
@@ -27,7 +27,7 @@ Reversed-consequence states what breaks, not opinion.
 ## 4. Bloom 2048 bits, k=3, scaled reads
 
 - Decision: legacy entries use `BLOOM_BITS = 2048` (`src/manifest.ts:8`), 3 hashes (`src/manifest.ts:101-114`); `bloomBitsForRows` scales newer chunks to ≥ rows×10 bits (`src/find.ts:158-164`); reader mods by actual stored length (`src/find.ts:176-191`).
-- Context: perf find fetches 11 while pruning 8 across 6 probed ids (~1-2 fetches per lookup; `bench/measured.json` `findFetched: 11, findPruned: 8`) — min/max range + bloom chain (`src/find.ts:198-238`) is what keeps the warm p50 at ~13.60ms.
+- Context: perf find fetches 11 while pruning 8 across 6 probed ids (~1-2 fetches per lookup; `bench/measured.json` `findFetched: 11, findPruned: 8`) — min/max range + bloom chain (`src/find.ts:198-238`) is what keeps the warm p50 at ~16.93ms.
 - Alternatives rejected: no bloom (every in-range chunk decodes — fetched count rises with chunk count); 256-bit bloom (fp rate forces decodes of non-matching chunks); fixed-size-only reader (breaks scaled chunks or wastes bits on small ones).
 - If reversed: bloom removed/shrunk → `fetched` climbs, find latency follows decode cost; fixed-2048 reader → scaled entries mis-decode (false negatives = lost rows).
 
@@ -48,8 +48,8 @@ Reversed-consequence states what breaks, not opinion.
 ## 7. Warm-only `findTrx` default, `findCold` opt-in and loud
 
 - Decision: `findTrx` searches warm only and throws when absent (`src/find.ts:324-365`); cold needs `findCold`, which narrows by warm index then warns per scan (`src/find.ts:370-376`, warn at `src/find.ts:411-413`).
-- Context: warm find is ~13.60ms p50 over 6 probed ids × 20 iters (cold-median first lookup 17.17ms; `bench/measured.json`); cold scan is O(segments) tar decode over already-zstd members (`src/find.ts:380-432`) — slower by construction.
-- Alternatives rejected: unified find (every miss pays a tar scan; typo'd ids cost seconds); silent cold fallback (operators can't tell a ~14ms hit from a multi-second scan in logs).
+- Context: warm find is ~16.93ms p50 over 6 probed ids × 20 iters (cold-median first lookup 21.40ms; `bench/measured.json`); cold scan is O(segments) tar decode over already-zstd members (`src/find.ts:380-432`) — slower by construction.
+- Alternatives rejected: unified find (every miss pays a tar scan; typo'd ids cost seconds); silent cold fallback (operators can't tell a ~17ms hit from a multi-second scan in logs).
 - If reversed: default find latency becomes segment-count-dependent; fully-pruned keys still pay directory-list + open costs instead of failing fast at the index.
 
 ## 8. Dual-copy manifest (+ sparse/shard), best-seq-wins load
