@@ -48,9 +48,10 @@ bun run build:ext      # needs MinGW gcc on PATH
 
 ## What gets installed where
 
-- Nothing global. The CLI is `bin/moltarc.ts` (package `bin` maps `moltarc`
-  to it for npm publishes; `package.json` `files` ships
-  `src`/`bin`/`docs/*.md`/`README.md`/`CHANGELOG.md`/`LICENSE`).
+- Nothing global. The CLI source is `bin/moltarc.ts`; npm `bin` maps `moltarc`
+  to `bin/moltarc.js`, a Bun shim that execs the TypeScript entry and reports a
+  friendly error when Bun is missing. Package `files` ships
+  `src`/`bin`/`docs/*.md`/`README.md`/`CHANGELOG.md`/`LICENSE`.
 - Archives live in plain directories you choose (`<outDir>` with
   `warm/` + `manifest.json`); the relay is another directory. No daemon,
   no port, no background service — except `p2p-sync`, which dials a peer URL

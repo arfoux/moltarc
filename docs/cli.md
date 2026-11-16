@@ -27,10 +27,10 @@ sealed), and malformed rows. Input over the 1 % malformed share aborts loud
 (`MALFORMED_ABORT_PCT`, `src/seal.ts`). Refuses to start under 50 MB free
 space (`checkReserve`). Second concurrent seal fails loud on `seal.lock`
 instead of racing the watermark.
-  Scope: the lock serializes seal-vs-seal only — `merge`, `coldg --apply`,
-  `p2p-sync` apply, `restore-from-cold --apply`, and `migrate` rewrite the
-  same manifest without taking it. Single-writer rule: run only one writer
-  at a time (see `docs/architecture.md` Manifest).
+  Scope: `seal.lock` is shared by every manifest writer (seal, merge,
+  `coldg --apply`, p2p-sync apply, `restore-from-cold --apply`, `migrate`,
+  `saveManifestAtomic`). A second concurrent writer fails loud (`manifest
+  locked`) instead of racing; see `docs/architecture.md` Manifest.
 
 ### `ship` — warm → relay, delta by hash
 

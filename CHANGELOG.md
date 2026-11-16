@@ -12,6 +12,7 @@ behavior change is marked as such.
 - Tests/CI: 22 previously unscheduled deterministic tests added to `test:stable`, 5 timing/multi-process tests moved to a new `test:extended` job, and suite floors raised; `test-floor.sh` is the single full-suite gate in both CI and publish.
 - Packaging/docs: the npm tarball now ships `CONTRIBUTING.md`, `SECURITY.md`, and `CODE_OF_CONDUCT.md`; a network-free published-surface check runs in CI and both publish jobs. Stale source anchors, install prerequisites, and CLI docs corrected.
 
+- CLI/docs/tooling: `coldg` and `restore-from-cold` now reject unknown flags or extra arguments instead of silently dry-running; three docs state the real shared `seal.lock` rule; npm `bin` docs point at the Bun shim; the published-surface check verifies bin targets; the ext floor comment reflects Windows-only DLL skips. CI now cancels superseded runs and every publish job has an explicit timeout.
 - Naming, no behavior change: fieldlog sales events seal as `entry`/`undo`
   with a `value` payload (`total` still accepted); fieldlog's read-model table is
   `entries`, while molt seals into table `entry` (singular). The large-image
