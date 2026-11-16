@@ -11,12 +11,18 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+      - name: Tag matches package.json version
+        run: |
+          test "${GITHUB_REF_NAME#v}" = "$(node -p require('./package.json').version)"
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
       - run: bun install
-      - run: bun run build
+      - name: Typecheck (same gate as CI)
+        run: node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
       - run: bun run test:stable
+      - run: bun test ext/
+      - run: bash scripts/test-floor.sh
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -33,12 +39,18 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+      - name: Tag matches package.json version
+        run: |
+          test "${GITHUB_REF_NAME#v}" = "$(node -p require('./package.json').version)"
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
       - run: bun install
-      - run: bun run build
-      - run: bun test test/interop.test.ts test/e2e.test.ts
+      - name: Typecheck (same gate as CI)
+        run: node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
+      - run: bun run test:stable
+      - run: bun test ext/
+      - run: bash scripts/test-floor.sh
       - uses: actions/setup-node@v4
         with:
           node-version: 22

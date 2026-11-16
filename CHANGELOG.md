@@ -3,12 +3,16 @@
 User-visible changes per tag, from `git log`. Test-only hardening with no
 behavior change is marked as such.
 
+> Historical entries below use pre-v0.21 names (`kasir`/`foto`); current names are `entry`/`photo`.
+
 ## Unreleased
 
 - Naming, no behavior change: fieldlog sales events seal as `entry`/`undo`
-  with a `value` payload (`total` still accepted; derived table `entries`);
-  the large-image quarantine is renamed `foto` → `photo` (`photo/`
-  sidecars, `photo:sha256:…` refs, `--deep-photo`, `PHOTO_INLINE_LIMIT_BYTES`).
+  with a `value` payload (`total` still accepted); fieldlog's read-model table is
+  `entries`, while molt seals into table `entry` (singular). The large-image
+  quarantine is renamed `foto` → `photo` (`photo/` sidecars, `photo:sha256:…`
+  refs, `PHOTO_INLINE_LIMIT_BYTES`); flags are renamed `--include-blobs` →
+  `--blobs` and `--deep-foto` → `--deep-photo`.
 - Docs only, no behavior change: `README.md` and `docs/` lead with the
   universal pipeline (game events, file versions, device telemetry first;
   entry-ledger as one domain among many) with neutral example captions.
@@ -18,6 +22,10 @@ behavior change is marked as such.
   and `docs/decisions.md` match `bench/measured.json` again; the photo gate is
   stated as over 256KB and the dict saving is qualified by chunk size; `files`
   ships `docs/*.md` so README links resolve from the published tarball.
+- Docs/CI/packaging, no behavior change: README images now use absolute raw URLs
+  (so they render from the npm tarball); `package.json` declares `engines.bun >= 1.0.0`;
+  both publish jobs run the full CI gate plus a tag↔package version check; stale
+  perf/line anchors corrected and comparison/interop docs qualified for scope.
 
 ## v0.21.3
 

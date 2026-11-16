@@ -27,6 +27,7 @@
     "demo": "bun examples/universal-demo.ts"
   },
   "license": "MIT",
+  "engines": { "bun": ">=1.0.0" },
   "devDependencies": {
     "@types/node": "^26.4.1",
     "typescript": "^7.0.2"

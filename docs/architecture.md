@@ -44,7 +44,7 @@ shape in `bin/moltarc.ts:35-54`.
   dict saves ~1.8 % at 16 KB chunks, ~0 % at 2 MB production chunks
   (`README.md` Dict SLA).
 - Photo gate: base64 bodies decoding past 256 KB (`PHOTO_INLINE_LIMIT_BYTES`,
-  `src/seal.ts:20-22`) land in `photo/<sha>.bin` + thumb companions while the
+  `src/seal.ts:25`) land in `photo/<sha>.bin` + thumb companions while the
   chunk keeps a `photo:sha256:…` hash ref (`src/seal.ts:221-251`,
   `src/thumb.ts:126-144`). Full contract in `docs/contracts.md`.
 
