@@ -17,11 +17,11 @@ shape in `bin/moltarc.ts:35-54`.
 
 - Hot input auto-detects: `hot.db` SQLite (magic `SQLite format 3`, tables
   `tx`/`log` with `device_id,seq,ts,id,table,body` via `bun:sqlite`) or JSONL
-  WAL export, one object per line (`src/seal.ts:133-145`, dispatch `src/seal.ts:392-395`).
+  WAL export, one object per line (`src/seal.ts` `isSqliteFile` + `readHotRowsCounted`/`readSqliteRowsCounted` dispatch in `seal`).
 - Per-device `sealed_upto_seq` watermark (`device_id -> max seq`) plus
   keep-last dedupe on (table, device, seq) make re-seal idempotent; a second
-  concurrent seal fails loud on `seal.lock` (watermark `src/seal.ts:279-282`,
-  lock `src/seal.ts:313-343`, CLI `docs/cli.md` seal).
+  concurrent seal fails loud on `seal.lock` (watermark `readWatermark`/
+  `advanceWatermark`, lock `acquireSealLock` in `src/seal.ts`, CLI `docs/cli.md` seal).
 - Rule: hot stays plain SQLite, no custom header.
 - Rule: never delete unsealed/unacked data; `forget`/`gc` only drop
   relay-acked chunks (`src/cold.ts:302-325`, `src/gc.ts:83-91`).

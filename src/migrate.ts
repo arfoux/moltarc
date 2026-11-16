@@ -6,7 +6,7 @@
 // are never touched, so history semantics (rows, seq, ts, sha) survive.
 import { copyFileSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { acquireManifestLock, buildManifest, loadManifest, manifestCrc, saveManifestAtomic, stripBom } from './manifest.js';
+import { acquireManifestLock, buildManifest, manifestCrc, saveManifestAtomic, stripBom } from './manifest.js';
 import type { ChunkEntry, ColdSegment, Manifest } from './manifest.js';
 
 export const CURRENT_MANIFEST_VERSION = 1;
@@ -130,12 +130,18 @@ export function migrate(outDir: string, opts?: { dryRun?: boolean }): MigrationR
   const primary = join(outDir, 'manifest.json');
   const backupPath = join(outDir, BACKUP_NAME);
   if (!existsSync(backupPath) && existsSync(primary)) copyFileSync(primary, backupPath);
+  // Preserve cold listing exactly where seal does: buildManifest scans warm
+  // only, so reattach the prior cold[] (tars stay on disk) or migration drops
+  // every cold segment reference.
   let cold: ColdSegment[] | undefined;
-  try {
-    const { manifest } = loadManifest(outDir);
-    if (Array.isArray(manifest.cold)) cold = manifest.cold;
-  } catch { /* no prior manifest readable: fresh cold[] */ }
+  for (const name of ['manifest.json', 'manifest.bak.json']) {
+    try {
+      const prev = JSON.parse(stripBom(readFileSync(join(outDir, name), 'utf8'))) as { cold?: ColdSegment[] };
+      if (Array.isArray(prev.cold)) { cold = prev.cold; break; }
+    } catch { /* no prior manifest copy readable: fresh cold[] */ }
+  }
   const fresh = buildManifest(outDir);
+  if (cold !== undefined) fresh.cold = cold;
   fresh.version = CURRENT_MANIFEST_VERSION;
   const prev = rawManifest(outDir)?.raw as { createdAt?: unknown } | null;
   if (prev && typeof prev.createdAt === 'string' && prev.createdAt.length > 0) fresh.createdAt = prev.createdAt;

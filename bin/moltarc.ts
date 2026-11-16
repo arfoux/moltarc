@@ -34,7 +34,7 @@ function fail(err: unknown): never {
 
 function usageLines(): string[] {
   return [
-    'usage: moltarc <seal|ship|find|find-cold|verify|repair|status|gc|merge|forget|coldg|restore-from-cold|check|p2p-sync|asof|migrate> [--verbose] ...',
+    'usage: moltarc <seal|ship|find|find-cold|verify|repair|status|gc|merge|forget|coldg|restore-from-cold|check|p2p-sync|asof|migrate> ...',
     '  moltarc seal <hot.jsonl|hot.db> <outDir> [--table <name>]',
     '  moltarc ship <outDir> <relayDir> [--blobs]',
     '  moltarc find <outDir> <id>',

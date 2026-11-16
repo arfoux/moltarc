@@ -61,8 +61,8 @@ promote to `<new>` alone with an updated id once every node has the list. Prints
 received/failed chunk.
 `p2p-sync` does not run the migrate guard: syncing into a pre-v1 archive
 appends v1-shaped entries with no pre-migrate backup — run
-`moltarc migrate <outDir>` first on old archives (`src/p2p.ts:88-93`,
-`src/p2p.ts:171-229`).
+`moltarc migrate <outDir>` first on old archives (no `assertMigrated`/
+`requireMigrated` call in `src/p2p.ts`: `ensureArchive`/`syncFromPeer`/`startNode`).
 
 > **WARNING: serving is LAN-open by default.** An empty `allowPeers` list serves anyone on
 > the LAN who can reach the port. Set `MOLTARC_PSK` and/or a non-empty `allowPeers`

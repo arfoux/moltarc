@@ -20,9 +20,9 @@ jobs:
       - run: bun install
       - name: Typecheck (same gate as CI)
         run: node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
-      - run: bun run test:stable
-      - run: bun test ext/
       - run: bash scripts/test-floor.sh
+      - run: bun run check:surface
+      - run: bun run test:extended
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -48,9 +48,9 @@ jobs:
       - run: bun install
       - name: Typecheck (same gate as CI)
         run: node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
-      - run: bun run test:stable
-      - run: bun test ext/
       - run: bash scripts/test-floor.sh
+      - run: bun run check:surface
+      - run: bun run test:extended
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -66,6 +66,7 @@ jobs:
           npm publish --registry=https://npm.pkg.github.com --access public
           cp /tmp/package.json.bak package.json
   release:
+    needs: [publish, publish-gpr]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -86,13 +87,7 @@ jobs:
             found { print }
           ' CHANGELOG.md)
           if [ -z "$NOTES" ]; then
-            NOTES=$(awk '
-              /^## Unreleased/ { found=1; next }
-              /^## / { if (found) exit }
-              found { print }
-            ' CHANGELOG.md | head -n 30)
-          fi
-          if [ -z "$NOTES" ]; then
-            NOTES="$TAG"
+            echo "::error::no CHANGELOG.md section for $TAG (or $VER) — refusing to publish release notes from an unrelated section"
+            exit 1
           fi
           printf '%s\n' "$NOTES" | gh release create "$TAG" --title "$TAG" --notes-file -

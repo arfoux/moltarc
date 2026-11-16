@@ -4,9 +4,9 @@
 # CI runs the stable suite + ext suite with no count assertion, so deleting
 # tests still greens. This floor fails loud when totals drop below last green.
 #
-# Floor: STABLE_FLOOR pins the last green total (173 pass, 0 fail,
-# `bun run test:stable` on main 2026-09-13); EXT_FLOOR pins the ext total
-# (7 tests, 0 fail, `bun test ext/` on main 2026-09-13).
+# Floor: STABLE_FLOOR pins the last green total (249 pass, 0 fail,
+# `bun run test:stable` on repo/completion-sweep 2026-11-17); EXT_FLOOR pins
+# the ext total (7 tests incl. 1 env skip, `bun test ext/`, same date).
 # Totals count pass+skip: env-skipped tests (e.g. Windows-only DLL tests
 # skipping on Linux CI) still count as present, so deleting a test still
 # trips the floor while a skip no longer fails loud.
@@ -15,7 +15,7 @@
 set -u
 set -o pipefail
 
-STABLE_FLOOR="${GATE_STABLE_FLOOR:-173}"
+STABLE_FLOOR="${GATE_STABLE_FLOOR:-249}"
 EXT_FLOOR="${GATE_EXT_FLOOR:-7}"
 FAILURES=0
 

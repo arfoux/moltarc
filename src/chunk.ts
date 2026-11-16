@@ -272,12 +272,20 @@ export function encodeChunk(table: string, rows: HotRow[], dict?: Buffer, dictId
   const { raw, dictId: inlineId } = encodeRows(sorted);
   const { codec, body, usedDict } = compressFrame(raw, dict);
   const seqs = sorted.map((r) => BigInt(r.seq));
-  const tss = sorted.map((r) => BigInt(r.ts));
+  // rows sort by seq, not ts: clock corrections/backfills can make ts
+  // non-monotonic. Span all rows or decodeChunk rejects its own header.
+  let tsMin = 0n;
+  let tsMax = 0n;
+  for (let i = 0; i < sorted.length; i++) {
+    const t = BigInt(sorted[i].ts);
+    if (i === 0 || t < tsMin) tsMin = t;
+    if (i === 0 || t > tsMax) tsMax = t;
+  }
   const header = encodeHeader({
     ver: VERSION, codec, flags: (inlineId ? 1 : 0) | (usedDict ? DICT_FLAG : 0),
     tableId: fnv1a32(table),
     seqMin: seqs[0] ?? 0n, seqMax: seqs[seqs.length - 1] ?? 0n,
-    tsMin: tss[0] ?? 0n, tsMax: tss[tss.length - 1] ?? 0n,
+    tsMin, tsMax,
     rows: sorted.length, crc32c: crc32c(body), dictId: usedDict ? dictId : inlineId, bodyLen: body.length,
   });
   return Buffer.concat([header, body]);

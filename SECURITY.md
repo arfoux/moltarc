@@ -5,8 +5,8 @@ covered, how to report, and what to honestly expect back.
 
 ## Report a vulnerability
 
-- Preferred: open a **private security advisory** on the
-  [moltarc GitHub repo](https://github.com/arfoux/moltarc)
+- Preferred: open a **private security advisory** at
+  https://github.com/arfoux/moltarc/security/advisories/new
   (Security tab → Advisories). It stays non-public until fixed.
 - Alternative: open a regular issue at
   `https://github.com/arfoux/moltarc/issues` **only** if the issue is not

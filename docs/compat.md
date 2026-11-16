@@ -77,10 +77,12 @@ is non-portable by construction:
   (`MOLTARC_BUN`, default `bun` on `PATH`); moving the dll without its
   checkout + bun breaks it.
 
-Rebuild per machine from the checkout root (MinGW gcc 14.2, sqlite
-amalgamation headers in `ext/amalg/`, kept out of git the same way):
+Rebuild per machine from the checkout root (MinGW gcc 14.2). Fetch the
+amalgamation first — `ext/amalg/` is git-ignored, so a fresh checkout has
+no headers (`bun run fetch-sqlite`, hash-verified and idempotent):
 
 ```
+bun run fetch-sqlite
 gcc -shared -O2 -I ext/amalg/sqlite-amalgamation-3530400 -DMOLTARC_TS="ext/moltarc.ts" ext/moltarc.c ext/moltarc_hook.c -o ext/moltarc.dll
 ```
 

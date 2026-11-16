@@ -5,11 +5,9 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'crypto';
 import {
   PSK_ENV,
-  PSK_ID_ENV,
   authOk,
   frameWire,
   parsePsk,
-  parsePskList,
   pskFromEnv,
   psksFromEnv,
   resolvePsk,
@@ -95,14 +93,21 @@ describe('p2p PSK rotation', () => {
     assert.equal(authOk([oldKey], helloSignedBy(primary)), false);
   });
 
-  it('documents the MOLTARC_PSK_ID transition contract', { timeout: 30_000 }, () => {
-    assert.equal(PSK_ID_ENV, 'MOLTARC_PSK_ID');
-    assert.equal(typeof parsePskList, 'function');
-    assert.equal(typeof psksFromEnv, 'function');
-    // Whitespace around entries is tolerated; empties are skipped.
-    const hex = freshHex();
-    const list = parsePskList(`  ${hex} , `);
-    assert.ok(list && list.length === 1);
-    assert.equal(list[0].toString('hex'), hex);
+  it('env-driven rotation: key list accepts old peers, promotion rejects them', { timeout: 30_000 }, () => {
+    const newKey = freshBuf();
+    const oldKey = freshBuf();
+    const during = resolvePsks(undefined, { [PSK_ENV]: `${newKey.toString('hex')},${oldKey.toString('hex')}` });
+    assert.ok(during && during.length === 2);
+    // Transition: inbound accepts both keys, outbound frames with the primary.
+    assert.equal(authOk(during, helloSignedBy(oldKey)), true);
+    assert.notEqual(unframeWire(during, frameWire(oldKey, helloSignedBy(oldKey))), null);
+    const outbound = frameWire(during[0], helloSignedBy(during[0]));
+    assert.notEqual(unframeWire([newKey], outbound), null);
+    // Promotion: env carries only the new key; old-key peers stop verifying.
+    const promoted = psksFromEnv({ [PSK_ENV]: newKey.toString('hex') });
+    assert.ok(promoted && promoted.length === 1);
+    assert.equal(authOk(promoted, helloSignedBy(newKey)), true);
+    assert.equal(authOk(promoted, helloSignedBy(oldKey)), false);
+    assert.equal(unframeWire(promoted, frameWire(oldKey, helloSignedBy(oldKey))), null);
   });
 });

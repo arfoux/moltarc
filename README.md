@@ -84,6 +84,7 @@ moltarc seal <hot.jsonl|hot.db> <outDir> [--table <name>]
 moltarc ship <outDir> <relayDir> [--blobs]
 moltarc find <outDir> <id>
 moltarc find-cold <outDir> <id>
+moltarc verify <outDir>              moltarc repair <outDir> <relayDir>
 moltarc status <outDir> [relayDir]   moltarc check <outDir> <relayDir>
 moltarc gc <outDir> [relayDir] [--apply] [--deep-photo]
 moltarc merge <outDir>           moltarc forget <outDir> <relayDir> <chunk> [chunk...]
